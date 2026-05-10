@@ -35,4 +35,4 @@ def read_file_content(file_path: str) -> str:
         return f"读取文件失败: {str(e)}"
 
 # 导出工具列表
-oip_tools = [get_current_time, list_files, read_file_content]
+agent_tools = [get_current_time, list_files, read_file_content]

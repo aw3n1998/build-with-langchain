@@ -12,8 +12,8 @@ root_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if root_path not in sys.path:
     sys.path.append(root_path)
 
-from oip.app.schemas.base import AIRequest
-from oip.app.services.ai_service import ai_service
+from agent_lab.app.schemas.base import AIRequest
+from agent_lab.app.services.ai_service import ai_service
 
 def get_or_create_session():
     if len(sys.argv) > 1:
@@ -25,7 +25,7 @@ def get_or_create_session():
 
 async def chat_loop():
     print("\n" + "="*50)
-    print("   Omni-Intelligence Platform (OIP) 交互模式")
+    print("   AI Agent 进阶开发实验室 (AgentLab) 交互模式")
     print("   输入 'exit' 或 'quit' 退出程序")
     print("="*50 + "\n")
     

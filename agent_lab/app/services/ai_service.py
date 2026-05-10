@@ -1,10 +1,10 @@
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.messages import ToolMessage, AIMessage, HumanMessage
-from oip.app.schemas.base import AIRequest, AIResponse
-from oip.app.core.config import settings
-from oip.app.core.history import AsyncSQLiteHistory
-from oip.app.services.tools import oip_tools
+from agent_lab.app.schemas.base import AIRequest, AIResponse
+from agent_lab.app.core.config import settings
+from agent_lab.app.core.history import AsyncSQLiteHistory
+from agent_lab.app.services.tools import agent_tools
 import httpx
 import asyncio
 
@@ -22,7 +22,7 @@ class AIService:
             http_async_client=custom_client,
             max_retries=2,
             streaming=True
-        ).bind_tools(oip_tools)
+        ).bind_tools(agent_tools)
 
         self.prompt = ChatPromptTemplate.from_messages([
             ("system", "你是一个专业的助手。如果用户要求你查时间或查文件，请调用相应的工具。调用完工具后，请根据工具返回的结果给用户一个最终的回答。"),
@@ -32,7 +32,7 @@ class AIService:
 
         self.base_chain = self.prompt | self.llm
         self.db_path = "chat_history.db"
-        self.tools_map = {tool.name: tool for tool in oip_tools}
+        self.tools_map = {tool.name: tool for tool in agent_tools}
 
     def get_session_history(self, session_id: str):
         return AsyncSQLiteHistory(db_path=self.db_path, session_id=session_id)

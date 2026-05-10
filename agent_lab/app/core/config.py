@@ -4,7 +4,7 @@ import os
 
 class Settings(BaseSettings):
     # 项目元数据
-    PROJECT_NAME: str = "Omni-Intelligence Platform"
+    PROJECT_NAME: str = "AI Agent Build Lab"
     VERSION: str = "0.1.0"
     API_V1_STR: str = "/api/v1"
 
