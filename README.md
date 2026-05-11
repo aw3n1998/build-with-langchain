@@ -281,6 +281,106 @@ Studio 功能：节点执行动画、每步 State 快照、手动注入消息测
 
 ---
 
+### Phase 4 — 知识检索与动态扩展
+
+#### Chapter 14 — Skill 动态检索（RAG 应用于工具选择）
+
+**问题：** 用户上传了大量 Skill，无法全部塞进 LLM 上下文（token 浪费 + 注意力稀释）。
+
+**原理：** 和 RAG 完全一样，只是把"文档"换成了"工具描述"：
+
+```
+注册阶段：工具 description → OpenAI Embedding → FAISS 向量索引
+检索阶段：用户问题        → Embedding        → 余弦相似度搜索 → Top-K 工具
+```
+
+**核心实现：** `app/services/skill_registry.py`
+
+```python
+class SkillRegistry:
+    def register(self, tools: list[BaseTool]) -> None:
+        texts = [f"{t.name}: {t.description}" for t in tools]
+        vecs = np.array(self._embedder.embed_documents(texts), dtype=np.float32)
+        faiss.normalize_L2(vecs)          # 归一化 → 内积 = 余弦相似度
+        self._index.add(vecs)
+
+    async def search(self, query: str, top_k: int = 3) -> list[BaseTool]:
+        vec = np.array(await self._embedder.aembed_query(query), dtype=np.float32)
+        faiss.normalize_L2(vec.reshape(1, -1))
+        scores, indices = self._index.search(vec.reshape(1, -1), top_k)
+        return [self._tools[self._names[i]] for i in indices[0]]
+```
+
+**图结构变化（每个子图加入 skill_retrieval 节点）：**
+
+```
+__start__
+    ↓
+skill_retrieval  ← embed(用户问题) → FAISS → Top-K 工具名写入 state
+    ↓
+agent            ← llm.bind_tools(仅检索到的K个工具)  动态绑定！
+    ↓
+tools            ← 从 state 中取工具执行
+    ↓
+agent → ... → __end__
+```
+
+- 新依赖：`faiss-cpu` + `OpenAIEmbeddings`（`langchain-openai` 已含）
+- 日志输出：`[SkillRegistry] 查询: '帮我执行代码' → 检索到: ['execute_python_code'] | 相似度: [0.891]`
+
+---
+
+#### Chapter 15 — Map-Reduce：动态并行 Worker Agent
+
+**问题：** 生成 100 张图片不能让同一个 Agent 串行处理，需要动态创建 N 个相同 Worker 并行执行。
+
+**核心技术：** `Send` API + `operator.add` reducer（Map-Reduce 模式）
+
+```python
+import operator
+
+class BatchState(TypedDict):
+    subtasks: list[dict]
+    # operator.add reducer：每个 worker 写入的列表自动拼接，不会互相覆盖
+    results: Annotated[list[str], operator.add]
+```
+
+**图结构：**
+
+```
+planner    ← LLM 分析任务，动态决定拆几份（运行时决定，非硬编码）
+    ↓  fan_out 返回 N 个 Send("worker", 子任务)
+worker × N ← 相同节点函数，N 个实例完全并行，互不干扰
+    ↓  operator.add 自动汇聚所有结果
+merger     ← LangGraph 等全部 worker 完成后触发
+```
+
+**关键代码：**
+
+```python
+def fan_out(state: BatchState) -> list[Send]:
+    # N 由 planner 运行时决定，不是固定数字
+    return [Send("worker", {"subtask": task}) for task in state["subtasks"]]
+
+async def worker_node(state: WorkerState) -> dict:
+    result = await process(state["subtask"])
+    return {"results": [result]}  # 列表包装，add reducer 汇聚
+
+g.add_conditional_edges("planner", fan_out, ["worker"])
+g.add_edge("worker", "merger")   # 所有 worker → merger，LangGraph 自动等待
+```
+
+**与 Supervisor 模式的区别：**
+
+| | Supervisor 模式（Chapter 11） | Map-Reduce 模式（本章） |
+|---|---|---|
+| Worker 数量 | 固定（code/file/general 三种） | 运行时动态决定 |
+| Worker 类型 | 不同节点（不同职责） | 相同节点（相同逻辑） |
+| 结果汇聚 | 专属字段（code_result 等） | `operator.add` reducer |
+| 适用场景 | 意图路由 | 批量并行任务 |
+
+---
+
 ## 踩坑记录
 
 | 错误 | 原因 | 解决 |
@@ -296,19 +396,24 @@ Studio 功能：节点执行动画、每步 State 快照、手动注入消息测
 
 ## 后续学习路线图
 
-### Phase 4 — 知识增强
+### Phase 4 — 知识检索与动态扩展（进行中）
 
-**Module 14：RAG 知识检索系统**
-- 向量数据库（Chroma / FAISS）存储私有文档
-- Embedding 模型将文本转为向量，用户提问 → 相似度检索 → 注入 prompt → LLM 回答
-- 解决：LLM 不知道私有文档内容的核心问题
+**✅ Module 14：Skill 动态检索（已完成）**
+- FAISS 向量索引 + OpenAI Embedding，工具描述语义检索
+- 每次只注入 Top-K 相关工具，其余不占 token
+- 见：`app/services/skill_registry.py`
 
-**Module 15：Human-in-the-loop（人工审核节点）**
+**✅ Module 15：Map-Reduce 动态并行 Worker（已完成）**
+- `operator.add` reducer + Send API 动态创建 N 个 Worker
+- 适用于批量任务（图片生成、批量处理等）
+- 见：`app/agents/batch_agent.py`
+
+**Module 16：Human-in-the-loop（人工审核节点）**
 - LangGraph `interrupt()` —— Agent 执行到关键节点时暂停，等人类确认后继续
 - 场景：执行危险代码前、发送邮件前、写入数据库前
 - 实现：`graph.compile(interrupt_before=["code_agent"])` + `graph.update_state()`
 
-**Module 16：Agent 评估与测试**
+**Module 17：Agent 评估与测试**
 - LangSmith tracing —— 追踪每次 LLM 调用的输入输出、延迟、cost
 - 自动化评估：构建测试集，评估 Agent 路由准确率、工具调用成功率
 - 回归测试：防止改动破坏已有能力

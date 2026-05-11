@@ -1,13 +1,36 @@
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
-.env
+*.pyo
+
+# 虚拟环境
 .venv
-env/
 venv/
+env/
 ENV/
 env.bak/
 venv.bak/
+
+# 环境变量（含 API Key，绝对不能提交）
+.env
+
+# SQLite 数据库（运行时生成的对话历史，不属于代码）
+*.db
+*.db-shm
+*.db-wal
+
+# LangGraph Studio 运行时状态（本地调试缓存，不属于代码）
+.langgraph_api/
+
+# Pickle 序列化文件（运行时产物）
+*.pckl
+
+# IDE
 .vscode/
 .idea/
+
+# 二进制媒体文件
 *.png
+*.jpg
+*.jpeg
