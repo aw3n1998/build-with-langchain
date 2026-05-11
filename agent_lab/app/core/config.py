@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY")
     OPENAI_API_BASE: str = "https://api.deepseek.com/v1"
     MODEL_NAME: str = "deepseek-chat"
+    EMBEDDING_MODEL_NAME: str = "text-embedding-3-small"
 
     # 网络高级配置
     SKIP_SSL_VERIFY: bool = True

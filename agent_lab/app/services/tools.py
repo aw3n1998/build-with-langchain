@@ -64,5 +64,10 @@ def execute_python_code(code: str) -> str:
         os.unlink(tmp_path)
 
 
-# 导出工具列表（含代码执行，LLM 自动决策是否调用）
-agent_tools = [get_current_time, list_files, read_file_content, execute_python_code]
+# 按职责分组——每个子 Agent 只注入它需要的工具，避免"工具噪声"
+code_tools    = [execute_python_code]
+file_tools    = [list_files, read_file_content]
+general_tools = [get_current_time]
+
+# 向后兼容别名（其他地方若有引用不会报错）
+agent_tools = code_tools + file_tools + general_tools
