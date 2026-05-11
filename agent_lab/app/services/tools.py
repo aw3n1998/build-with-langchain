@@ -1,6 +1,8 @@
 from langchain_core.tools import tool
 from datetime import datetime
 import os
+import subprocess
+import tempfile
 
 # 使用 @tool 装饰器定义工具
 # 对标 Java 的 @Service 或 @Component，但带有自然语言描述 (docstring)
@@ -34,5 +36,33 @@ def read_file_content(file_path: str) -> str:
     except Exception as e:
         return f"读取文件失败: {str(e)}"
 
-# 导出工具列表
-agent_tools = [get_current_time, list_files, read_file_content]
+@tool
+def execute_python_code(code: str) -> str:
+    """执行 Python 代码并返回输出。如果出错，返回完整的错误信息（用于自纠错 Agent）。
+
+    Args:
+        code: 要执行的 Python 代码字符串
+    """
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False, encoding='utf-8') as f:
+        f.write(code)
+        tmp_path = f.name
+
+    try:
+        result = subprocess.run(
+            ["python", tmp_path],
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+        if result.returncode == 0:
+            return f"执行成功:\n{result.stdout}"
+        else:
+            return f"执行失败:\n{result.stderr}"
+    except subprocess.TimeoutExpired:
+        return "执行超时（超过10秒）"
+    finally:
+        os.unlink(tmp_path)
+
+
+# 导出工具列表（含代码执行，LLM 自动决策是否调用）
+agent_tools = [get_current_time, list_files, read_file_content, execute_python_code]
