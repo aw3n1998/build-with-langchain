@@ -1,5 +1,6 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import Optional
+from dotenv import load_dotenv
 import os
 
 class Settings(BaseSettings):
@@ -9,7 +10,7 @@ class Settings(BaseSettings):
     API_V1_STR: str = "/api/v1"
 
     # OpenAI / DeepSeek 配置 (优先从 .env 读取)
-    OPENAI_API_KEY: str = "sk-placeholder"
+    OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY")
     OPENAI_API_BASE: str = "https://api.deepseek.com/v1"
     MODEL_NAME: str = "deepseek-chat"
 
