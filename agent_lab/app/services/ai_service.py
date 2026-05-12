@@ -1,4 +1,5 @@
-from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+from langchain_openai import ChatOpenAI
+from langchain_community.embeddings.fastembed import FastEmbedEmbeddings
 from langchain_core.messages import AIMessageChunk
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from agent_lab.app.agents.supervisor import build_supervisor
@@ -25,18 +26,19 @@ class AIService:
             ),
             max_retries=2,
         )
-        embedder = OpenAIEmbeddings(
-            api_key=settings.OPENAI_API_KEY,
-            base_url=settings.OPENAI_API_BASE,
-            model=settings.EMBEDDING_MODEL_NAME,
-            http_client=httpx.Client(verify=not settings.SKIP_SSL_VERIFY),
-        )
+        # 本地 Embedding 模型，首次运行自动下载 (~50MB)，无需 API
+        # 使用多语言模型，支持中文工具描述和用户查询
+        embedder = FastEmbedEmbeddings(model_name="BAAI/bge-small-zh-v1.5")
         self._registry = SkillRegistry(embedder)
-        self._registry.register(code_tools + file_tools + general_tools)
         self._agent = None
 
     async def _ensure_initialized(self):
         if self._agent is None:
+            # 首次初始化：注册工具（同步，本地 embedding 极快）
+            if not self._registry._names:
+                logger.info("[AIService] 初始化 SkillRegistry，注册工具...")
+                self._registry.register(code_tools + file_tools + general_tools)
+
             conn = await aiosqlite.connect(self._db_path)
             memory = AsyncSqliteSaver(conn)
             self._agent = build_supervisor(self._llm, self._registry).compile(checkpointer=memory)

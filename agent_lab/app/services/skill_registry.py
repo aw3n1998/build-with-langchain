@@ -1,7 +1,7 @@
 import numpy as np
 import faiss
 from langchain_core.tools import BaseTool
-from langchain_openai import OpenAIEmbeddings
+from langchain_core.embeddings import Embeddings
 from agent_lab.app.core.logger import get_logger
 
 logger = get_logger("skill_registry")
@@ -17,36 +17,47 @@ class SkillRegistry:
 
     这样不管注册了多少工具，每次 LLM 上下文里只出现最相关的 K 个，
     避免 token 浪费和注意力稀释。
+
+    Embedder 可以是任意实现了 Embeddings 接口的对象，例如：
+      - FastEmbedEmbeddings（本地模型，无需 API）← 当前使用
+      - OpenAIEmbeddings（需要 OpenAI/兼容 API）
     """
 
-    def __init__(self, embedder: OpenAIEmbeddings) -> None:
+    def __init__(self, embedder: Embeddings) -> None:
         self._embedder = embedder
         self._tools: dict[str, BaseTool] = {}  # name → tool 对象
         self._names: list[str] = []             # 与 FAISS 索引行对齐的名称列表
         self._index: faiss.IndexFlatIP | None = None
 
-    def register(self, tools: list[BaseTool]) -> None:
-        """批量注册工具，同步生成 embedding 并加入 FAISS 索引。在服务启动时调用一次。"""
-        if not tools:
-            return
-
-        # 用 "name: description" 拼接，让检索同时感知工具名和用途
-        texts = [f"{t.name}: {t.description}" for t in tools]
-        vecs = np.array(self._embedder.embed_documents(texts), dtype=np.float32)
-
-        # L2 归一化后做内积 = 余弦相似度，范围 [-1, 1]，越大越相关
-        faiss.normalize_L2(vecs)
-
+    def _build_index(self, vecs: np.ndarray, tools: list[BaseTool]) -> None:
+        """内部方法：把向量加入 FAISS 索引，更新名称和工具映射。"""
+        faiss.normalize_L2(vecs)  # L2 归一化后做内积 = 余弦相似度
         if self._index is None:
             self._index = faiss.IndexFlatIP(vecs.shape[1])
-
         self._index.add(vecs)
         for t in tools:
             self._tools[t.name] = t
             self._names.append(t.name)
-
         logger.info("[SkillRegistry] 注册完成，共 %d 个工具: %s",
                     len(self._names), self._names)
+
+    def register(self, tools: list[BaseTool]) -> None:
+        """同步注册（适合本地 embedding 模型）。在服务启动时调用一次。"""
+        if not tools:
+            return
+        texts = [f"{t.name}: {t.description}" for t in tools]
+        vecs = np.array(self._embedder.embed_documents(texts), dtype=np.float32)
+        self._build_index(vecs, tools)
+
+    async def aregister(self, tools: list[BaseTool]) -> None:
+        """异步注册（适合远程 API embedding）。在 async 上下文的启动时调用一次。"""
+        if not tools:
+            return
+        texts = [f"{t.name}: {t.description}" for t in tools]
+        vecs = np.array(
+            await self._embedder.aembed_documents(texts), dtype=np.float32
+        )
+        self._build_index(vecs, tools)
 
     def get(self, name: str) -> BaseTool:
         return self._tools[name]

@@ -1,5 +1,4 @@
 from langchain_core.messages import SystemMessage, AIMessage, HumanMessage, ToolMessage
-from langchain_openai import OpenAIEmbeddings
 from langgraph.graph import StateGraph, END
 from langgraph.types import Send
 from agent_lab.app.agents.state import SupervisorState
@@ -206,6 +205,7 @@ def build_supervisor(llm, registry: SkillRegistry):
 # ── 模块级 graph（LangGraph Studio 入口）─────────────────────
 from agent_lab.app.core.config import settings
 from langchain_openai import ChatOpenAI
+from langchain_community.embeddings.fastembed import FastEmbedEmbeddings
 import httpx
 
 _llm = ChatOpenAI(
@@ -219,15 +219,12 @@ _llm = ChatOpenAI(
     max_retries=2,
 )
 
-# 创建共享 SkillRegistry，注册所有工具的 embedding
-_embedder = OpenAIEmbeddings(
-    api_key=settings.OPENAI_API_KEY,
-    base_url=settings.OPENAI_API_BASE,
-    model=settings.EMBEDDING_MODEL_NAME,
-    http_client=httpx.Client(verify=not settings.SKIP_SSL_VERIFY),
-)
-
-_registry = SkillRegistry(_embedder)
-_registry.register(code_tools + file_tools + general_tools)
-
-graph = build_supervisor(_llm, _registry).compile()
+# 创建共享 SkillRegistry，使用本地 FastEmbed 模型（无需 API，首次运行自动下载）
+try:
+    _embedder = FastEmbedEmbeddings(model_name="BAAI/bge-small-zh-v1.5")
+    _registry = SkillRegistry(_embedder)
+    _registry.register(code_tools + file_tools + general_tools)
+    graph = build_supervisor(_llm, _registry).compile()
+except Exception as e:
+    logger.warning("LangGraph Studio graph 初始化失败（首次运行需下载模型）: %s", e)
+    graph = None
