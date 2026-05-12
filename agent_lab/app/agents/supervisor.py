@@ -139,16 +139,59 @@ def build_supervisor(llm, registry: SkillRegistry):
 
         return {"messages": [AIMessage(content=final_answer)]}
 
+    # ── 上下文压缩节点（Compaction）─────────────────────────────
+    async def summarizer_node(state: SupervisorState) -> dict:
+        """
+        长对话压缩节点，每次对话入口自动触发检查。
+
+        原理（和 Claude Code /compact 一样）：
+          - 消息数 ≤ 阈值：直接跳过，不做任何处理
+          - 消息数 > 阈值：把旧消息交给 LLM 总结成一段摘要，
+            用摘要替换旧消息，只保留最近几条保持连贯性
+
+        效果：无论对话多长，传给 LLM 的 token 数始终可控。
+        """
+        messages = state["messages"]
+        # 阈值：保留最近 6 条，超过 20 条总量时触发压缩
+        KEEP_RECENT = 6
+        TRIGGER_AT  = 20
+
+        if len(messages) <= TRIGGER_AT:
+            return {}   # 消息不多，直接跳过
+
+        to_compress = messages[:-KEEP_RECENT]
+        recent      = messages[-KEEP_RECENT:]
+
+        logger.info("[Summarizer] 消息数 %d 超过阈值，开始压缩 %d 条旧消息",
+                    len(messages), len(to_compress))
+
+        summary = await llm.ainvoke([
+            SystemMessage(
+                "请简洁总结以下对话的核心内容，保留：已完成的事项、重要决策、关键结论。"
+                "不要遗漏任何重要信息，但去掉无意义的闲聊。"
+            ),
+            *to_compress,
+        ])
+
+        compressed = [
+            SystemMessage(content=f"【历史对话摘要】\n{summary.content}"),
+            *recent,
+        ]
+        logger.info("[Summarizer] 压缩完成：%d 条 → %d 条", len(messages), len(compressed))
+        return {"messages": compressed}
+
     # ── 组装图 ────────────────────────────────────────────────
     g = StateGraph(SupervisorState)
 
+    g.add_node("summarizer",  summarizer_node)   # ← 新增：入口处自动压缩
     g.add_node("router",      router_node)
     g.add_node("code_agent",  code_agent_node)
     g.add_node("file_agent",  file_agent_node)
     g.add_node("general",     general_node)
     g.add_node("aggregator",  aggregator_node)
 
-    g.set_entry_point("router")
+    g.set_entry_point("summarizer")              # ← 入口改为 summarizer
+    g.add_edge("summarizer", "router")           # summarizer → router
     g.add_conditional_edges("router", fan_out, ["code_agent", "file_agent", "general"])
     g.add_edge("code_agent", "aggregator")
     g.add_edge("file_agent", "aggregator")
