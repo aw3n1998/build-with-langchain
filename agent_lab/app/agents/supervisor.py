@@ -35,7 +35,9 @@ def build_supervisor(llm, registry: SkillRegistry):
     拓扑结构：
         __start__
             ↓
-          router  ← LLM 决定选哪些 Agent（可多选）
+        summarizer  ← 自动检查消息长度，超阈值压缩历史（Compaction）
+            ↓
+          router    ← LLM 决定选哪些 Agent（可多选）
             ↓  Send API 并行扇出
       ┌─────┼─────┐
    code   file  general
