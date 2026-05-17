@@ -1,0 +1,111 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── 设计 Token ────────────────────────────────────── */
+:root {
+  --bg:            #0d0d0d;
+  --card:          #161616;
+  --border:        rgba(255,255,255,0.07);
+  --border-strong: rgba(255,255,255,0.13);
+  --text:          rgba(255,255,255,0.87);
+  --text-sec:      rgba(255,255,255,0.52);
+  --text-muted:    rgba(255,255,255,0.30);
+  --text-dim:      rgba(255,255,255,0.18);
+  --accent:        #6366f1;
+  --accent-hover:  #5254cc;
+  --code-bg:       #0a0a0a;
+}
+
+/* ── Reset ─────────────────────────────────────────── */
+html, body, #root {
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Segoe UI', sans-serif;
+}
+
+/* ── 滚动条 ─────────────────────────────────────────── */
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.09); border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.15); }
+
+/* ── 流式光标 ───────────────────────────────────────── */
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0; }
+}
+.cursor-blink {
+  display: inline-block;
+  width: 2px; height: 14px;
+  background: var(--accent);
+  border-radius: 1px;
+  margin-left: 2px;
+  vertical-align: middle;
+  animation: blink 1s step-start infinite;
+}
+
+/* ── Prose（AI 消息内容） ────────────────────────────── */
+.prose-content {
+  font-size: 14px;
+  line-height: 1.78;
+  color: var(--text);
+}
+.prose-content p { margin: 0 0 10px; }
+.prose-content p:last-child { margin-bottom: 0; }
+.prose-content ul,
+.prose-content ol  { padding-left: 20px; margin: 8px 0; }
+.prose-content li  { margin-bottom: 5px; color: var(--text-sec); }
+.prose-content li::marker { color: rgba(255,255,255,0.25); }
+.prose-content strong { color: rgba(255,255,255,0.93); font-weight: 600; }
+.prose-content em    { color: var(--text-sec); font-style: italic; }
+.prose-content h1, .prose-content h2, .prose-content h3 {
+  color: rgba(255,255,255,0.9); font-weight: 600;
+  margin: 18px 0 8px; line-height: 1.35;
+}
+.prose-content h1 { font-size: 18px; }
+.prose-content h2 { font-size: 16px; }
+.prose-content h3 { font-size: 14px; }
+.prose-content a   { color: #818cf8; text-decoration: underline; text-underline-offset: 3px; }
+.prose-content blockquote {
+  border-left: 2px solid rgba(255,255,255,0.15);
+  padding-left: 14px; margin: 12px 0;
+  color: var(--text-sec);
+}
+.prose-content hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 16px 0;
+}
+
+/* 行内代码 */
+.prose-content :not(pre) > code {
+  background: rgba(255,255,255,0.07);
+  border: 1px solid rgba(255,255,255,0.09);
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-family: 'SF Mono', 'Fira Code', ui-monospace, monospace;
+  font-size: 0.86em;
+  color: rgba(255,255,255,0.85);
+}
+
+/* 代码块 */
+.prose-content pre {
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px 16px;
+  overflow-x: auto;
+  margin: 12px 0;
+}
+.prose-content pre code {
+  font-family: 'SF Mono', 'Fira Code', ui-monospace, monospace;
+  font-size: 13px;
+  line-height: 1.7;
+  color: rgba(255,255,255,0.72);
+  background: none;
+  border: none;
+  padding: 0;
+}
