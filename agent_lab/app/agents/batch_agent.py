@@ -145,7 +145,7 @@ async def merger_node(state: BatchState, llm) -> dict:
 
 # ── 图构建 ────────────────────────────────────────────────────
 
-def build_batch_graph(llm):
+def build_batch_graph(llm, checkpointer=None):
     """
     构建 Map-Reduce 图：
       planner → (动态 N 个 worker 并行) → merger
@@ -176,7 +176,7 @@ def build_batch_graph(llm):
     g.add_edge("worker", "merger")                           # 所有 worker → merger
     g.add_edge("merger", END)
 
-    return g.compile()
+    return g.compile(checkpointer=checkpointer)
 
 
 # ── 快速验证入口 ──────────────────────────────────────────────

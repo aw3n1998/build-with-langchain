@@ -1,0 +1,43 @@
+# Git
+.git
+.gitignore
+
+# Python 缓存
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info
+dist/
+build/
+
+# 虚拟环境
+.venv
+venv
+env
+
+# 本地数据库文件（运行时生成）
+*.db
+*.sqlite
+
+# 环境变量（绝对不能打进镜像）
+.env
+.env.local
+
+# 演示脚本（不需要进容器）
+demo_rag_*.py
+test_*.py
+
+# 文档
+README.md
+*.md
+
+# IDE
+.idea
+.vscode
+*.iml
+
+# 日志
+*.log
+logs/

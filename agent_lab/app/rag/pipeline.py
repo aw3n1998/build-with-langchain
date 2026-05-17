@@ -44,7 +44,10 @@ class RAGPipeline:
 
     # ── 连接 ─────────────────────────────────────────────────────
 
-    def connect(self, host: str = "localhost", port: int = 19530) -> bool:
+    def connect(self, host: str | None = None, port: int | None = None) -> bool:
+        import os
+        host = host or os.environ.get("MILVUS_HOST", "localhost")
+        port = port or int(os.environ.get("MILVUS_PORT", "19530"))
         """
         连接 Milvus，从已有数据重建 BM25 索引。
         返回 True 表示连接成功，False 表示 Milvus 不可用（降级为仅 BM25）。
@@ -78,10 +81,11 @@ class RAGPipeline:
             return
         try:
             # 查询已存储的所有 chunk（content 字段）
+            # Milvus query 单次最多 16384 条，生产场景可分页处理
             results = self._store._collection.query(
                 expr="chunk_index >= 0",
                 output_fields=["content", "source", "project_id", "chunk_index"],
-                limit=50000,  # 生产场景可以分页
+                limit=16384,
             )
             if not results:
                 logger.info("[Pipeline] Milvus 中暂无历史数据，BM25 索引为空")

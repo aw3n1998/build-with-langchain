@@ -27,9 +27,13 @@ _AGGREGATE_PROMPT = SystemMessage(content=(
 ))
 
 
-def build_supervisor(llm, registry: SkillRegistry):
+def build_supervisor(llms: dict, registry: SkillRegistry):
     """
     并行多 Agent Supervisor，所有子 Agent 共用同一个 SkillRegistry。
+
+    llms 格式：
+        {"supervisor": llm_sup, "code": llm_code, "file": llm_file, "general": llm_general}
+    缺失的键自动回退到 llms["supervisor"]，即主 Agent 的 LLM。
 
     拓扑结构：
         __start__
@@ -48,15 +52,21 @@ def build_supervisor(llm, registry: SkillRegistry):
 
     每个子 Agent 内部都有 skill_retrieval 节点，动态从 registry 检索工具。
     """
-    code_graph = build_code_subgraph(llm, registry)
-    file_graph = build_file_subgraph(llm, registry)
+    # 从 llms 字典取各角色 LLM，缺失则用 supervisor LLM
+    sup_llm     = llms["supervisor"]
+    code_llm    = llms.get("code",    sup_llm)
+    file_llm    = llms.get("file",    sup_llm)
+    general_llm = llms.get("general", sup_llm)
+
+    code_graph = build_code_subgraph(code_llm, registry)
+    file_graph = build_file_subgraph(file_llm, registry)
 
     # ── 路由节点 ───────────────────────────────────────────────
     async def router_node(state: SupervisorState) -> dict:
         last_human = next(
             (m for m in reversed(state["messages"]) if m.type == "human"), None
         )
-        decision = await llm.ainvoke([_ROUTER_PROMPT, last_human])
+        decision = await sup_llm.ainvoke([_ROUTER_PROMPT, last_human])
         raw = decision.content.strip().lower()
         agents = [a.strip() for a in raw.split(",") if a.strip() in ("code", "file", "general")]
         if not agents:
@@ -92,7 +102,7 @@ def build_supervisor(llm, registry: SkillRegistry):
         return {"file_result": final.content if final else ""}
 
     async def general_node(state: SupervisorState) -> dict:
-        """General Agent：动态检索工具，按需调用。"""
+        """General Agent：动态检索工具，按需调用。使用 general_llm（可与 supervisor 不同）。"""
         logger.info("[General] 开始执行")
         query = next(
             (m.content for m in reversed(state["messages"]) if m.type == "human"), ""
@@ -100,7 +110,7 @@ def build_supervisor(llm, registry: SkillRegistry):
         retrieved = await registry.search(query, top_k=3)
         logger.info("[General] skill_retrieval → %s", [t.name for t in retrieved])
 
-        llm_dynamic = llm.bind_tools(retrieved)
+        llm_dynamic = general_llm.bind_tools(retrieved)
         tools_map = {t.name: t for t in retrieved}
 
         response = await llm_dynamic.ainvoke([_GENERAL_PROMPT] + state["messages"])
@@ -132,7 +142,7 @@ def build_supervisor(llm, registry: SkillRegistry):
             final_answer = list(active.values())[0]
         else:
             combined = "\n\n".join(f"【{k} Agent】\n{v}" for k, v in active.items())
-            synthesis = await llm.ainvoke([
+            synthesis = await sup_llm.ainvoke([
                 _AGGREGATE_PROMPT,
                 HumanMessage(content=combined),
             ])
@@ -166,7 +176,7 @@ def build_supervisor(llm, registry: SkillRegistry):
         logger.info("[Summarizer] 消息数 %d 超过阈值，开始压缩 %d 条旧消息",
                     len(messages), len(to_compress))
 
-        summary = await llm.ainvoke([
+        summary = await sup_llm.ainvoke([
             SystemMessage(
                 "请简洁总结以下对话的核心内容，保留：已完成的事项、重要决策、关键结论。"
                 "不要遗漏任何重要信息，但去掉无意义的闲聊。"
@@ -224,7 +234,7 @@ try:
     _embedder = FastEmbedEmbeddings(model_name="BAAI/bge-small-zh-v1.5")
     _registry = SkillRegistry(_embedder)
     _registry.register(code_tools + file_tools + general_tools)
-    graph = build_supervisor(_llm, _registry).compile()
+    graph = build_supervisor({"supervisor": _llm}, _registry).compile()
 except Exception as e:
     logger.warning("LangGraph Studio graph 初始化失败（首次运行需下载模型）: %s", e)
     graph = None

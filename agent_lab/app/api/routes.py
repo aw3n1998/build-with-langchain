@@ -11,14 +11,7 @@ SSE 格式（text/event-stream）：
   data: {"type": "chunk", "content": "，我"}
   data: {"type": "done", "content": ""}
 
-  每条消息以 \n\n 结尾，前端用 EventSource API 接收。
-
-面试问答：
-Q: 为什么用 SSE 不用 WebSocket？
-A: AI 回复是单向流（服务端 → 客户端），SSE 够用且更简单：
-   - 基于 HTTP，无需握手协议，防火墙友好
-   - 原生支持断线重连（EventSource 自动重试）
-   - WebSocket 是双向通信，适合聊天室/协同编辑等场景
+  每条消息以 \\n\\n 结尾，前端用 EventSource API 接收。
 """
 
 import json
@@ -39,12 +32,36 @@ router = APIRouter()
 
 # ── 请求 / 响应 Schema ──────────────────────────────────────────
 
+class AgentLLMConfig(BaseModel):
+    """单个 Agent 的 LLM 配置，任意字段为 None 时回退到后端 .env 默认值。"""
+    model:    str | None = Field(default=None, description="模型标识符")
+    api_base: str | None = Field(default=None, description="LLM API base URL")
+    api_key:  str | None = Field(default=None, description="LLM API key")
+
+
 class ChatRequest(BaseModel):
     session_id: str = Field(
         default_factory=lambda: f"sid-{str(uuid.uuid4())[:8]}",
         description="会话 ID，同一个 session_id 共享对话历史",
     )
     content: str = Field(..., min_length=1, description="用户消息")
+    agent: str = Field(
+        default="supervisor",
+        description="路由目标：supervisor | code | file | batch | general",
+    )
+    agent_configs: dict[str, AgentLLMConfig] | None = Field(
+        default=None,
+        description=(
+            "各 Agent 的 LLM 配置（键名：supervisor/code/file/general/batch）。"
+            "缺失的键使用后端 .env 默认值；整个字段为 null 时全部使用默认值。"
+        ),
+    )
+
+
+class ResumeRequest(BaseModel):
+    session_id: str = Field(..., description="会话 ID，必须与原 chat 请求一致")
+    agent: str = Field(default="supervisor", description="当前 agent（目前仅 supervisor 支持 HITL）")
+    approved: bool = Field(default=True, description="True=继续执行，False=取消")
 
 
 class IngestResponse(BaseModel):
@@ -61,67 +78,89 @@ class StatusResponse(BaseModel):
 
 # ── 工具函数 ────────────────────────────────────────────────────
 
-async def sse_generator(session_id: str, content: str) -> AsyncGenerator[str, None]:
+async def _events_to_sse(gen) -> AsyncGenerator[str, None]:
     """
-    把 ai_service.astream_chat() 的 chunk 转成 SSE 格式。
-
-    SSE 协议规定：每条消息格式为 "data: <内容>\n\n"
-    前端 EventSource 收到后自动触发 onmessage 事件。
+    将 ai_service 事件生成器转成 SSE 格式字符串。
+    ai_service 已经 yield dict（type/content/node），直接序列化转发。
+    流结束后追加 done 帧。
     """
     try:
-        async for chunk in ai_service.astream_chat(session_id, content):
-            payload = json.dumps({"type": "chunk", "content": chunk}, ensure_ascii=False)
+        async for event in gen:
+            payload = json.dumps(event, ensure_ascii=False)
             yield f"data: {payload}\n\n"
-
-        # 发送结束信号，前端据此关闭 EventSource 连接
         yield f"data: {json.dumps({'type': 'done', 'content': ''})}\n\n"
-
     except Exception as e:
-        logger.exception("[SSE] session=%s 异常", session_id)
-        error_payload = json.dumps({"type": "error", "content": str(e)}, ensure_ascii=False)
-        yield f"data: {error_payload}\n\n"
+        logger.exception("[SSE] 异常")
+        yield f"data: {json.dumps({'type': 'error', 'content': str(e)}, ensure_ascii=False)}\n\n"
+
+
+async def sse_generator(
+    session_id: str,
+    content: str,
+    agent: str = "supervisor",
+    agent_configs: dict | None = None,
+) -> AsyncGenerator[str, None]:
+    """把 ai_service.astream_chat() 的事件流转成 SSE 格式。"""
+    gen = ai_service.astream_chat(session_id, content, agent=agent, agent_configs=agent_configs)
+    async for frame in _events_to_sse(gen):
+        yield frame
+
+
+async def sse_resume_generator(
+    session_id: str,
+    agent: str,
+    approved: bool,
+) -> AsyncGenerator[str, None]:
+    """把 ai_service.aresume_chat() 的事件流转成 SSE 格式。"""
+    gen = ai_service.aresume_chat(session_id, agent=agent, approved=approved)
+    async for frame in _events_to_sse(gen):
+        yield frame
 
 
 # ── 路由 ────────────────────────────────────────────────────────
 
 @router.post("/chat")
 async def chat(request: ChatRequest) -> StreamingResponse:
-    """
-    与 AI Agent 对话（SSE 流式）。
+    """与 AI Agent 对话（SSE 流式）。"""
+    # 汇总 agent_configs 日志（只记录非空的 agent）
+    cfg_summary = {
+        k: v.model or "default"
+        for k, v in (request.agent_configs or {}).items()
+        if v and v.model
+    } or "default"
+    logger.info("[Chat] session=%s agent=%s configs=%s msg=%s",
+                request.session_id, request.agent, cfg_summary,
+                request.content[:40])
 
-    前端调用示例（JavaScript）：
-        const es = new EventSource('/api/chat');
-        // 注：EventSource 只支持 GET，POST 需用 fetch + ReadableStream
-
-        // 推荐方式：fetch + ReadableStream
-        const resp = await fetch('/api/chat', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({session_id: 'sid-001', content: '你好'})
-        });
-        const reader = resp.body.getReader();
-        const decoder = new TextDecoder();
-        while (true) {
-            const {done, value} = await reader.read();
-            if (done) break;
-            const text = decoder.decode(value);
-            // 解析 SSE 格式: "data: {...}\n\n"
-            for (const line of text.split('\n')) {
-                if (line.startsWith('data: ')) {
-                    const msg = JSON.parse(line.slice(6));
-                    if (msg.type === 'chunk') display(msg.content);
-                }
-            }
-        }
-    """
-    logger.info("[Chat] session=%s  msg=%s", request.session_id, request.content[:40])
     return StreamingResponse(
-        sse_generator(request.session_id, request.content),
+        sse_generator(
+            request.session_id,
+            request.content,
+            request.agent,
+            request.agent_configs,
+        ),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",   # 关闭 Nginx 缓冲，保证流实时到达
+            "X-Accel-Buffering": "no",
         },
+    )
+
+
+@router.post("/chat/resume")
+async def chat_resume(request: ResumeRequest) -> StreamingResponse:
+    """
+    恢复被 HITL 暂停的对话（SSE 流式）。
+
+    前端在收到 {"type": "interrupt"} 后，由用户点击确认/取消，
+    然后调用此接口继续或中止图的执行。
+    """
+    logger.info("[Resume] session=%s agent=%s approved=%s",
+                request.session_id, request.agent, request.approved)
+    return StreamingResponse(
+        sse_resume_generator(request.session_id, request.agent, request.approved),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
 
 
@@ -130,15 +169,6 @@ async def ingest_file(
     file: UploadFile = File(..., description="要导入的文档（.txt / .pdf / .docx）"),
     project_id: str = Form(default="default", description="项目 ID，多租户隔离用"),
 ):
-    """
-    上传文档并导入知识库。
-
-    curl 调用示例：
-        curl -X POST http://localhost:8000/api/rag/ingest/file \\
-          -F "file=@施工验收规范.txt" \\
-          -F "project_id=proj_001"
-    """
-    # 把上传文件写到临时目录
     import tempfile, os, pathlib
     suffix = pathlib.Path(file.filename).suffix.lower()
     allowed = {".txt", ".pdf", ".docx"}
@@ -164,15 +194,6 @@ async def ingest_text(
     source_name: str = Form(default="inline", description="来源名称（显示在检索结果里）"),
     project_id: str = Form(default="default"),
 ):
-    """
-    直接导入纯文本到知识库（不需要上传文件）。
-
-    curl 调用示例：
-        curl -X POST http://localhost:8000/api/rag/ingest/text \\
-          -d "content=防水层施工须进行蓄水试验，蓄水时间不少于24小时" \\
-          -d "source_name=施工规范" \\
-          -d "project_id=proj_001"
-    """
     pipeline = ai_service._rag_pipeline
     result = pipeline.ingest_text(content, source_name=source_name, project_id=project_id)
     return IngestResponse(success=result.startswith("✅"), message=result)
@@ -180,14 +201,6 @@ async def ingest_text(
 
 @router.get("/rag/status", response_model=StatusResponse)
 async def rag_status():
-    """
-    查询 RAG 知识库状态。
-
-    返回：
-      - rag_connected: Milvus 是否已连接
-      - chunk_count: 当前知识库中的 chunk 数量
-      - model: 当前使用的 LLM 模型名称
-    """
     from agent_lab.app.core.config import settings
     pipeline = ai_service._rag_pipeline
     return StatusResponse(
@@ -199,5 +212,4 @@ async def rag_status():
 
 @router.get("/health")
 async def health():
-    """健康检查，给 Docker / K8S 探针用。"""
     return {"status": "ok"}

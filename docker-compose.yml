@@ -1,18 +1,32 @@
-# Milvus 单机版 Docker Compose
-# 启动命令：docker compose up -d
-# 停止命令：docker compose down
-# 端口：19530（gRPC，pymilvus 用这个）, 9091（HTTP 管理接口）
-
-version: '3.8'
-
 services:
+
+  # ── 应用服务 ─────────────────────────────────────────────────
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env                        # OPENAI_API_KEY 等从这里读
+    environment:
+      MILVUS_HOST: standalone       # 容器内用服务名访问，不用 localhost
+      MILVUS_PORT: "19530"
+    volumes:
+      - fastembed_cache:/app/.cache/fastembed   # 模型文件持久化，避免重启重新下载
+    depends_on:
+      standalone:
+        condition: service_healthy  # 等 Milvus 健康检查通过再启动
+    restart: unless-stopped
+
+  # ── Milvus 依赖组件 ───────────────────────────────────────────
   etcd:
     image: quay.io/coreos/etcd:v3.5.5
     environment:
-      - ETCD_AUTO_COMPACTION_MODE=revision
-      - ETCD_AUTO_COMPACTION_RETENTION=1000
-      - ETCD_QUOTA_BACKEND_BYTES=4294967296
-      - ETCD_SNAPSHOT_COUNT=50000
+      ETCD_AUTO_COMPACTION_MODE: revision
+      ETCD_AUTO_COMPACTION_RETENTION: "1000"
+      ETCD_QUOTA_BACKEND_BYTES: "4294967296"
+      ETCD_SNAPSHOT_COUNT: "50000"
     command: >
       etcd
       --name milvus-etcd
@@ -22,6 +36,13 @@ services:
       --listen-peer-urls http://0.0.0.0:2380
       --initial-advertise-peer-urls http://etcd:2380
       --initial-cluster milvus-etcd=http://etcd:2380
+    volumes:
+      - etcd_data:/etcd
+    healthcheck:
+      test: ["CMD", "etcdctl", "endpoint", "health"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
 
   minio:
     image: minio/minio:RELEASE.2023-03-13T19-46-17Z
@@ -29,6 +50,13 @@ services:
       MINIO_ACCESS_KEY: minioadmin
       MINIO_SECRET_KEY: minioadmin
     command: minio server /minio_data --console-address ":9001"
+    volumes:
+      - minio_data:/minio_data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
 
   standalone:
     image: milvusdb/milvus:v2.4.0
@@ -37,13 +65,24 @@ services:
       ETCD_ENDPOINTS: etcd:2379
       MINIO_ADDRESS: minio:9000
     ports:
-      - "19530:19530"   # gRPC（pymilvus 连这个）
-      - "9091:9091"     # HTTP REST 管理接口
+      - "19530:19530"
+      - "9091:9091"
     depends_on:
-      - etcd
-      - minio
+      etcd:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
     volumes:
       - milvus_data:/var/lib/milvus
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
+      interval: 30s
+      timeout: 20s
+      retries: 5
+      start_period: 60s     # Milvus 启动慢，给 60s 预热时间
 
 volumes:
   milvus_data:
+  etcd_data:
+  minio_data:
+  fastembed_cache:          # FastEmbed 模型缓存，~50MB，只下载一次

@@ -18,7 +18,7 @@ class FileState(TypedDict):
     active_tools: list[str]  # 本轮由 SkillRegistry 检索到的工具名列表
 
 
-def build_file_subgraph(llm, registry: SkillRegistry):
+def build_file_subgraph(llm, registry: SkillRegistry, checkpointer=None):
     """
     工厂函数：接收共享 llm 和 SkillRegistry，返回带动态工具检索的文件操作子图。
     """
@@ -62,4 +62,4 @@ def build_file_subgraph(llm, registry: SkillRegistry):
     g.add_conditional_edges("agent", should_continue, {"tools": "tools", END: END})
     g.add_edge("tools", "agent")
 
-    return g.compile()
+    return g.compile(checkpointer=checkpointer)
