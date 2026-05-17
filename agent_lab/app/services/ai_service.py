@@ -210,11 +210,21 @@ class AIService:
                 else self._build_subagent(agent, agent_llm, memory=None)
             )
 
+        # Supervisor 图里只有这两个节点的输出是给用户看的：
+        #   general   → 通用问答节点的直接回复
+        #   aggregator → 多 Agent 汇聚后的整合回复
+        # router / summarizer / code_agent_node / file_agent_node 的 LLM 输出
+        # 都是内部决策，不应该流给前端。
+        _USER_FACING_NODES = {"general", "aggregator"} if agent == "supervisor" else None
+
         async for msg, _meta in graph.astream(
             {"messages": [("user", content)]},
             config=config,
             stream_mode="messages",
         ):
+            node = _meta.get("langgraph_node", "")
+            if _USER_FACING_NODES is not None and node not in _USER_FACING_NODES:
+                continue
             if (
                 isinstance(msg, AIMessageChunk)
                 and msg.content
@@ -282,6 +292,9 @@ class AIService:
             config=config,
             stream_mode="messages",
         ):
+            node = _meta.get("langgraph_node", "")
+            if node not in {"general", "aggregator"}:
+                continue
             if (
                 isinstance(msg, AIMessageChunk)
                 and msg.content

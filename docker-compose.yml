@@ -12,6 +12,12 @@ services:
     environment:
       MILVUS_HOST: standalone       # 容器内用服务名访问，不用 localhost
       MILVUS_PORT: "19530"
+      # Clash 代理：容器通过宿主机的代理访问外网 LLM API
+      # 前提：Clash 需开启 Allow LAN，否则容器访问不到 7890 端口
+      HTTP_PROXY: "http://host.docker.internal:7890"
+      HTTPS_PROXY: "http://host.docker.internal:7890"
+      # Milvus 等内网服务不走代理
+      NO_PROXY: "standalone,etcd,minio,localhost,127.0.0.1"
     volumes:
       - fastembed_cache:/app/.cache/fastembed   # 模型文件持久化，避免重启重新下载
     depends_on:
