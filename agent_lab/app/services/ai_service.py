@@ -15,6 +15,7 @@ from agent_lab.app.core.config import settings
 from agent_lab.app.core.logger import get_logger
 import httpx
 import aiosqlite
+import os
 
 logger = get_logger("ai_service")
 
@@ -46,7 +47,11 @@ class AIService:
         """
         根据单个 AgentLLMConfig（或 None）构造 LLM。
         cfg 为 None / 字段全空时，回退到 settings.py 的默认值。
+
+        代理说明：langchain-openai 传入 http_async_client 后会禁用环境变量代理自动检测，
+        所以在此显式读取 HTTPS_PROXY / HTTP_PROXY 并传给 httpx.AsyncClient。
         """
+        proxy_url = os.getenv("HTTPS_PROXY") or os.getenv("HTTP_PROXY") or None
         return ChatOpenAI(
             api_key  = (cfg and cfg.api_key)  or settings.OPENAI_API_KEY,
             base_url = (cfg and cfg.api_base) or settings.OPENAI_API_BASE,
@@ -55,6 +60,7 @@ class AIService:
                 verify=not settings.SKIP_SSL_VERIFY,
                 timeout=settings.REQUEST_TIMEOUT,
                 http2=False,
+                proxy=proxy_url,        # 显式传代理，绕过 langchain-openai 的 transport 覆盖
             ),
             max_retries=2,
         )
