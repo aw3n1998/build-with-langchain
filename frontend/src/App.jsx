@@ -4,7 +4,8 @@ import ChatWindow     from './components/ChatWindow'
 import InputBar       from './components/InputBar'
 import KnowledgePanel from './components/KnowledgePanel'
 import SettingsPanel  from './components/SettingsPanel'
-import { getStatus, streamChat, resumeChat } from './api'
+import HistorySidebar from './components/HistorySidebar'
+import { getStatus, streamChat, resumeChat, getHistory, getSessionHistory, deleteSession } from './api'
 
 function genId() {
   return Math.random().toString(36).slice(2, 10)
@@ -21,7 +22,7 @@ function getDisplayModel(fallback) {
 }
 
 export default function App() {
-  const [sessionId] = useState(() => `sid-${genId()}`)
+  const [sessionId, setSessionId]         = useState(() => `sid-${genId()}`)
   const [messages, setMessages]           = useState([])
   const [isStreaming, setIsStreaming]      = useState(false)
   const [ragStatus, setRagStatus]         = useState({ rag_connected: false, chunk_count: 0, model: '' })
@@ -33,6 +34,16 @@ export default function App() {
   // { sessionId, agent, node, msgId }   msgId = interrupt 消息在 messages 里的 id
   // displayModel 只用于 TopBar 标签显示，不影响实际请求（api.js 直接读 localStorage）
   const [displayModel, setDisplayModel]   = useState(() => getDisplayModel(''))
+  const [sessions, setSessions]           = useState([])
+
+  const fetchSessions = useCallback(async () => {
+    try {
+      const data = await getHistory()
+      setSessions(data || [])
+    } catch (err) {
+      console.error('Failed to fetch historical sessions:', err)
+    }
+  }, [])
 
   // 启动 + 定期刷新 RAG 状态
   useEffect(() => {
@@ -43,6 +54,11 @@ export default function App() {
     const id = setInterval(refresh, 15000)
     return () => clearInterval(id)
   }, [])
+
+  // 加载历史会话列表
+  useEffect(() => {
+    fetchSessions()
+  }, [fetchSessions])
 
   /** 统一消费 SSE 事件流（sendMessage / handleResume 共用） */
   const consumeStream = useCallback(async (gen, aiMsgId, currentSessionId, currentAgent) => {
@@ -113,8 +129,9 @@ export default function App() {
       // interrupt 卡片的交互按钮需要 isStreaming=false 才能响应
       setIsStreaming(false)
       try { setRagStatus(await getStatus()) } catch {}
+      try { await fetchSessions() } catch {}
     }
-  }, [sessionId, isStreaming, agent, consumeStream])
+  }, [sessionId, isStreaming, agent, consumeStream, fetchSessions])
 
   /** HITL：用户点击"确认"或"取消"后调用 */
   const handleResume = useCallback(async (approved) => {
@@ -149,13 +166,41 @@ export default function App() {
     } finally {
       setIsStreaming(false)
       try { setRagStatus(await getStatus()) } catch {}
+      try { await fetchSessions() } catch {}
     }
-  }, [pendingInterrupt, consumeStream])
+  }, [pendingInterrupt, consumeStream, fetchSessions])
 
   const startNewChat = () => {
     if (isStreaming) return
+    setSessionId(`sid-${genId()}`)
     setMessages([])
   }
+
+  const handleSelectSession = useCallback(async (sid) => {
+    if (isStreaming) return
+    try {
+      setSessionId(sid)
+      const data = await getSessionHistory(sid)
+      setMessages(data.messages || [])
+      setPendingInterrupt(null)
+    } catch (err) {
+      console.error("Failed to load session history:", err)
+    }
+  }, [isStreaming])
+
+  const handleDeleteSession = useCallback(async (sid) => {
+    try {
+      await deleteSession(sid)
+      await fetchSessions()
+      if (sid === sessionId) {
+        setSessionId(`sid-${genId()}`)
+        setMessages([])
+        setPendingInterrupt(null)
+      }
+    } catch (err) {
+      console.error("Failed to delete session:", err)
+    }
+  }, [sessionId, fetchSessions])
 
   // 同一时间只开一个面板
   const openKnowledge = () => { setShowKnowledge(v => !v); setShowSettings(false) }
@@ -170,38 +215,59 @@ export default function App() {
 
   return (
     <div style={{
-      height: '100%', display: 'flex', flexDirection: 'column',
+      height: '100%', display: 'flex', flexDirection: 'row',
       background: 'var(--bg)', position: 'relative', overflow: 'hidden',
+      width: '100%'
     }}>
-      <TopBar
-        model={topBarModel}
-        ragStatus={ragStatus}
-        onKnowledgeClick={openKnowledge}
-        showKnowledge={showKnowledge}
+      {/* 历史侧边栏 */}
+      <HistorySidebar
+        currentSessionId={sessionId}
+        sessions={sessions}
+        onSelectSession={handleSelectSession}
         onNewChat={startNewChat}
-        onSettingsClick={openSettings}
+        onDeleteSession={handleDeleteSession}
       />
 
-      <ChatWindow messages={messages} onResume={handleResume} />
+      {/* 主对话区 */}
+      <div style={{
+        flex: 1,
+        display: 'flex',
+        flexDirection: 'column',
+        height: '100%',
+        minWidth: 0,
+        position: 'relative',
+        overflow: 'hidden'
+      }}>
+        <TopBar
+          model={topBarModel}
+          ragStatus={ragStatus}
+          onKnowledgeClick={openKnowledge}
+          showKnowledge={showKnowledge}
+          onNewChat={startNewChat}
+          onSettingsClick={openSettings}
+        />
 
-      <InputBar
-        onSend={sendMessage}
-        disabled={isStreaming}
-        agent={agent}
-        onAgentChange={setAgent}
-      />
+        <ChatWindow messages={messages} onResume={handleResume} />
 
-      <KnowledgePanel
-        open={showKnowledge}
-        onClose={() => setShowKnowledge(false)}
-        onStatusChange={setRagStatus}
-      />
+        <InputBar
+          onSend={sendMessage}
+          disabled={isStreaming}
+          agent={agent}
+          onAgentChange={setAgent}
+        />
 
-      <SettingsPanel
-        open={showSettings}
-        onClose={() => setShowSettings(false)}
-        onSaved={handleSettingsSaved}
-      />
+        <KnowledgePanel
+          open={showKnowledge}
+          onClose={() => setShowKnowledge(false)}
+          onStatusChange={setRagStatus}
+        />
+
+        <SettingsPanel
+          open={showSettings}
+          onClose={() => setShowSettings(false)}
+          onSaved={handleSettingsSaved}
+        />
+      </div>
     </div>
   )
 }

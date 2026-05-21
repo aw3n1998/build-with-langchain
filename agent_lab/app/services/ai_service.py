@@ -1,13 +1,14 @@
 from langchain_openai import ChatOpenAI
 from langchain_community.embeddings.fastembed import FastEmbedEmbeddings
-from langchain_core.messages import AIMessageChunk
+from langchain_core.messages import AIMessageChunk, AIMessage
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from agent_lab.app.agents.supervisor    import build_supervisor
 from agent_lab.app.agents.code_agent    import build_code_subgraph
 from agent_lab.app.agents.file_agent    import build_file_subgraph
 from agent_lab.app.agents.batch_agent   import build_batch_graph
 from agent_lab.app.agents.general_agent import build_general_subgraph
-from agent_lab.app.services.tools import code_tools, file_tools, general_tools
+from agent_lab.app.agents.shell_agent   import build_shell_subgraph
+from agent_lab.app.services.tools import code_tools, file_tools, shell_tools, general_tools
 from agent_lab.app.services.skill_registry import SkillRegistry
 from agent_lab.app.rag.pipeline import init_pipeline
 from agent_lab.app.rag.rag_tools import rag_tools
@@ -19,7 +20,7 @@ import os
 
 logger = get_logger("ai_service")
 
-_VALID_AGENTS = {"supervisor", "code", "file", "batch", "general"}
+_VALID_AGENTS = {"supervisor", "code", "file", "batch", "general", "shell"}
 
 
 class AIService:
@@ -74,7 +75,7 @@ class AIService:
         result = {"supervisor": self._llm}
         if not agent_configs:
             return result
-        for name in ("supervisor", "code", "file", "general", "batch"):
+        for name in ("supervisor", "code", "file", "general", "batch", "shell"):
             cfg = agent_configs.get(name)
             if cfg and any([cfg.model, cfg.api_base, cfg.api_key]):
                 result[name] = self._make_llm_from_config(cfg)
@@ -97,7 +98,7 @@ class AIService:
     def _ensure_registry(self):
         if not self._registry._names:
             logger.info("[AIService] 初始化 SkillRegistry，注册工具...")
-            all_tools = code_tools + file_tools + general_tools + rag_tools
+            all_tools = code_tools + file_tools + shell_tools + general_tools + rag_tools
             self._registry.register(all_tools)
 
     # ── Supervisor 懒初始化 ───────────────────────────────────────
@@ -144,6 +145,7 @@ class AIService:
             "file":    lambda: build_file_subgraph(llm, self._registry, checkpointer=memory),
             "batch":   lambda: build_batch_graph(llm, checkpointer=memory),
             "general": lambda: build_general_subgraph(llm, self._registry, checkpointer=memory),
+            "shell":   lambda: build_shell_subgraph(llm, self._registry, checkpointer=memory),
         }
         if name not in builders:
             raise ValueError(f"未知子 Agent: {name}")
@@ -223,6 +225,7 @@ class AIService:
         # 都是内部决策，不应该流给前端。
         _USER_FACING_NODES = {"general", "aggregator"} if agent == "supervisor" else None
 
+        streamed_any = False
         async for msg, _meta in graph.astream(
             {"messages": [("user", content)]},
             config=config,
@@ -236,7 +239,17 @@ class AIService:
                 and msg.content
                 and not getattr(msg, "tool_calls", None)
             ):
+                streamed_any = True
                 yield {"type": "chunk", "content": msg.content}
+
+        # ── 补发逻辑：若流式输出为空，检查最后一条 AI 消息并作为单个 chunk 输出 ──────────
+        if not streamed_any:
+            state = await graph.aget_state(config)
+            messages = state.values.get("messages", [])
+            if messages:
+                last_msg = messages[-1]
+                if isinstance(last_msg, AIMessage) and last_msg.content:
+                    yield {"type": "chunk", "content": last_msg.content}
 
         # ── HITL 检测：流结束后检查图是否处于暂停状态 ────────────
         if agent == "supervisor":
@@ -293,6 +306,7 @@ class AIService:
             )
 
         # 恢复图（None 表示不注入新消息，从当前 checkpoint 继续）
+        streamed_any = False
         async for msg, _meta in graph.astream(
             None,
             config=config,
@@ -306,7 +320,17 @@ class AIService:
                 and msg.content
                 and not getattr(msg, "tool_calls", None)
             ):
+                streamed_any = True
                 yield {"type": "chunk", "content": msg.content}
+
+        # ── 补发逻辑：若流式输出为空，检查最后一条 AI 消息并作为单个 chunk 输出 ──────────
+        if not streamed_any:
+            state = await graph.aget_state(config)
+            messages = state.values.get("messages", [])
+            if messages:
+                last_msg = messages[-1]
+                if isinstance(last_msg, AIMessage) and last_msg.content:
+                    yield {"type": "chunk", "content": last_msg.content}
 
         # 恢复后再次检测是否还有下一个 interrupt
         state = await graph.aget_state(config)

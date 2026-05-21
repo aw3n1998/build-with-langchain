@@ -1,0 +1,59 @@
+{
+  "defaultAction": "SCMP_ACT_ALLOW",
+  "archMap": [
+    { "architecture": "SCMP_ARCH_X86_64",  "subArchitectures": ["SCMP_ARCH_X86", "SCMP_ARCH_X32"] },
+    { "architecture": "SCMP_ARCH_AARCH64", "subArchitectures": ["SCMP_ARCH_ARM"] }
+  ],
+  "syscalls": [
+    {
+      "names": [
+        "ptrace",
+        "process_vm_readv",
+        "process_vm_writev",
+        "mount",
+        "umount2",
+        "pivot_root",
+        "chroot",
+        "kexec_load",
+        "kexec_file_load",
+        "create_module",
+        "init_module",
+        "finit_module",
+        "delete_module",
+        "reboot",
+        "syslog",
+        "acct",
+        "bpf",
+        "perf_event_open",
+        "io_uring_setup",
+        "io_uring_enter",
+        "io_uring_register",
+        "userfaultfd",
+        "add_key",
+        "request_key",
+        "keyctl",
+        "nfsservctl",
+        "settimeofday",
+        "adjtimex",
+        "clock_adjtime",
+        "stime",
+        "vhangup",
+        "quotactl",
+        "ioperm",
+        "iopl",
+        "swapon",
+        "swapoff",
+        "mknod",
+        "mknodat",
+        "lookup_dcookie",
+        "_sysctl",
+        "setdomainname",
+        "sethostname",
+        "uselib"
+      ],
+      "action": "SCMP_ACT_ERRNO",
+      "errnoRet": 1,
+      "comment": "封锁内核级高危操作：调试注入、内核模块、挂载、eBPF、重启等"
+    }
+  ]
+}

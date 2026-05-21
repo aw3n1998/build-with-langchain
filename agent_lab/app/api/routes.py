@@ -213,3 +213,101 @@ async def rag_status():
 @router.get("/health")
 async def health():
     return {"status": "ok"}
+
+
+@router.get("/history")
+async def get_history():
+    """获取所有历史会话"""
+    try:
+        await ai_service._ensure_supervisor()
+        checkpointer = ai_service._agent.checkpointer
+        
+        sessions = {}
+        async for c in checkpointer.alist(None):
+            thread_id = c.config.get("configurable", {}).get("thread_id", "")
+            if not thread_id or not thread_id.startswith("supervisor:"):
+                continue
+            session_id = thread_id.split(":", 1)[1]
+            
+            # 仅取每个 session_id 的最新 checkpoint 状态
+            if session_id in sessions:
+                continue
+                
+            channel_values = c.checkpoint.get("channel_values", {})
+            messages = channel_values.get("messages", [])
+            if not messages:
+                continue
+                
+            first_user_msg = next((m.content for m in messages if m.type == "human"), "")
+            title = first_user_msg[:40] if first_user_msg else "新会话"
+            
+            sessions[session_id] = {
+                "session_id": session_id,
+                "title": title,
+                "updated_at": c.checkpoint.get("ts"),
+                "message_count": len(messages)
+            }
+            
+        sorted_sessions = sorted(sessions.values(), key=lambda x: x["updated_at"], reverse=True)
+        return sorted_sessions
+    except Exception as e:
+        logger.exception("Failed to get history")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/history/{session_id}")
+async def get_session_history(session_id: str):
+    """加载指定会话的完整历史消息"""
+    try:
+        await ai_service._ensure_supervisor()
+        checkpointer = ai_service._agent.checkpointer
+        
+        thread_id = f"supervisor:{session_id}"
+        config = {"configurable": {"thread_id": thread_id}}
+        
+        c = await checkpointer.aget(config)
+        if not c:
+            return {"messages": []}
+            
+        channel_values = c.get("channel_values", {})
+        messages = channel_values.get("messages", [])
+        
+        formatted_messages = []
+        for msg in messages:
+            if msg.type == "system":
+                continue
+            role = "user" if msg.type == "human" else "assistant"
+            formatted_messages.append({
+                "id": getattr(msg, "id", None) or str(uuid.uuid4())[:8],
+                "role": role,
+                "content": msg.content,
+                "streaming": False,
+                "agentLabel": getattr(msg, "response_metadata", {}).get("agent", "supervisor")
+            })
+            
+        return {"messages": formatted_messages}
+    except Exception as e:
+        logger.exception(f"Failed to get session history for {session_id}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/history/{session_id}")
+async def delete_session(session_id: str):
+    """删除指定的历史会话"""
+    try:
+        await ai_service._ensure_supervisor()
+        checkpointer = ai_service._agent.checkpointer
+        
+        # 删除 supervisor 图的 thread
+        thread_id = f"supervisor:{session_id}"
+        await checkpointer.adelete_thread(thread_id)
+        
+        # 同时删除子 agent 的 thread（如果有的话）
+        for ag in ["code", "file", "batch", "general", "shell"]:
+            sub_thread_id = f"{ag}:{session_id}"
+            await checkpointer.adelete_thread(sub_thread_id)
+            
+        return {"success": True}
+    except Exception as e:
+        logger.exception(f"Failed to delete session {session_id}")
+        raise HTTPException(status_code=500, detail=str(e))

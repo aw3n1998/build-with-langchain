@@ -13,8 +13,7 @@ ARG PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
 RUN pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir -r requirements.txt
 
-# 直接从构建上下文复制本地预下载的 FastEmbed 模型（避免构建时联网）
-# 本地模型已在 fastembed_cache/ 中，通过 Python 脚本解析符号链接后复制进来
+# 从构建上下文复制本地预下载的 FastEmbed 模型（100% 离线构建，避免容器联网 SSL 报错）
 ENV FASTEMBED_CACHE_PATH=/app/.cache/fastembed
 COPY fastembed_cache /app/.cache/fastembed
 
@@ -34,8 +33,9 @@ COPY --from=builder /app/.cache/fastembed /app/.cache/fastembed
 # 复制项目代码
 COPY agent_lab/ ./agent_lab/
 
-# FastEmbed 模型缓存目录
+# FastEmbed 模型缓存目录与 HuggingFace 离线模式限制
 ENV FASTEMBED_CACHE_PATH=/app/.cache/fastembed
+ENV HF_HUB_OFFLINE=1
 
 # 非 root 用户运行（安全实践）
 RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app

@@ -5,6 +5,7 @@ const AGENTS = [
   { id: 'general',   label: 'General',    desc: 'Q&A + RAG, no routing overhead' },
   { id: 'code',      label: 'Code',       desc: 'Code writing & execution' },
   { id: 'file',      label: 'File',       desc: 'File listing & reading' },
+  { id: 'shell',     label: 'Shell',      desc: 'Run safe shell commands' },
   { id: 'batch',     label: 'Batch',      desc: 'Parallel map-reduce tasks' },
 ]
 

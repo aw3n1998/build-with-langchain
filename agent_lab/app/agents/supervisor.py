@@ -4,7 +4,7 @@ from langgraph.types import Send
 from agent_lab.app.agents.state import SupervisorState
 from agent_lab.app.agents.code_agent import build_code_subgraph
 from agent_lab.app.agents.file_agent import build_file_subgraph
-from agent_lab.app.services.tools import code_tools, file_tools, general_tools
+from agent_lab.app.services.tools import code_tools, file_tools, shell_tools, general_tools
 from agent_lab.app.services.skill_registry import SkillRegistry
 from agent_lab.app.core.logger import get_logger
 
@@ -12,10 +12,11 @@ logger = get_logger("supervisor")
 
 _ROUTER_PROMPT = SystemMessage(content=(
     "你是一个任务分发器。根据用户最新消息，选择需要的处理器（可多选，逗号分隔）：\n"
-    "- code    （需要编写或执行代码）\n"
-    "- file    （需要列出目录或读取文件）\n"
+    "- code    （需要编写或执行 Python 代码）\n"
+    "- file    （需要列出目录或读取文件内容）\n"
+    "- shell   （需要执行系统命令，如 ls/git/grep/ps 等）\n"
     "- general （可直接回答，如查时间、聊天、问答）\n\n"
-    "只输出选中的词，用逗号分隔，例如：code,file\n"
+    "只输出选中的词，用逗号分隔，例如：code,shell\n"
     "不要输出任何解释。"
 ))
 
@@ -68,7 +69,8 @@ def build_supervisor(llms: dict, registry: SkillRegistry):
         )
         decision = await sup_llm.ainvoke([_ROUTER_PROMPT, last_human])
         raw = decision.content.strip().lower()
-        agents = [a.strip() for a in raw.split(",") if a.strip() in ("code", "file", "general")]
+        valid = ("code", "file", "shell", "general")
+        agents = [a.strip() for a in raw.split(",") if a.strip() in valid]
         if not agents:
             agents = ["general"]
         logger.info("[Supervisor] 并行路由 → %s", agents)
@@ -76,12 +78,18 @@ def build_supervisor(llms: dict, registry: SkillRegistry):
             "selected_agents": agents,
             "code_result": "",
             "file_result": "",
+            "shell_result": "",
             "general_result": "",
         }
 
     # ── Send 扇出函数（条件边）────────────────────────────────
     def fan_out(state: SupervisorState) -> list[Send]:
-        node_map = {"code": "code_agent", "file": "file_agent", "general": "general"}
+        node_map = {
+            "code":    "code_agent",
+            "file":    "file_agent",
+            "shell":   "shell_agent",
+            "general": "general",
+        }
         return [
             Send(node_map[agent], {"messages": state["messages"]})
             for agent in state["selected_agents"]
@@ -100,6 +108,35 @@ def build_supervisor(llms: dict, registry: SkillRegistry):
         result = await file_graph.ainvoke({"messages": state["messages"]})
         final = next((m for m in reversed(result["messages"]) if isinstance(m, AIMessage)), None)
         return {"file_result": final.content if final else ""}
+
+    async def shell_agent_node(state: SupervisorState) -> dict:
+        """Shell Agent：执行白名单 shell 命令（ls/git/grep/ps 等只读命令）。"""
+        logger.info("[ShellAgent] 开始执行")
+        query = next(
+            (m.content for m in reversed(state["messages"]) if m.type == "human"), ""
+        )
+        shell_llm = llms.get("shell", sup_llm)
+        llm_with_tools = shell_llm.bind_tools(shell_tools)
+        tools_map = {t.name: t for t in shell_tools}
+        _shell_prompt = SystemMessage(content=(
+            "你是一个系统信息查询专家，只能使用 run_shell_command 工具执行命令。\n"
+            "只执行只读/查询类命令，严禁写文件、删除、网络操作。\n"
+            "完成后用中文简洁汇报结果。"
+        ))
+        response = await llm_with_tools.ainvoke([_shell_prompt] + state["messages"])
+        messages = [response]
+        while getattr(messages[-1], "tool_calls", None):
+            tool_results = []
+            for tc in messages[-1].tool_calls:
+                tool = tools_map.get(tc["name"])
+                if tool:
+                    res = await tool.ainvoke(tc["args"])
+                    tool_results.append(ToolMessage(content=str(res), tool_call_id=tc["id"]))
+            messages.extend(tool_results)
+            response = await llm_with_tools.ainvoke([_shell_prompt] + state["messages"] + messages)
+            messages.append(response)
+        final = messages[-1]
+        return {"shell_result": final.content if isinstance(final, AIMessage) else ""}
 
     async def general_node(state: SupervisorState) -> dict:
         """General Agent：动态检索工具，按需调用。使用 general_llm（可与 supervisor 不同）。"""
@@ -131,8 +168,9 @@ def build_supervisor(llms: dict, registry: SkillRegistry):
     async def aggregator_node(state: SupervisorState) -> dict:
         active = {
             k: v for k, v in {
-                "code": state.get("code_result", ""),
-                "file": state.get("file_result", ""),
+                "code":    state.get("code_result", ""),
+                "file":    state.get("file_result", ""),
+                "shell":   state.get("shell_result", ""),
                 "general": state.get("general_result", ""),
             }.items() if v
         }
@@ -194,20 +232,25 @@ def build_supervisor(llms: dict, registry: SkillRegistry):
     # ── 组装图 ────────────────────────────────────────────────
     g = StateGraph(SupervisorState)
 
-    g.add_node("summarizer",  summarizer_node)   # ← 新增：入口处自动压缩
+    g.add_node("summarizer",  summarizer_node)
     g.add_node("router",      router_node)
     g.add_node("code_agent",  code_agent_node)
     g.add_node("file_agent",  file_agent_node)
+    g.add_node("shell_agent", shell_agent_node)
     g.add_node("general",     general_node)
     g.add_node("aggregator",  aggregator_node)
 
-    g.set_entry_point("summarizer")              # ← 入口改为 summarizer
-    g.add_edge("summarizer", "router")           # summarizer → router
-    g.add_conditional_edges("router", fan_out, ["code_agent", "file_agent", "general"])
-    g.add_edge("code_agent", "aggregator")
-    g.add_edge("file_agent", "aggregator")
-    g.add_edge("general",    "aggregator")
-    g.add_edge("aggregator", END)
+    g.set_entry_point("summarizer")
+    g.add_edge("summarizer", "router")
+    g.add_conditional_edges(
+        "router", fan_out,
+        ["code_agent", "file_agent", "shell_agent", "general"]
+    )
+    g.add_edge("code_agent",  "aggregator")
+    g.add_edge("file_agent",  "aggregator")
+    g.add_edge("shell_agent", "aggregator")
+    g.add_edge("general",     "aggregator")
+    g.add_edge("aggregator",  END)
 
     return g
 
@@ -233,7 +276,7 @@ _llm = ChatOpenAI(
 try:
     _embedder = FastEmbedEmbeddings(model_name="BAAI/bge-small-zh-v1.5")
     _registry = SkillRegistry(_embedder)
-    _registry.register(code_tools + file_tools + general_tools)
+    _registry.register(code_tools + file_tools + shell_tools + general_tools)
     graph = build_supervisor({"supervisor": _llm}, _registry).compile()
 except Exception as e:
     logger.warning("LangGraph Studio graph 初始化失败（首次运行需下载模型）: %s", e)

@@ -119,3 +119,23 @@ export async function* resumeChat(sessionId, agent, approved) {
   if (!response.ok) throw new Error(`HTTP ${response.status}`)
   yield* parseSSE(response)
 }
+
+// ── 历史会话管理 ─────────────────────────────────────────────
+
+export async function getHistory() {
+  const r = await fetch(`${getBase()}/history`)
+  if (!r.ok) throw new Error(`status ${r.status}`)
+  return r.json()
+}
+
+export async function getSessionHistory(sessionId) {
+  const r = await fetch(`${getBase()}/history/${sessionId}`)
+  if (!r.ok) throw new Error(`status ${r.status}`)
+  return r.json()
+}
+
+export async function deleteSession(sessionId) {
+  const r = await fetch(`${getBase()}/history/${sessionId}`, { method: 'DELETE' })
+  if (!r.ok) throw new Error(`status ${r.status}`)
+  return r.json()
+}

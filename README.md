@@ -21,13 +21,14 @@ AgentLab 是一套**完整的 AI Agent 工程实战项目**，从零搭建多 Ag
 ┌─────────────────────────────────────────────────────────┐
 │                    浏览器 (React + Vite)                 │
 │                                                         │
-│  TopBar ─ 显示当前模型、RAG 状态、新对话按钮              │
-│  ChatWindow ─ 流式渲染 AI 消息（Markdown 支持）           │
+│  HistorySidebar ─ 历史会话侧边栏（新建/选择/删除会话）   │
+│  TopBar ─ 显示当前模型、RAG 状态、侧栏开关及操作按钮     │
+│  ChatWindow ─ 流式渲染 AI 消息（Markdown & 格式化表格）   │
 │  InputBar ─ 发消息 + Agent 选择（5 种）                  │
 │  KnowledgePanel ─ 抽屉面板：上传文件 / 粘贴文本           │
 │  SettingsPanel ─ 抽屉面板：每个 Agent 独立配置 LLM        │
 │                                                         │
-│  api.js: fetch POST /api/chat → SSE 流式读取             │
+│  api.js: fetch API / SSE 流式读取 / 历史会话管理          │
 └──────────────────────┬──────────────────────────────────┘
                        │ HTTP / SSE
 ┌──────────────────────▼──────────────────────────────────┐
@@ -717,6 +718,9 @@ SSE 消息格式：
 | `POST` | `/api/rag/ingest/text` | 纯文本导入知识库 |
 | `GET`  | `/api/rag/status` | 查询 Milvus 连接状态和 chunk 数量 |
 | `GET`  | `/api/health` | 健康检查（Docker/K8S 探针用） |
+| `GET`  | `/api/history` | 获取所有历史会话列表，包括标题、更新时间、消息数 |
+| `GET`  | `/api/history/{session_id}` | 加载指定会话的完整历史消息列表（自动排除系统消息） |
+| `DELETE`| `/api/history/{session_id}` | 物理删除指定的历史会话（同步删除主图及各子 Agent 的 SQLite Checkpoint） |
 | `GET`  | `/docs` | Swagger UI，浏览器直接测试所有接口 |
 
 ---
@@ -950,6 +954,39 @@ async def astream_chat(self, session_id, content, agent="supervisor", agent_conf
 
 ---
 
+#### Chapter 22 — 历史会话持久化与管理（History Sessions）
+
+**核心需求：** 对话不能一刷新页面就消失，必须进行持久化，并且支持新建对话、在多个历史对话间平滑切换、以及物理删除历史对话。
+
+**后端路由与数据库交互（`routes.py`）：**
+- **获取会话列表：** `GET /api/history` 扫描 SQLite Checkpointer 数据库，过滤并提取以 `supervisor:` 开头的 `thread_id` 最新快照，以更新时间（`ts`）降序排列。
+- **获取会话详情：** `GET /api/history/{session_id}` 读取对应 thread 快照的 `messages` 列表，自动过滤系统（`system`）消息，并格式化成前端标准 JSON。
+- **物理删除会话：** `DELETE /api/history/{session_id}` 必须彻底物理清理 Checkpointer。**踩坑点：** 必须使用 `AsyncSqliteSaver.adelete_thread(thread_id)`，参数必须是 `thread_id: str`，传配置 dict 会导致静默不生效。
+
+```python
+@router.delete("/history/{session_id}")
+async def delete_session(session_id: str):
+    """物理删除指定的历史会话及所有关联子图的 Checkpoint"""
+    await ai_service._ensure_supervisor()
+    checkpointer = ai_service._agent.checkpointer
+    
+    # 删除 Supervisor 主图的 thread
+    await checkpointer.adelete_thread(f"supervisor:{session_id}")
+    
+    # 同步删除各个子 Agent 的 thread 快照以完全释放 SQLite 数据库空间
+    for ag in ["code", "file", "batch", "general", "shell"]:
+        await checkpointer.adelete_thread(f"{ag}:{session_id}")
+        
+    return {"success": True}
+```
+
+**前端历史侧边栏（`HistorySidebar.jsx`）：**
+- 采用极简高端的玻璃摩砂感（Glassmorphism）侧边栏设计，布局在屏幕最左侧。
+- 鼠标悬浮列表项时淡入删除按钮，配合微动画提供一流的交互体验。
+- 自动格式化显示消息条数和更新时间。
+
+---
+
 ## 架构演进图
 
 ```
@@ -965,12 +1002,17 @@ v3: FastAPI 服务化
 v4: RAG 集成
    FastAPI + RAGPipeline(Milvus) + SkillRegistry(FAISS)
 
-v5: 全栈 Web 应用（当前）
+v5: 全栈 Web 应用
    React 前端 + FastAPI 后端
    + 每 Agent 独立 LLM 配置
    + 直连子 Agent 模式
    + 知识库 Web UI
    + 设置面板 Web UI
+
+v6: 历史会话持久化（当前）
+   + Glassmorphic 历史侧边栏 (HistorySidebar)
+   + SQLite Checkpointer 历史会话持久化
+   + 历史会话详情懒加载 & 智能主子图物理删除
 ```
 
 ---
@@ -1068,13 +1110,14 @@ build-with-langchain/
 ├── frontend/
 │   ├── src/
 │   │   ├── App.jsx                # 状态管理中枢
-│   │   ├── api.js                 # fetch + SSE async generator
+│   │   ├── api.js                 # fetch API & SSE 流式处理器 & 历史会话 API 封装
 │   │   └── components/
 │   │       ├── TopBar.jsx
 │   │       ├── ChatWindow.jsx
 │   │       ├── InputBar.jsx       # Agent 选择器 + 发送框
 │   │       ├── KnowledgePanel.jsx # 知识库管理抽屉
-│   │       └── SettingsPanel.jsx  # 每 Agent LLM 配置抽屉
+│   │       ├── SettingsPanel.jsx  # 每 Agent LLM 配置抽屉
+│   │       └── HistorySidebar.jsx # 历史会话管理侧边栏 (新建/切换/删除会话)
 │   ├── index.html
 │   └── vite.config.js
 ├── docker-compose.yml             # Milvus 启动配置

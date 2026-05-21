@@ -8,6 +8,7 @@ const AGENTS = [
   { id: 'code',       label: 'Code Agent',  desc: 'Falls back to Supervisor if unset' },
   { id: 'file',       label: 'File Agent',  desc: 'Falls back to Supervisor if unset' },
   { id: 'general',    label: 'General',     desc: 'Falls back to Supervisor if unset' },
+  { id: 'shell',      label: 'Shell Agent', desc: 'Falls back to Supervisor if unset' },
   { id: 'batch',      label: 'Batch',       desc: 'Falls back to Supervisor if unset' },
 ]
 

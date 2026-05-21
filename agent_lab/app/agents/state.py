@@ -14,4 +14,5 @@ class SupervisorState(TypedDict):
     # 而各自独立字段每轮被 router 重置为 ""，更清晰安全
     code_result:    str   # CodeAgent 的输出，未使用时为 ""
     file_result:    str   # FileAgent 的输出，未使用时为 ""
+    shell_result:   str   # ShellAgent 的输出，未使用时为 ""
     general_result: str   # General 的输出，未使用时为 ""
