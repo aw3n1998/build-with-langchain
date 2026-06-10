@@ -3,15 +3,12 @@ from langchain_community.embeddings.fastembed import FastEmbedEmbeddings
 from langchain_core.messages import AIMessageChunk, AIMessage
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from agent_lab.app.agents.supervisor    import build_supervisor
-from agent_lab.app.agents.code_agent    import build_code_subgraph
-from agent_lab.app.agents.file_agent    import build_file_subgraph
-from agent_lab.app.agents.batch_agent   import build_batch_graph
-from agent_lab.app.agents.general_agent import build_general_subgraph
-from agent_lab.app.agents.shell_agent   import build_shell_subgraph
 from agent_lab.app.services.tools import code_tools, file_tools, shell_tools, general_tools
 from agent_lab.app.services.skill_registry import SkillRegistry
+from agent_lab.app.services.agent_registry import agent_registry
 from agent_lab.app.rag.pipeline import init_pipeline
 from agent_lab.app.rag.rag_tools import rag_tools
+from agent_lab.app.pipeline.pipeline_tools import pipeline_tools
 from agent_lab.app.core.config import settings
 from agent_lab.app.core.logger import get_logger
 import httpx
@@ -20,7 +17,7 @@ import os
 
 logger = get_logger("ai_service")
 
-_VALID_AGENTS = {"supervisor", "code", "file", "batch", "general", "shell"}
+_VALID_AGENTS = {"supervisor"} | agent_registry.get_valid_agents()
 
 
 class AIService:
@@ -53,10 +50,12 @@ class AIService:
         所以在此显式读取 HTTPS_PROXY / HTTP_PROXY 并传给 httpx.AsyncClient。
         """
         proxy_url = os.getenv("HTTPS_PROXY") or os.getenv("HTTP_PROXY") or None
+        max_tokens = (cfg and getattr(cfg, "max_tokens", None)) or settings.MAX_TOKENS
         return ChatOpenAI(
             api_key  = (cfg and cfg.api_key)  or settings.OPENAI_API_KEY,
             base_url = (cfg and cfg.api_base) or settings.OPENAI_API_BASE,
             model    = (cfg and cfg.model)    or settings.MODEL_NAME,
+            max_tokens=max_tokens,
             http_async_client=httpx.AsyncClient(
                 verify=not settings.SKIP_SSL_VERIFY,
                 timeout=settings.REQUEST_TIMEOUT,
@@ -77,7 +76,8 @@ class AIService:
             return result
         for name in ("supervisor", "code", "file", "general", "batch", "shell"):
             cfg = agent_configs.get(name)
-            if cfg and any([cfg.model, cfg.api_base, cfg.api_key]):
+            if cfg and any([cfg.model, cfg.api_base, cfg.api_key,
+                            getattr(cfg, "max_tokens", None)]):
                 result[name] = self._make_llm_from_config(cfg)
             else:
                 result[name] = self._llm
@@ -88,7 +88,8 @@ class AIService:
         if not agent_configs:
             return True
         return all(
-            not any([cfg.model, cfg.api_base, cfg.api_key])
+            not any([cfg.model, cfg.api_base, cfg.api_key,
+                     getattr(cfg, "max_tokens", None)])
             for cfg in agent_configs.values()
             if cfg is not None
         )
@@ -98,7 +99,7 @@ class AIService:
     def _ensure_registry(self):
         if not self._registry._names:
             logger.info("[AIService] 初始化 SkillRegistry，注册工具...")
-            all_tools = code_tools + file_tools + shell_tools + general_tools + rag_tools
+            all_tools = code_tools + file_tools + shell_tools + general_tools + rag_tools + pipeline_tools
             self._registry.register(all_tools)
 
     # ── Supervisor 懒初始化 ───────────────────────────────────────
@@ -138,20 +139,112 @@ class AIService:
         return self._agents[name]
 
     def _build_subagent(self, name: str, llm, memory):
-        """用指定 llm 和 memory 构建子 Agent 图（不缓存）。"""
+        """用指定 llm 和 memory 构建插拔式子 Agent 图（不缓存）。"""
         self._ensure_registry()
-        builders = {
-            "code":    lambda: build_code_subgraph(llm, self._registry, checkpointer=memory),
-            "file":    lambda: build_file_subgraph(llm, self._registry, checkpointer=memory),
-            "batch":   lambda: build_batch_graph(llm, checkpointer=memory),
-            "general": lambda: build_general_subgraph(llm, self._registry, checkpointer=memory),
-            "shell":   lambda: build_shell_subgraph(llm, self._registry, checkpointer=memory),
-        }
-        if name not in builders:
+        import inspect
+
+        agent_meta = agent_registry.get_agent(name)
+        if not agent_meta:
             raise ValueError(f"未知子 Agent: {name}")
-        return builders[name]()
+
+        builder = agent_meta.builder
+        sig = inspect.signature(builder)
+        kwargs = {}
+
+        # 动态匹配与绑定参数
+        if "llm" in sig.parameters:
+            kwargs["llm"] = llm
+        if "checkpointer" in sig.parameters:
+            kwargs["checkpointer"] = memory
+        elif "memory" in sig.parameters:
+            kwargs["memory"] = memory
+        if "registry" in sig.parameters:
+            kwargs["registry"] = self._registry
+
+        try:
+            return builder(**kwargs)
+        except TypeError:
+            # 如果解包绑定失败，则按老的位置顺序传参（针对 core 预注册）
+            args = []
+            for param_name in sig.parameters.keys():
+                if param_name == "llm":
+                    args.append(llm)
+                elif param_name == "registry":
+                    args.append(self._registry)
+                elif param_name in ("checkpointer", "memory"):
+                    args.append(memory)
+            return builder(*args)
 
     # ── 核心流式接口 ─────────────────────────────────────────────
+
+    @staticmethod
+    def _extract_tool_markers(text: str):
+        """从工具返回文本里抽出机器可读标记，转成前端事件，并返回清理后的展示文本。
+
+        识别：
+          PARAM_FORM::{json}                       → {"type":"param_form", ...}   弹出图参数卡
+          IMGFILE::<scene_id>::<asset_id>::<abspath>→ {"type":"image", scene_id, asset_id, url, name}
+        """
+        import json as _json
+        from urllib.parse import quote
+
+        events = []
+        kept_lines = []
+        for line in text.splitlines():
+            s = line.strip()
+            if s.startswith("PARAM_FORM::"):
+                try:
+                    payload = _json.loads(s[len("PARAM_FORM::"):])
+                    events.append({"type": "param_form", **payload})
+                except Exception:
+                    kept_lines.append(line)
+            elif s.startswith("VIDEO_PARAM_FORM::"):
+                try:
+                    payload = _json.loads(s[len("VIDEO_PARAM_FORM::"):])
+                    events.append({"type": "video_param_form", **payload})
+                except Exception:
+                    kept_lines.append(line)
+            elif s.startswith("VIDFILE::"):
+                parts = s.split("::", 2)
+                if len(parts) == 3:
+                    scene_id, abspath = parts[1], parts[2]
+                    events.append({
+                        "type": "video",
+                        "scene_id": scene_id,
+                        "name": os.path.basename(abspath),
+                        "url": f"/api/file?path={quote(abspath)}",
+                    })
+                else:
+                    kept_lines.append(line)
+            elif s.startswith("IMGFILE::"):
+                parts = s.split("::", 3)
+                if len(parts) == 4:
+                    scene_id, asset_id, abspath = parts[1], parts[2], parts[3]
+                    events.append({
+                        "type": "image",
+                        "scene_id": scene_id,
+                        "asset_id": asset_id,
+                        "name": os.path.basename(abspath),
+                        "url": f"/api/file?path={quote(abspath)}",
+                    })
+                else:
+                    kept_lines.append(line)
+            else:
+                kept_lines.append(line)
+        return "\n".join(kept_lines), events
+
+    def _detect_agent_intent(self, content: str) -> str:
+        """
+        根据用户输入，自动检测并分发到特定的插拔式子 Agent 插件。
+        """
+        content_lower = content.lower()
+        for name in agent_registry.get_valid_agents():
+            meta = agent_registry.get_agent(name)
+            if meta and meta.routing_keywords:
+                if any(kw in content_lower for kw in meta.routing_keywords):
+                    logger.info(f"[AIService] 发现关键词特征，自动重定向至插拔式子 Agent: '{name}'")
+                    return name
+        return "supervisor"
 
     async def astream_chat(
         self,
@@ -159,6 +252,7 @@ class AIService:
         content: str,
         agent: str = "supervisor",
         agent_configs: dict | None = None,
+        workspace: str | None = None,
     ):
         """
         流式生成器：逐 chunk yield 事件 dict。
@@ -173,6 +267,16 @@ class AIService:
         各键对应一个 AgentLLMConfig（model / api_base / api_key）。
         缺失 / 全空 → 使用后端 .env 默认值，并走缓存路径。
         """
+        # 设置本请求工作目录（出图/出视频落地根 + 静态服图根）
+        from agent_lab.app.pipeline.runtime import set_workspace
+        set_workspace(workspace)
+
+        if agent == "supervisor":
+            detected_agent = self._detect_agent_intent(content)
+            if detected_agent != "supervisor":
+                logger.info(f"[AIService] 意图自适应分发：supervisor ➔ {detected_agent}")
+                agent = detected_agent
+
         if agent not in _VALID_AGENTS:
             logger.warning("[AIService] 未知 agent '%s'，回退到 supervisor", agent)
             agent = "supervisor"
@@ -211,23 +315,176 @@ class AIService:
             )
         # ── 直连子 Agent ─────────────────────────────────────────
         else:
-            agent_llm = llms.get(agent, self._llm)
-            graph = (
-                await self._get_subagent(agent)
-                if use_default
-                else self._build_subagent(agent, agent_llm, memory=None)
-            )
+            # 子 Agent 没有专属配置时，继承 supervisor 的全局设置（思考程度/长度），
+            # 这样输入栏的「思考/长度」也能作用到 video/file 等子 Agent。
+            agent_llm = llms.get(agent) or llms.get("supervisor") or self._llm
+            if use_default:
+                graph = await self._get_subagent(agent)
+            else:
+                # 即使使用自定义 LLM，也必须传入 checkpointer
+                # 因为 HITL 检测和补发逻辑都依赖 graph.aget_state()
+                conn = await aiosqlite.connect(self._db_path)
+                memory = AsyncSqliteSaver(conn)
+                graph = self._build_subagent(agent, agent_llm, memory)
 
-        # Supervisor 图里只有这两个节点的输出是给用户看的：
-        #   general   → 通用问答节点的直接回复
-        #   aggregator → 多 Agent 汇聚后的整合回复
-        # router / summarizer / code_agent_node / file_agent_node 的 LLM 输出
-        # 都是内部决策，不应该流给前端。
-        _USER_FACING_NODES = {"general", "aggregator"} if agent == "supervisor" else None
+        # 只有声明为"用户可见"的节点的 LLM token 才推送给前端：
+        #   supervisor  → general（通用问答）/ aggregator（多 Agent 汇聚）
+        #   插拔式子 Agent → 由 AgentMetadata.user_facing_nodes 控制；None 则全部可见
+        if agent == "supervisor":
+            _USER_FACING_NODES = {"general", "aggregator"}
+        else:
+            meta = agent_registry.get_agent(agent)
+            _USER_FACING_NODES = meta.user_facing_nodes if (meta and meta.user_facing_nodes) else None
 
         streamed_any = False
-        async for msg, _meta in graph.astream(
+        async for item in graph.astream(
             {"messages": [("user", content)]},
+            config=config,
+            stream_mode=["messages", "custom"],
+            subgraphs=True,   # 让子图（file/code/video）里发的 custom 工具事件冒泡上来
+        ):
+            # subgraphs=True 时每条是 (namespace, mode, payload)；否则 (mode, payload)
+            if len(item) == 3:
+                _ns, stream_mode, payload = item
+            else:
+                stream_mode, payload = item
+            # ── 文本 token 流（用户可见节点的自然语言）──────────────
+            if stream_mode == "messages":
+                msg, _meta = payload
+                node = _meta.get("langgraph_node", "")
+                if _USER_FACING_NODES is not None and node not in _USER_FACING_NODES:
+                    continue
+                if (
+                    isinstance(msg, AIMessageChunk)
+                    and msg.content
+                    and not getattr(msg, "tool_calls", None)
+                ):
+                    streamed_any = True
+                    yield {"type": "chunk", "content": msg.content}
+            # ── 自定义流：各 agent 节点主动上报的工具调用 / 结果 ──────
+            # （general/shell/video 等节点用 stream_events.emit_* 发出，
+            #   子图里发的也会冒泡到这里，从而"所有 agent 可见"）
+            elif stream_mode == "custom":
+                data = payload or {}
+                kind = data.get("kind")
+                if kind == "tool_call":
+                    yield {"type": "tool_call", "name": data.get("name", ""),
+                           "args": data.get("args", {})}
+                elif kind == "tool_result":
+                    clean, extra_events = self._extract_tool_markers(str(data.get("content", "")))
+                    yield {"type": "tool_result", "name": data.get("name", ""),
+                           "content": clean[:600]}
+                    for ev in extra_events:
+                        yield ev
+
+        # ── 补发逻辑：若流式输出为空，检查最后一条 AI 消息并作为单个 chunk 输出 ──────────
+        if not streamed_any:
+            state = await graph.aget_state(config)
+            messages = state.values.get("messages", [])
+            if messages:
+                last_msg = messages[-1]
+                if isinstance(last_msg, AIMessage) and last_msg.content:
+                    yield {"type": "chunk", "content": last_msg.content}
+
+        # ── HITL 检测：流结束后检查图是否处于暂停状态 ────────────
+        if agent in {"supervisor"} | agent_registry.get_valid_agents():
+            state = await graph.aget_state(config)
+            if state.next:
+                pending = state.next[0]
+                # 动态合并所有注册 Agent 的 node_labels 以支持热插拔
+                global_node_labels = {}
+                for a_name in agent_registry.get_valid_agents():
+                    meta = agent_registry.get_agent(a_name)
+                    if meta and meta.node_labels:
+                        global_node_labels.update(meta.node_labels)
+                label = global_node_labels.get(pending, pending)
+                logger.info("[HITL] session=%s 图暂停，等待确认节点: %s", session_id, pending)
+                yield {
+                    "type": "interrupt",
+                    "node": pending,
+                    "content": f"即将执行「{label}」，是否确认继续？",
+                }
+
+    # ── HITL 恢复接口 ────────────────────────────────────────────
+
+    async def aresume_chat(
+        self,
+        session_id: str,
+        agent: str = "supervisor",
+        approved: bool = True,
+    ):
+        """
+        恢复被 HITL interrupt_before 暂停的 Supervisor 图或 Quality 图。
+
+        approved=True  → 继续执行被暂停的节点，流式输出结果
+        approved=False → 向状态注入"已取消"结果，跳过暂停节点直接聚合或返回中止消息
+        """
+        if agent == "supervisor":
+            # 先检查 supervisor 图本身是否有挂起状态
+            graph = await self._ensure_supervisor()
+            state = await graph.aget_state({"configurable": {"thread_id": f"supervisor:{session_id}"}})
+            if not state.next:
+                # 若主 supervisor 图未挂起，扫描所有其他有效子 Agent 的线程状态进行自动重定向
+                for a_name in agent_registry.get_valid_agents():
+                    if a_name == "supervisor":
+                        continue
+                    sub_thread_id = f"{a_name}:{session_id}"
+                    sub_config = {"configurable": {"thread_id": sub_thread_id}}
+                    sub_graph = await self._get_subagent(a_name)
+                    sub_state = await sub_graph.aget_state(sub_config)
+                    if sub_state.next:
+                        logger.info(f"[AIService] 检测到挂起的子 Agent 线程 '{a_name}'，自动重定向恢复")
+                        agent = a_name
+                        break
+
+        if agent not in {"supervisor"} | agent_registry.get_valid_agents():
+            yield {"type": "error", "content": f"HITL 不支持 {agent} 模式"}
+            return
+
+        thread_id = f"{agent}:{session_id}"
+        config = {"configurable": {"thread_id": thread_id}}
+        
+        if agent == "supervisor":
+            graph = await self._ensure_supervisor()
+        else:
+            graph = await self._get_subagent(agent)
+
+        # 确认图确实处于暂停状态
+        state = await graph.aget_state(config)
+        if not state.next:
+            yield {"type": "error", "content": "当前会话没有待确认的操作"}
+            return
+
+        pending_node = state.next[0]
+        logger.info("[HITL] session=%s approved=%s node=%s", session_id, approved, pending_node)
+
+        if agent == "quality":
+            if approved:
+                await graph.aupdate_state(
+                    config,
+                    {"confirmed": True},
+                    as_node="draft_presenter",
+                )
+            else:
+                await graph.aupdate_state(
+                    config,
+                    {"confirmed": False},
+                    as_node="draft_presenter",
+                )
+        else:
+            if not approved:
+                # 以被暂停节点的身份注入"已取消"结果，让图继续走到 aggregator
+                await graph.aupdate_state(
+                    config,
+                    {"code_result": "用户已取消，代码 Agent 执行被中止。"},
+                    as_node=pending_node,
+                )
+
+        # 恢复图（None 表示不注入新消息，从当前 checkpoint 继续）
+        streamed_any = False
+        _USER_FACING_NODES = {"general", "aggregator"} if agent == "supervisor" else None
+        async for msg, _meta in graph.astream(
+            None,
             config=config,
             stream_mode="messages",
         ):
@@ -251,93 +508,17 @@ class AIService:
                 if isinstance(last_msg, AIMessage) and last_msg.content:
                     yield {"type": "chunk", "content": last_msg.content}
 
-        # ── HITL 检测：流结束后检查图是否处于暂停状态 ────────────
-        if agent == "supervisor":
-            state = await graph.aget_state(config)
-            if state.next:
-                pending = state.next[0]
-                node_labels = {"code_agent": "代码执行 Agent"}
-                label = node_labels.get(pending, pending)
-                logger.info("[HITL] session=%s 图暂停，等待确认节点: %s", session_id, pending)
-                yield {
-                    "type": "interrupt",
-                    "node": pending,
-                    "content": f"即将执行「{label}」，是否确认继续？",
-                }
-
-    # ── HITL 恢复接口 ────────────────────────────────────────────
-
-    async def aresume_chat(
-        self,
-        session_id: str,
-        agent: str = "supervisor",
-        approved: bool = True,
-    ):
-        """
-        恢复被 HITL interrupt_before 暂停的 Supervisor 图。
-
-        approved=True  → 继续执行被暂停的节点，流式输出结果
-        approved=False → 向状态注入"已取消"结果，跳过暂停节点直接聚合
-        """
-        if agent != "supervisor":
-            yield {"type": "error", "content": "HITL 仅支持 supervisor 模式"}
-            return
-
-        thread_id = f"{agent}:{session_id}"
-        config = {"configurable": {"thread_id": thread_id}}
-        graph = await self._ensure_supervisor()
-
-        # 确认图确实处于暂停状态
-        state = await graph.aget_state(config)
-        if not state.next:
-            yield {"type": "error", "content": "当前会话没有待确认的操作"}
-            return
-
-        pending_node = state.next[0]
-        logger.info("[HITL] session=%s approved=%s node=%s", session_id, approved, pending_node)
-
-        if not approved:
-            # 以被暂停节点的身份注入"已取消"结果，让图继续走到 aggregator
-            from langchain_core.messages import AIMessage
-            await graph.aupdate_state(
-                config,
-                {"code_result": "用户已取消，代码 Agent 执行被中止。"},
-                as_node=pending_node,
-            )
-
-        # 恢复图（None 表示不注入新消息，从当前 checkpoint 继续）
-        streamed_any = False
-        async for msg, _meta in graph.astream(
-            None,
-            config=config,
-            stream_mode="messages",
-        ):
-            node = _meta.get("langgraph_node", "")
-            if node not in {"general", "aggregator"}:
-                continue
-            if (
-                isinstance(msg, AIMessageChunk)
-                and msg.content
-                and not getattr(msg, "tool_calls", None)
-            ):
-                streamed_any = True
-                yield {"type": "chunk", "content": msg.content}
-
-        # ── 补发逻辑：若流式输出为空，检查最后一条 AI 消息并作为单个 chunk 输出 ──────────
-        if not streamed_any:
-            state = await graph.aget_state(config)
-            messages = state.values.get("messages", [])
-            if messages:
-                last_msg = messages[-1]
-                if isinstance(last_msg, AIMessage) and last_msg.content:
-                    yield {"type": "chunk", "content": last_msg.content}
-
         # 恢复后再次检测是否还有下一个 interrupt
         state = await graph.aget_state(config)
         if state.next:
             pending = state.next[0]
-            node_labels = {"code_agent": "代码执行 Agent"}
-            label = node_labels.get(pending, pending)
+            # 动态合并所有注册 Agent 的 node_labels 以支持热插拔
+            global_node_labels = {}
+            for a_name in agent_registry.get_valid_agents():
+                meta = agent_registry.get_agent(a_name)
+                if meta and meta.node_labels:
+                    global_node_labels.update(meta.node_labels)
+            label = global_node_labels.get(pending, pending)
             yield {
                 "type": "interrupt",
                 "node": pending,

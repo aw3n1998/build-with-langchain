@@ -4,6 +4,7 @@ from langchain_core.messages import ToolMessage, SystemMessage
 from langgraph.graph import StateGraph, END
 from langgraph.graph.message import add_messages
 from agent_lab.app.services.skill_registry import SkillRegistry
+from agent_lab.app.services.stream_events import emit_tool_call, emit_tool_result
 from agent_lab.app.core.logger import get_logger
 
 logger = get_logger("file_agent")
@@ -40,11 +41,23 @@ def build_file_subgraph(llm, registry: SkillRegistry, checkpointer=None):
 
     async def tools_node(state: FileState) -> dict:
         last = state["messages"][-1]
-        tools_map = {n: registry.get(n) for n in state["active_tools"]}
         results = []
         for tc in last.tool_calls:
-            logger.info("[FileAgent] 执行工具: %s", tc["name"])
-            result = await tools_map[tc["name"]].ainvoke(tc["args"])
+            name = tc["name"]
+            logger.info("[FileAgent] 执行工具: %s", name)
+            emit_tool_call(name, tc.get("args"))
+            try:
+                tool = registry.get(name)
+            except Exception:
+                tool = None
+            if tool is None:
+                result = f"[工具不可用] {name}"
+            else:
+                try:
+                    result = await tool.ainvoke(tc["args"])
+                except Exception as e:  # noqa: BLE001
+                    result = f"[工具执行失败] {name}: {type(e).__name__}: {e}"
+            emit_tool_result(name, result)
             results.append(ToolMessage(content=str(result), tool_call_id=tc["id"]))
         return {"messages": results}
 

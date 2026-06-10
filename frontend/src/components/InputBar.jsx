@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 
-const AGENTS = [
+// 兜底列表（后端 /api/agents 未就绪时用）；正常走后端动态列表
+const FALLBACK_AGENTS = [
   { id: 'supervisor', label: 'Supervisor', desc: 'Auto-route to best agent' },
   { id: 'general',   label: 'General',    desc: 'Q&A + RAG, no routing overhead' },
   { id: 'code',      label: 'Code',       desc: 'Code writing & execution' },
@@ -8,6 +9,40 @@ const AGENTS = [
   { id: 'shell',     label: 'Shell',      desc: 'Run safe shell commands' },
   { id: 'batch',     label: 'Batch',      desc: 'Parallel map-reduce tasks' },
 ]
+
+// Slash 命令（在输入框输入 / 唤起）：都是 agent/会话相关命令，不是内容命令
+const SLASH_COMMANDS = [
+  { cmd: '/new',       desc: '开始一个新会话', action: 'new' },
+  { cmd: '/clear',     desc: '清空当前对话内容', action: 'clear' },
+  { cmd: '/workspace', desc: '选择本会话的工作目录', action: 'workspace' },
+  { cmd: '/compact',   desc: '立即压缩上下文（总结旧消息）', action: 'compact' },
+  { cmd: '/agent',     desc: '切换 Agent（supervisor/general/code/file/shell/batch）', action: 'agent' },
+  { cmd: '/think',     desc: '切换思考程度（标准/深度思考）', action: 'think' },
+  { cmd: '/help',      desc: '查看可用命令', action: 'help' },
+]
+
+// 思考程度 → 模型映射
+const THINK_LEVELS = [
+  { id: 'standard', label: '标准',     model: 'deepseek-chat' },
+  { id: 'deep',     label: '深度思考', model: 'deepseek-reasoner' },
+]
+// 回复/上下文长度档位
+const LENGTH_LEVELS = [
+  { id: 'short',  label: '短',  max_tokens: 2048 },
+  { id: 'medium', label: '中',  max_tokens: 4096 },
+  { id: 'long',   label: '长',  max_tokens: 8192 },
+]
+
+// 读取/写入 localStorage 里 supervisor 的 LLM 配置（api.js 发请求时会带上）
+function readSupCfg() {
+  try { return JSON.parse(localStorage.getItem('agentlab_agent_configs') || 'null') || {} }
+  catch { return {} }
+}
+function writeSupCfg(patch) {
+  const cfg = readSupCfg()
+  cfg.supervisor = { ...(cfg.supervisor || {}), ...patch }
+  localStorage.setItem('agentlab_agent_configs', JSON.stringify(cfg))
+}
 
 /**
  * InputBar — 底部输入栏
@@ -17,9 +52,71 @@ const AGENTS = [
  * - textarea 随内容自动增高（最高 160px）
  * - 流式回复期间禁用输入
  */
-export default function InputBar({ onSend, disabled, agent, onAgentChange }) {
+export default function InputBar({ onSend, disabled, agent, onAgentChange,
+                                   onNewChat, onClearChat, onOpenWorkspace, onCompact,
+                                   agents }) {
   const [value, setValue] = useState('')
+  const [slashIdx, setSlashIdx] = useState(0)
   const textareaRef = useRef(null)
+  const AGENTS = (agents && agents.length) ? agents : FALLBACK_AGENTS
+
+  // slash 菜单：输入以 / 开头且无空格时显示匹配命令
+  const showSlash = value.startsWith('/') && !value.includes(' ') && !value.includes('\n')
+  const slashMatches = showSlash
+    ? SLASH_COMMANDS.filter(c => c.cmd.startsWith(value.toLowerCase()))
+    : []
+
+  // 思考程度 / 长度：从已存配置反推当前档位
+  const sup = readSupCfg().supervisor || {}
+  const [think, setThink] = useState(
+    () => (sup.model === 'deepseek-reasoner' ? 'deep' : 'standard'))
+  const [length, setLength] = useState(() => {
+    const mt = sup.max_tokens
+    return mt >= 8192 ? 'long' : mt <= 2048 ? 'short' : 'medium'
+  })
+
+  const onThinkChange = (id) => {
+    setThink(id)
+    const lv = THINK_LEVELS.find(l => l.id === id)
+    writeSupCfg({ model: lv.model })
+  }
+  const onLengthChange = (id) => {
+    setLength(id)
+    const lv = LENGTH_LEVELS.find(l => l.id === id)
+    writeSupCfg({ max_tokens: lv.max_tokens })
+  }
+  const HELP_TEXT = SLASH_COMMANDS.map(c => `${c.cmd} — ${c.desc}`).join('\n')
+
+  // 执行一条命令行（如 "/agent code" / "/new"）。返回 true 表示已作为命令处理。
+  const runCommandLine = (line) => {
+    const [cmd, ...rest] = line.trim().split(/\s+/)
+    const arg = rest.join(' ')
+    switch (cmd) {
+      case '/new':       onNewChat?.(); return true
+      case '/clear':     onClearChat?.(); return true
+      case '/workspace': onOpenWorkspace?.(); return true
+      case '/compact':   onCompact?.(); return true
+      case '/help':      setValue('/'); textareaRef.current?.focus(); return true  // 展开命令菜单
+      case '/agent':
+        if (arg && AGENTS.some(a => a.id === arg)) onAgentChange?.(arg)
+        return true
+      case '/think':
+        onThinkChange(arg === 'deep' || arg === '深度' ? 'deep' : 'standard'); return true
+      default:
+        return false
+    }
+  }
+
+  // slash 菜单选中：无参命令直接执行；带参命令补全成 "/cmd " 等待输入
+  const pickSlash = (c) => {
+    if (c.action === 'agent' || c.action === 'think') {
+      setValue(c.cmd + ' ')
+      textareaRef.current?.focus()
+    } else {
+      runCommandLine(c.cmd)
+      setValue('')
+    }
+  }
 
   useEffect(() => {
     const el = textareaRef.current
@@ -28,14 +125,30 @@ export default function InputBar({ onSend, disabled, agent, onAgentChange }) {
     el.style.height = Math.min(el.scrollHeight, 160) + 'px'
   }, [value])
 
+  useEffect(() => { setSlashIdx(0) }, [value])
+
   const handleSend = useCallback(() => {
     if (!value.trim() || disabled) return
+    // 以 / 开头的整行作为命令处理，不发给 LLM
+    if (value.trim().startsWith('/') && runCommandLine(value)) {
+      setValue('')
+      if (textareaRef.current) textareaRef.current.style.height = 'auto'
+      return
+    }
     onSend(value)
     setValue('')
     if (textareaRef.current) textareaRef.current.style.height = 'auto'
   }, [value, disabled, onSend])
 
   const handleKeyDown = (e) => {
+    // slash 菜单导航
+    if (showSlash && slashMatches.length > 0) {
+      if (e.key === 'ArrowDown') { e.preventDefault(); setSlashIdx(i => (i + 1) % slashMatches.length); return }
+      if (e.key === 'ArrowUp')   { e.preventDefault(); setSlashIdx(i => (i - 1 + slashMatches.length) % slashMatches.length); return }
+      if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) {
+        e.preventDefault(); pickSlash(slashMatches[Math.min(slashIdx, slashMatches.length - 1)]); return
+      }
+    }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       handleSend()
@@ -52,6 +165,26 @@ export default function InputBar({ onSend, disabled, agent, onAgentChange }) {
       background: 'transparent',
     }}>
       <div style={{ maxWidth: 760, margin: '0 auto' }}>
+
+        {/* 思考程度 + 长度（命令改到输入框内 / 唤起）*/}
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8,
+        }}>
+          <span style={{ fontSize: 11, color: 'var(--text-dim)' }}>输入 <code style={{
+            background: 'rgba(255,255,255,0.08)', padding: '1px 5px', borderRadius: 4,
+          }}>/</code> 唤起命令</span>
+          <div style={{ flex: 1 }} />
+          <span style={{ fontSize: 11, color: 'var(--text-dim)', flexShrink: 0 }}>思考</span>
+          <select value={think} onChange={e => onThinkChange(e.target.value)} disabled={disabled}
+            style={selStyle}>
+            {THINK_LEVELS.map(l => <option key={l.id} value={l.id}>{l.label}</option>)}
+          </select>
+          <span style={{ fontSize: 11, color: 'var(--text-dim)', flexShrink: 0 }}>长度</span>
+          <select value={length} onChange={e => onLengthChange(e.target.value)} disabled={disabled}
+            style={selStyle}>
+            {LENGTH_LEVELS.map(l => <option key={l.id} value={l.id}>{l.label}</option>)}
+          </select>
+        </div>
 
         {/* Agent 选择器 */}
         <div style={{
@@ -108,6 +241,31 @@ export default function InputBar({ onSend, disabled, agent, onAgentChange }) {
             — {activeAgent.desc}
           </span>
         </div>
+
+        {/* slash 命令菜单 */}
+        {showSlash && slashMatches.length > 0 && (
+          <div style={{
+            background: 'var(--card)', border: '1px solid var(--border-strong)',
+            borderRadius: 12, marginBottom: 6, overflow: 'hidden',
+            boxShadow: '0 4px 16px rgba(0,0,0,0.4)',
+          }}>
+            {slashMatches.map((c, i) => {
+              const active = i === Math.min(slashIdx, slashMatches.length - 1)
+              return (
+                <div key={c.cmd} onMouseDown={e => { e.preventDefault(); pickSlash(c) }}
+                  onMouseEnter={() => setSlashIdx(i)}
+                  style={{
+                    display: 'flex', alignItems: 'baseline', gap: 10, padding: '8px 14px',
+                    cursor: 'pointer', background: active ? 'rgba(99,102,241,0.15)' : 'transparent',
+                  }}>
+                  <span style={{ fontFamily: 'monospace', fontSize: 13, fontWeight: 600,
+                                 color: 'rgba(165,168,255,0.95)' }}>{c.cmd}</span>
+                  <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{c.desc}</span>
+                </div>
+              )
+            })}
+          </div>
+        )}
 
         {/* 输入卡片 */}
         <div style={{
@@ -202,4 +360,10 @@ export default function InputBar({ onSend, disabled, agent, onAgentChange }) {
       `}</style>
     </footer>
   )
+}
+
+const selStyle = {
+  height: 24, borderRadius: 6, padding: '0 6px', flexShrink: 0,
+  border: '1px solid var(--border-strong)', background: 'var(--card)',
+  color: 'rgba(255,255,255,0.75)', fontSize: 11, cursor: 'pointer',
 }

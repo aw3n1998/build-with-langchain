@@ -1,0 +1,503 @@
+"""
+流水线工具集 —— 把状态机（store）+ 远程 GPU（gpu_client）封装成 LangChain @tool，
+供 video_agent（及 SkillRegistry 语义检索）按需调用。
+
+设计原则（对齐本框架现有 tools.py）：
+  - 每个工具返回**人类可读的字符串**（带 emoji 前缀），便于 Agent 直接转述给用户。
+  - 工具只暴露编排动作，不暴露 SSH 凭据；凭据全部封装在 gpu_client 里走 .env。
+  - 出图（FLUX）→ 选图（HITL）→ 图生视频（Wan2.2）三段对应状态机流转。
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import posixpath
+
+from langchain_core.tools import tool
+
+from agent_lab.app.core.config import settings
+from agent_lab.app.core.logger import get_logger
+from agent_lab.app.pipeline.runtime import (
+    candidates_dir,
+    get_workspace,
+    is_within_known_root,
+    video_dir,
+)
+from agent_lab.app.pipeline.store import SceneState, get_store
+from agent_lab.app.pipeline.gpu_client import (
+    GpuConfigError,
+    GpuRunError,
+    get_gpu_client,
+)
+
+logger = get_logger("pipeline.tools")
+
+
+# ── 本地素材：读小说/剧本所在文件夹 ───────────────────────────────
+def _resolve_in_workspace(path: str) -> str | None:
+    """把用户给的路径解析成绝对路径，并校验必须落在工作目录（已知根）内。"""
+    ws = get_workspace()
+    abs_path = path if os.path.isabs(path) else os.path.join(ws, path)
+    abs_path = os.path.abspath(abs_path)
+    return abs_path if is_within_known_root(abs_path) else None
+
+
+def _is_secret(path: str) -> bool:
+    """敏感文件防护：禁止读取 .env / 私钥 / 凭据类文件。"""
+    try:
+        from agent_lab.app.services.tools import is_secret_path
+        return is_secret_path(path)
+    except Exception:
+        return False
+
+
+def _read_text_smart(abs_path: str) -> str:
+    """智能解码文本：UTF-8(含BOM) → GB18030(GBK/GB2312) → UTF-16 → 兜底替换。
+
+    中文小说常见 GBK/ANSI 编码，写死 UTF-8 会整篇乱码，故多编码回退。
+    """
+    with open(abs_path, "rb") as f:
+        raw = f.read()
+    # 可选：有 chardet 就用它先猜
+    try:
+        import chardet
+        guess = chardet.detect(raw[:200000]).get("encoding")
+    except Exception:
+        guess = None
+    for enc in [guess, "utf-8-sig", "gb18030", "utf-16", "big5"]:
+        if not enc:
+            continue
+        try:
+            return raw.decode(enc)
+        except (UnicodeDecodeError, LookupError):
+            continue
+    return raw.decode("utf-8", errors="replace")  # 最后兜底
+
+
+def _read_docx(abs_path: str) -> str:
+    """零依赖读取 .docx 正文：docx 本质是 zip，解 word/document.xml。"""
+    import re
+    import zipfile
+
+    with zipfile.ZipFile(abs_path) as z:
+        xml = z.read("word/document.xml").decode("utf-8", "replace")
+    # 段落 </w:p> 转换行；<w:t> 文本保留；其余标签去掉
+    xml = re.sub(r"</w:p>", "\n", xml)
+    xml = re.sub(r"<[^>]+>", "", xml)
+    return xml
+
+
+@tool
+def list_workspace_files(path: str = "", pattern: str = "", subdir: str = "") -> str:
+    """列出工作目录（含其任意子目录）下的文件，用于找小说/剧本/素材。
+
+    支持进入子目录：path 可以是相对工作目录的子路径（如 "视频素材/即梦"）
+    或工作目录内的绝对路径（如 "F:\\小说\\小说\\视频素材\\即梦"）。
+
+    Args:
+        path: 要列的目录，相对工作目录或工作目录内的绝对路径；留空=工作目录根。
+        pattern: 可选通配，如 *.txt / *.docx / *小说*。
+        subdir: path 的别名（兼容）。
+    """
+    import glob as _glob
+
+    target = path or subdir
+    base = _resolve_in_workspace(target) if target else get_workspace()
+    if base is None or not os.path.isdir(base):
+        return f"目录不存在或不在工作目录内: {target or '(根)'}"
+    pat = os.path.join(base, pattern or "*")
+    entries = [e for e in sorted(_glob.glob(pat)) if not _is_secret(e)]  # 隐藏密钥/凭据
+    if not entries:
+        return f"（{base} 下没有匹配 {pattern or '*'} 的文件）"
+    lines = [f"{base}:"]
+    for e in entries:
+        name = os.path.basename(e)
+        if os.path.isdir(e):
+            lines.append(f"  {name}/")
+        else:
+            kb = os.path.getsize(e) / 1024
+            lines.append(f"  {name} ({kb:.0f} KB)")
+    lines.append("可用 read_text_file 读取某个文件内容（小说/剧本）。")
+    return "\n".join(lines)
+
+
+@tool
+def read_text_file(path: str, max_chars: int = 8000, offset: int = 0) -> str:
+    """读取工作目录下的文本文件内容（小说/剧本/设定），供 Agent 参考来写分镜与提示词。
+
+    支持 .txt / .md / .docx；长文按 max_chars 截断，可用 offset 继续读后续部分。
+
+    Args:
+        path: 文件路径，相对工作目录或绝对路径（须在工作目录内）。
+        max_chars: 单次最多返回字符数（默认 8000，避免一次塞爆上下文）。
+        offset: 从第几个字符开始读（用于分段读长篇小说）。
+    """
+    abs_path = _resolve_in_workspace(path)
+    if abs_path is None:
+        return f"文件不在工作目录内（出于安全只能读工作目录下的文件）: {path}"
+    if _is_secret(path) or _is_secret(abs_path):
+        return "出于安全，禁止读取密钥/凭据类文件（.env、私钥、credentials 等）。"
+    if not os.path.isfile(abs_path):
+        return f"文件不存在: {abs_path}"
+    ext = os.path.splitext(abs_path)[1].lower()
+    try:
+        if ext == ".docx":
+            text = _read_docx(abs_path)
+        elif ext in (".txt", ".md", ".markdown", ".text", ""):
+            text = _read_text_smart(abs_path)
+        else:
+            return f"暂不支持的文件类型 {ext}（支持 .txt/.md/.docx）。"
+    except Exception as e:  # noqa: BLE001
+        return f"读取失败: {type(e).__name__}: {e}"
+
+    total = len(text)
+    chunk = text[offset: offset + max_chars]
+    head = f"{os.path.basename(abs_path)}（共 {total} 字，本次 {offset}~{offset + len(chunk)}）:\n"
+    tail = ""
+    if offset + len(chunk) < total:
+        tail = f"\n…（还有 {total - offset - len(chunk)} 字，继续读可设 offset={offset + len(chunk)}）"
+    return head + chunk + tail
+
+
+# ── 项目 / 分镜管理 ────────────────────────────────────────────────
+@tool
+def create_video_project(title: str, novel_text: str = "") -> str:
+    """新建一个"小说转短剧"项目。返回项目 ID，后续加分镜/出图都要用到它。
+
+    Args:
+        title: 项目标题（如"第一章 One Coat Between Us"）。
+        novel_text: 可选，原文片段，便于后续拆分分镜。
+    """
+    proj = get_store().create_project(title=title, novel_text=novel_text)
+    return f"已创建项目 [{proj['id']}] 《{proj['title']}》。下一步：用 add_scene 添加分镜。"
+
+
+@tool
+def add_scene(
+    project_id: str,
+    scene_number: int,
+    narration: str = "",
+    image_prompt: str = "",
+    motion_prompt: str = "",
+    title: str = "",
+) -> str:
+    """给项目添加一个分镜（镜头）。状态初始为 DRAFT。
+
+    Args:
+        project_id: create_video_project 返回的项目 ID。
+        scene_number: 镜头序号（决定成片拼接顺序）。
+        narration: 旁白/台词。
+        image_prompt: 出图提示词（FLUX 用，含触发词如 ch4r_cael）。
+        motion_prompt: 运镜/动态提示词（Wan2.2 图生视频用）。
+        title: 镜头简短标题。
+    """
+    scene = get_store().add_scene(
+        project_id=project_id,
+        scene_number=scene_number,
+        narration=narration,
+        image_prompt=image_prompt,
+        motion_prompt=motion_prompt,
+        title=title,
+    )
+    return (
+        f"已添加分镜 [{scene['id']}] #{scene['scene_number']} {scene['title']}"
+        f"（状态 {scene['state']}）。"
+    )
+
+
+@tool
+def list_project_scenes(project_id: str) -> str:
+    """列出项目下所有分镜及其状态、候选图数量、视频路径。"""
+    try:
+        st = get_store().status(project_id)
+    except ValueError as e:
+        return f"{e}"
+    lines = [f"项目《{st['project']['title']}》[{project_id}]:"]
+    for s in st["scenes"]:
+        vid = f"{s['video_path']}" if s.get("video_path") else ""
+        lines.append(
+            f"  #{s['scene_number']} {s['title'] or '(无题)'} "
+            f"[{s['id']}] 状态={s['state']} 候选图={s['num_candidates']}{vid}"
+        )
+    if not st["scenes"]:
+        lines.append("  （暂无分镜）")
+    return "\n".join(lines)
+
+
+# ── 出图（FLUX） ──────────────────────────────────────────────────
+@tool
+def register_candidate_image(scene_id: str, remote_image_path: str) -> str:
+    """把一张已存在于 GPU 服务器上的候选图登记进某分镜（不触发出图，用于已有图）。
+
+    适用：FLUX 已离线生成好若干 scene_*.png，直接登记为候选供选图。
+
+    Args:
+        scene_id: 目标分镜 ID。
+        remote_image_path: 服务器上图片绝对路径，如 /root/autodl-tmp/cael_scenes/scene_10.png。
+    """
+    store = get_store()
+    asset = store.add_asset(scene_id=scene_id, storage_path=remote_image_path, asset_type="IMAGE")
+    store.set_scene_state(scene_id, SceneState.PENDING_HUMAN_SELECTION, force=True)
+    return (
+        f"已登记候选图 [{asset['id']}] → {remote_image_path}。"
+        f"分镜进入 PENDING_HUMAN_SELECTION，等待选图（select_candidate）。"
+    )
+
+
+@tool
+def request_image_params(scene_id: str, image_prompt: str = "") -> str:
+    """【出图前必调】请求用户确认出图参数：返回一个参数卡占位，前端会弹出可编辑的参数表单
+    （提示词 / 张数 / 步数 / guidance / 尺寸 / seed），由用户改好点"出图"后才真正生成。
+
+    用户说"出图/生成候选图/出几张图"时，先调用本工具弹参数卡，**不要直接** generate_candidates。
+
+    Args:
+        scene_id: 目标分镜 ID。
+        image_prompt: 出图提示词；留空则用分镜自带的 image_prompt。
+    """
+    store = get_store()
+    scene = store.get_scene(scene_id)
+    if not scene:
+        return f"分镜不存在: {scene_id}"
+    prompt = image_prompt or scene.get("image_prompt") or ""
+    # 机器可读载荷：流式层会解析成 param_form 事件弹卡片，并从展示文本里剥掉这一行。
+    payload = {
+        "scene_id": scene_id,
+        "image_prompt": prompt,
+        "n": settings.FLUX_N,
+        "steps": settings.FLUX_STEPS,
+        "guidance": settings.FLUX_GUIDANCE,
+        "width": settings.FLUX_WIDTH,
+        "height": settings.FLUX_HEIGHT,
+        "seed": -1,
+        "offload": settings.FLUX_OFFLOAD,
+    }
+    return "已弹出出图参数卡，请在卡片里确认参数后点「出图」。\n" \
+           f"PARAM_FORM::{json.dumps(payload, ensure_ascii=False)}"
+
+
+@tool
+def generate_candidates(
+    scene_id: str,
+    image_prompt: str = "",
+    n: int = 0,
+    steps: int = 0,
+    guidance: float = -1.0,
+    width: int = 0,
+    height: int = 0,
+    seed: int = -1,
+    offload: str = "",
+) -> str:
+    """调用远程 FLUX 为分镜生成 N 张候选图（多种子），全部登记进状态库并拉回工作目录供选图。
+
+    通常由参数卡确认后触发（见 request_image_params）。分镜推进到 PENDING_HUMAN_SELECTION。
+
+    Args:
+        scene_id: 目标分镜 ID。
+        image_prompt: 出图提示词；留空则用分镜自带的 image_prompt（含触发词如 ch4r_cael）。
+        n: 出图张数；0=用默认（settings.FLUX_N）。
+        steps: 采样步数；0=默认。
+        guidance: 提示词贴合度；<0=默认。
+        width/height: 尺寸；0=默认。
+        seed: 起始种子；-1=随机。
+        offload: 显存策略 model/sequential；空=默认。
+    """
+    store = get_store()
+    scene = store.get_scene(scene_id)
+    if not scene:
+        return f"分镜不存在: {scene_id}"
+    prompt = image_prompt or scene.get("image_prompt") or ""
+    if not prompt:
+        return "没有出图提示词（image_prompt 为空）。"
+    out_remote_dir = posixpath.join(settings.GPU_FLUX_OUT_ROOT, scene_id)
+    try:
+        store.set_scene_state(scene_id, SceneState.PENDING_FLUX_GEN, force=True)
+        remote_imgs = get_gpu_client().generate_candidates(
+            prompt, out_remote_dir,
+            n=(n or None),
+            steps=(steps or None),
+            guidance=(None if guidance < 0 else guidance),
+            width=(width or None),
+            height=(height or None),
+            seed=seed,
+            offload=(offload or None),
+        )
+    except GpuConfigError as e:
+        return f"GPU 未配置: {e}"
+    except GpuRunError as e:
+        store.set_scene_state(scene_id, SceneState.FAILED, force=True)
+        return f"出图失败: {e}"
+
+    local_dir = candidates_dir(scene_id)  # 落到当前工作目录
+    store.set_scene_state(scene_id, SceneState.PENDING_HUMAN_SELECTION, force=True)
+    lines = [f"FLUX 出 {len(remote_imgs)} 张候选 → 分镜 {scene_id} 进入 PENDING_HUMAN_SELECTION:"]
+    img_markers = []  # 机器可读：流式层解析成 image 事件
+    for rp in remote_imgs:
+        asset = store.add_asset(scene_id=scene_id, storage_path=rp, asset_type="IMAGE")
+        name = posixpath.basename(rp)
+        try:
+            lp = os.path.join(local_dir, name)
+            get_gpu_client().download(rp, lp)
+            lines.append(f"  [{asset['id']}] {name} {lp}")
+            img_markers.append(f"IMGFILE::{scene_id}::{asset['id']}::{lp}")
+        except Exception as e:  # noqa: BLE001 - 下载失败不影响登记
+            lines.append(f"  [{asset['id']}] {name} 下载失败: {e}")
+    lines.append("下一步：点选一张候选图即可（select_candidate）。")
+    lines.extend(img_markers)
+    return "\n".join(lines)
+
+
+# ── 选图（HITL） ──────────────────────────────────────────────────
+@tool
+def list_candidates(scene_id: str) -> str:
+    """列出某分镜的所有候选图（含选中标记），供人/Agent 决策选哪张。"""
+    assets = get_store().list_assets(scene_id, asset_type="IMAGE")
+    if not assets:
+        return f"（分镜 {scene_id} 暂无候选图）"
+    lines = [f"分镜 {scene_id} 候选图:"]
+    for a in assets:
+        mark = "选中" if a["is_selected"] else ""
+        lines.append(f"  [{a['id']}] {a['storage_path']} ({a['approval_status']}){mark}")
+    return "\n".join(lines)
+
+
+@tool
+def select_candidate(scene_id: str, asset_id: str) -> str:
+    """HITL 选图：选定一张候选图，分镜推进到 PENDING_VIDEO_GEN（可出视频）。
+
+    Args:
+        scene_id: 分镜 ID。
+        asset_id: 选中的候选图 asset ID（来自 list_candidates）。
+    """
+    try:
+        scene = get_store().select_asset(scene_id, asset_id)
+    except ValueError as e:
+        return f"{e}"
+    return f"已选定 {asset_id}，分镜 {scene_id} → {scene['state']}。下一步：render_scene_video。"
+
+
+# ── 图生视频（Wan2.2） ────────────────────────────────────────────
+@tool
+def request_video_params(scene_id: str, motion_prompt: str = "") -> str:
+    """【出视频前必调】请求用户确认出视频参数：前端会弹出可编辑的参数表单
+    （运镜提示词 / 分辨率 / 帧数 / 采样步数），由用户改好点"出视频"后才真正生成。
+
+    用户说"出视频/生成视频/图生视频"时，先调用本工具弹参数卡，**不要直接** render_scene_video。
+
+    Args:
+        scene_id: 目标分镜 ID（须已 select_candidate 选好图）。
+        motion_prompt: 运镜/动态提示词；留空则用分镜自带的 motion_prompt。
+    """
+    store = get_store()
+    scene = store.get_scene(scene_id)
+    if not scene:
+        return f"分镜不存在: {scene_id}"
+    if scene["state"] != SceneState.PENDING_VIDEO_GEN.value:
+        return (f"分镜当前状态 {scene['state']}，需先选图（select_candidate）"
+                f"进入 PENDING_VIDEO_GEN 才能出视频。")
+    prompt = motion_prompt or scene.get("motion_prompt") or "缓慢推镜，电影质感，自然光影。"
+    payload = {
+        "scene_id": scene_id,
+        "motion_prompt": prompt,
+        "size": settings.WAN_SIZE,
+        "frame_num": settings.WAN_FRAME_NUM,
+        "sample_steps": settings.WAN_SAMPLE_STEPS,
+    }
+    return ("已弹出出视频参数卡，请在卡片里确认参数后点「出视频」。\n"
+            f"VIDEO_PARAM_FORM::{json.dumps(payload, ensure_ascii=False)}")
+
+
+@tool
+def render_scene_video(
+    scene_id: str,
+    motion_prompt: str = "",
+    size: str = "",
+    frame_num: int = 0,
+    sample_steps: int = 0,
+    download: bool = True,
+) -> str:
+    """对已选图的分镜调用远程 Wan2.2-TI2V-5B 出图生视频 mp4，完成后下载回工作目录。
+
+    通常由参数卡确认后触发（见 request_video_params）。需先 select_candidate 选好图。
+
+    Args:
+        scene_id: 分镜 ID。
+        motion_prompt: 运镜/动态提示词；留空则用分镜自带的 motion_prompt。
+        size: 分辨率（如 704*1280 竖屏 / 1280*704 横屏）；空=默认。
+        frame_num: 帧数（越多越长越吃显存，24G 建议 ≤25）；0=默认。
+        sample_steps: 采样步数；0=默认。
+        download: 是否把成片下载到工作目录 video_out。
+    """
+    store = get_store()
+    scene = store.get_scene(scene_id)
+    if not scene:
+        return f"分镜不存在: {scene_id}"
+    if scene["state"] != SceneState.PENDING_VIDEO_GEN.value:
+        return (
+            f"分镜当前状态 {scene['state']}，需先 select_candidate 选图"
+            f"（进入 PENDING_VIDEO_GEN）才能出视频。"
+        )
+    asset = store.get_asset(scene["selected_asset_id"]) if scene.get("selected_asset_id") else None
+    if not asset:
+        return "未找到选中的候选图。"
+    prompt = motion_prompt or scene.get("motion_prompt") or "缓慢推镜，电影质感，自然光影。"
+    out_remote = posixpath.join(
+        settings.GPU_OUTPUT_DIR, f"{scene_id}_{scene['scene_number']}.mp4"
+    )
+    try:
+        get_gpu_client().generate_video(
+            asset["storage_path"], prompt, out_remote,
+            size=(size or None),
+            frame_num=(frame_num or None),
+            sample_steps=(sample_steps or None),
+        )
+    except GpuConfigError as e:
+        return f"GPU 未配置: {e}"
+    except GpuRunError as e:
+        store.set_scene_state(scene_id, SceneState.FAILED, force=True)
+        return f"图生视频失败: {e}"
+
+    store.set_scene_video(scene_id, out_remote)
+    store.set_scene_state(scene_id, SceneState.COMPLETED)
+    msg = f"Wan2.2 出片完成 → {out_remote}，分镜 {scene_id} 标记 COMPLETED。"
+
+    vid_marker = ""
+    if download:
+        local_dir = video_dir()  # 落到当前工作目录
+        local_path = os.path.join(local_dir, f"{scene['scene_number']:02d}_{scene_id}.mp4")
+        try:
+            get_gpu_client().download(out_remote, local_path)
+            msg += f"\n已下载到本机: {local_path}"
+            vid_marker = f"\nVIDFILE::{scene_id}::{local_path}"  # 供前端内嵌播放
+        except Exception as e:  # noqa: BLE001 - 下载失败不应回滚渲染结果
+            msg += f"\n下载失败（成片仍在服务器）: {e}"
+    return msg + vid_marker
+
+
+@tool
+def project_status(project_id: str) -> str:
+    """查看整个项目的进度汇总（JSON），含每个分镜状态与产物。"""
+    try:
+        st = get_store().status(project_id)
+    except ValueError as e:
+        return f"{e}"
+    return json.dumps(st, ensure_ascii=False, indent=2)
+
+
+# ── 分组导出（供 ai_service 注入 SkillRegistry） ───────────────────
+pipeline_tools = [
+    list_workspace_files,
+    read_text_file,
+    create_video_project,
+    add_scene,
+    list_project_scenes,
+    register_candidate_image,
+    request_image_params,
+    generate_candidates,
+    list_candidates,
+    select_candidate,
+    request_video_params,
+    render_scene_video,
+    project_status,
+]

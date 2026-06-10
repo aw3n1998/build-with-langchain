@@ -34,6 +34,13 @@ venv.bak/
 *.png
 *.jpg
 *.jpeg
+*.mp4
+*.webm
+*.mov
+
+# Agent 运行时工作目录（默认工作目录 + 每个工作目录的 .agent 数据，运行时生成）
+agent_workspace/
+.agent/
 
 # FastEmbed 模型缓存（首次运行自动下载，体积大，不属于代码）
 fastembed_cache/

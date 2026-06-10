@@ -21,6 +21,7 @@ services:
     volumes:
       - fastembed_cache:/app/.cache/fastembed   # 模型文件持久化，避免重启重新下载
       - agent_workspace:/app/workspace           # Agent 工作目录（沙箱化文件操作）
+      - D:\epms-cli:/app/epms-cli                # 挂载宿主机 CLI 模块到容器内
     depends_on:
       standalone:
         condition: service_healthy  # 等 Milvus 健康检查通过再启动

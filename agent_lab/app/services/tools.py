@@ -27,15 +27,59 @@ logger = get_logger("tools")
 _WORKSPACE = os.environ.get("AGENT_WORKSPACE", "/app/workspace")
 
 
+def _workspace_root() -> str:
+    """当前文件沙箱根：用户在网页选定的工作目录优先，否则用默认 _WORKSPACE。"""
+    try:
+        from agent_lab.app.pipeline.runtime import explicit_workspace
+        ws = explicit_workspace()
+        if ws:
+            return ws
+    except Exception:
+        pass
+    return _WORKSPACE
+
+
 def _safe_path(raw: str) -> str | None:
     """
     将用户传入路径解析为绝对路径，并检查是否在白名单目录内。
     返回 None 表示路径不合法。
     """
-    abs_path = os.path.realpath(os.path.join(_WORKSPACE, raw))
-    if not abs_path.startswith(os.path.realpath(_WORKSPACE)):
+    root = _workspace_root()
+    abs_path = os.path.realpath(os.path.join(root, raw))
+    if not abs_path.startswith(os.path.realpath(root)):
         return None
     return abs_path
+
+
+# ── 敏感文件防护：禁止 Agent 读取密钥/凭据类文件 ─────────────────────────────
+_SECRET_FILENAMES: frozenset[str] = frozenset({
+    ".env", ".env.local", ".env.production", ".env.development",
+    "id_rsa", "id_dsa", "id_ecdsa", "id_ed25519",
+    "authorized_keys", "known_hosts",
+    ".netrc", ".npmrc", ".pypirc", ".git-credentials", ".htpasswd",
+    "credentials", "secrets.json", "secrets.yaml", "secrets.yml",
+})
+_SECRET_EXTS: frozenset[str] = frozenset({
+    ".pem", ".key", ".pfx", ".p12", ".ppk", ".keystore", ".jks", ".kdbx",
+})
+_SECRET_DIRS: frozenset[str] = frozenset({".ssh", ".aws", ".gnupg", ".azure", ".kube"})
+
+
+def is_secret_path(path: str) -> bool:
+    """该路径是否指向敏感文件（密钥/凭据/.env 等），是则禁止读取。"""
+    if not path:
+        return False
+    norm = path.replace("\\", "/")
+    name = os.path.basename(norm.rstrip("/")).lower()
+    ext = os.path.splitext(name)[1]
+    if name in _SECRET_FILENAMES or name.startswith(".env"):
+        return True
+    if ext in _SECRET_EXTS:
+        return True
+    parts = {p.lower() for p in norm.split("/")}
+    if parts & _SECRET_DIRS:
+        return True
+    return False
 
 
 # ── Shell 命令白名单 ───────────────────────────────────────────────────────────
@@ -55,8 +99,7 @@ _ALLOWED_COMMANDS: frozenset[str] = frozenset({
     "git",
     # Python 包查询（只读子命令）
     "pip", "pip3",
-    # 环境
-    "env", "printenv",
+    # 注意：故意不放 env / printenv —— 避免泄露进程环境变量
 })
 
 # git 允许的子命令
@@ -130,6 +173,11 @@ def _validate_command(cmd_str: str) -> tuple[bool, str]:
 
     base_cmd = os.path.basename(tokens[0]).lower()
 
+    # 敏感文件防护：任一参数指向密钥/凭据文件 → 拒绝（防 cat .env / id_ed25519 等）
+    for tok in tokens[1:]:
+        if is_secret_path(tok):
+            return False, "命令涉及敏感文件（密钥/凭据/.env），已被安全策略拒绝"
+
     # 封禁命令检查
     if base_cmd in _BLOCKED_COMMANDS:
         return False, f"命令 '{base_cmd}' 已被安全策略封禁"
@@ -187,11 +235,11 @@ def list_files(directory: str = ".") -> str:
     """
     safe = _safe_path(directory)
     if safe is None:
-        return f"🚫 路径访问被拒绝：只允许访问工作目录 {_WORKSPACE} 内的路径。"
+        return f"路径访问被拒绝：只允许访问工作目录 {_workspace_root()} 内的路径。"
     try:
         if not os.path.exists(safe):
             os.makedirs(safe, exist_ok=True)
-        files = os.listdir(safe)
+        files = [f for f in os.listdir(safe) if not is_secret_path(f)]  # 隐藏密钥/凭据文件
         return "\n".join(files) if files else "该目录为空。"
     except Exception as exc:
         return f"读取目录失败: {exc}"
@@ -208,10 +256,21 @@ def read_file_content(file_path: str) -> str:
     """
     safe = _safe_path(file_path)
     if safe is None:
-        return f"🚫 路径访问被拒绝：只允许读取工作目录 {_WORKSPACE} 内的文件。"
+        return f"路径访问被拒绝：只允许读取工作目录 {_workspace_root()} 内的文件。"
+    if is_secret_path(file_path) or is_secret_path(safe):
+        return "出于安全，禁止读取密钥/凭据类文件（.env、私钥、credentials 等）。"
     try:
-        with open(safe, "r", encoding="utf-8") as f:
-            content = f.read(2000)
+        with open(safe, "rb") as f:
+            raw = f.read(8000)
+        # 多编码回退（中文 txt 常为 GBK/ANSI，写死 UTF-8 会乱码）
+        for enc in ("utf-8-sig", "gb18030", "utf-16", "big5"):
+            try:
+                content = raw.decode(enc)[:2000]
+                break
+            except (UnicodeDecodeError, LookupError):
+                content = None
+        if content is None:
+            content = raw.decode("utf-8", errors="replace")[:2000]
         return content if content else "（文件为空）"
     except Exception as exc:
         return f"读取文件失败: {exc}"
@@ -243,14 +302,14 @@ def run_shell_command(command: str) -> str:
     """
     在白名单沙箱中执行 shell 命令，仅支持只读/查询类命令。
 
-    ✅ 允许的命令类别：
+    允许的命令类别：
       - 文件查看: ls, cat, head, tail, wc, find, stat, du, df
       - 文本处理: grep, awk, sort, uniq, cut, diff
       - 系统信息: pwd, date, echo, uname, ps, free, uptime, whoami
       - 版本控制: git status/log/diff/branch/show（只读子命令）
       - 包查询:   pip list / pip show / pip freeze
 
-    🚫 禁止的操作：
+    禁止的操作：
       - 写文件（rm、mv、cp、chmod、>重定向）
       - 网络操作（curl、wget、nc、ssh）
       - 启动解释器（python、bash、sh、node）
@@ -263,7 +322,7 @@ def run_shell_command(command: str) -> str:
 
     ok, reason = _validate_command(command)
     if not ok:
-        return f"🚫 命令被拒绝: {reason}"
+        return f"命令被拒绝: {reason}"
 
     try:
         tokens = shlex.split(command)
@@ -273,7 +332,7 @@ def run_shell_command(command: str) -> str:
             text=True,
             timeout=10,
             shell=False,      # 不使用 shell，避免 shell 注入
-            cwd=_WORKSPACE,   # 工作目录限制
+            cwd=_workspace_root(),   # 工作目录限制（用户选定优先）
             env={              # 最小化环境变量，不暴露主进程 env
                 "PATH": "/usr/local/bin:/usr/bin:/bin",
                 "HOME": "/tmp",
@@ -281,9 +340,9 @@ def run_shell_command(command: str) -> str:
             },
         )
     except subprocess.TimeoutExpired:
-        return "⏱️ 命令执行超时（超过 10 秒）"
+        return "命令执行超时（超过 10 秒）"
     except FileNotFoundError:
-        return f"❌ 命令不存在: {shlex.split(command)[0]}"
+        return f"命令不存在: {shlex.split(command)[0]}"
     except Exception as exc:
         return f"执行失败: {exc}"
 
@@ -291,7 +350,7 @@ def run_shell_command(command: str) -> str:
     stderr = result.stderr
 
     if result.returncode != 0:
-        return f"❌ 命令返回非零状态码 ({result.returncode}):\n{stderr or output}"
+        return f"命令返回非零状态码 ({result.returncode}):\n{stderr or output}"
 
     if not output.strip():
         return "（命令执行完毕，无输出）"
@@ -299,7 +358,7 @@ def run_shell_command(command: str) -> str:
     if len(output) > 4000:
         output = output[:4000] + "\n... [输出过长，已截断]"
 
-    return f"✅ 执行成功:\n{output}"
+    return f"执行成功:\n{output}"
 
 
 # ── 按职责分组，供各 Sub-Agent 按需注入 ────────────────────────────────────────

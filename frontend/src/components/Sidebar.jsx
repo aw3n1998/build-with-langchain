@@ -56,7 +56,6 @@ export default function Sidebar({ ragStatus, onStatusChange }) {
       {/* ── Logo ── */}
       <div className="px-5 py-5 border-b border-slate-700">
         <div className="flex items-center gap-2">
-          <span className="text-2xl">🤖</span>
           <div>
             <h1 className="text-base font-bold text-white leading-tight">AgentLab</h1>
             <p className="text-xs text-slate-500">AI Agent + RAG 开源项目</p>
@@ -82,16 +81,12 @@ export default function Sidebar({ ragStatus, onStatusChange }) {
 
           {ragStatus.rag_connected && (
             <div className="flex items-center gap-2 text-sm text-slate-400">
-              <span>📚</span>
-              <span>
-                {ragStatus.chunk_count} 个 chunk
-              </span>
+              <span>{ragStatus.chunk_count} 个 chunk</span>
             </div>
           )}
 
           {ragStatus.model && (
             <div className="flex items-center gap-2 text-sm text-slate-400">
-              <span>🧠</span>
               <span className="font-mono text-xs truncate">{ragStatus.model}</span>
             </div>
           )}
@@ -117,7 +112,7 @@ export default function Sidebar({ ragStatus, onStatusChange }) {
                     : 'text-slate-400 hover:text-slate-200'
                 }`}
               >
-                {t === 'file' ? '📄 上传文件' : '📝 导入文本'}
+                {t === 'file' ? '上传文件' : '导入文本'}
               </button>
             ))}
           </div>
@@ -150,7 +145,7 @@ export default function Sidebar({ ragStatus, onStatusChange }) {
                               : 'border-slate-600 hover:border-blue-500 hover:bg-blue-500/5 text-slate-400 hover:text-slate-200'
                             }`}
               >
-                <span className="text-3xl mb-1">{busy ? '⏳' : '📤'}</span>
+                <span className="text-xs mb-1 text-slate-500">{busy ? '上传中' : '选择文件'}</span>
                 <span className="text-xs font-medium">
                   {busy ? '上传中...' : '点击或拖拽文件到此处'}
                 </span>

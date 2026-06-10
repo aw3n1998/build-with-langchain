@@ -5,6 +5,7 @@ from agent_lab.app.agents.state import SupervisorState
 from agent_lab.app.agents.code_agent import build_code_subgraph
 from agent_lab.app.agents.file_agent import build_file_subgraph
 from agent_lab.app.services.tools import code_tools, file_tools, shell_tools, general_tools
+from agent_lab.app.services.stream_events import emit_tool_call, emit_tool_result
 from agent_lab.app.services.skill_registry import SkillRegistry
 from agent_lab.app.core.logger import get_logger
 
@@ -128,9 +129,14 @@ def build_supervisor(llms: dict, registry: SkillRegistry):
         while getattr(messages[-1], "tool_calls", None):
             tool_results = []
             for tc in messages[-1].tool_calls:
+                emit_tool_call(tc["name"], tc.get("args"))
                 tool = tools_map.get(tc["name"])
                 if tool:
-                    res = await tool.ainvoke(tc["args"])
+                    try:
+                        res = await tool.ainvoke(tc["args"])
+                    except Exception as e:  # noqa: BLE001
+                        res = f"[工具执行失败] {tc['name']}: {type(e).__name__}: {e}"
+                    emit_tool_result(tc["name"], res)
                     tool_results.append(ToolMessage(content=str(res), tool_call_id=tc["id"]))
             messages.extend(tool_results)
             response = await llm_with_tools.ainvoke([_shell_prompt] + state["messages"] + messages)
@@ -155,7 +161,21 @@ def build_supervisor(llms: dict, registry: SkillRegistry):
         while getattr(messages[-1], "tool_calls", None):
             tool_results = []
             for tc in messages[-1].tool_calls:
-                result = await tools_map[tc["name"]].ainvoke(tc["args"])
+                emit_tool_call(tc["name"], tc.get("args"))
+                tool = tools_map.get(tc["name"])
+                if tool is None:  # 召回里没有时回退全局 registry，避免 KeyError 崩图
+                    try:
+                        tool = registry.get(tc["name"])
+                    except Exception:
+                        tool = None
+                if tool is None:
+                    result = f"[工具不可用] {tc['name']}"
+                else:
+                    try:
+                        result = await tool.ainvoke(tc["args"])
+                    except Exception as e:  # noqa: BLE001
+                        result = f"[工具执行失败] {tc['name']}: {type(e).__name__}: {e}"
+                emit_tool_result(tc["name"], result)
                 tool_results.append(ToolMessage(content=str(result), tool_call_id=tc["id"]))
             messages.extend(tool_results)
             follow_up = await llm_dynamic.ainvoke(
@@ -194,25 +214,26 @@ def build_supervisor(llms: dict, registry: SkillRegistry):
         长对话压缩节点，每次对话入口自动触发检查。
 
         原理（和 Claude Code /compact 一样）：
-          - 消息数 ≤ 阈值：直接跳过，不做任何处理
-          - 消息数 > 阈值：把旧消息交给 LLM 总结成一段摘要，
+          - 真实 token 用量 < 窗口×比例：跳过
+          - 达到阈值：把旧消息交给 LLM 总结成一段摘要，
             用摘要替换旧消息，只保留最近几条保持连贯性
 
-        效果：无论对话多长，传给 LLM 的 token 数始终可控。
+        触发以**真实 token 用量**为准（与前端进度条一致），而非消息条数。
         """
-        messages = state["messages"]
-        # 阈值：保留最近 6 条，超过 20 条总量时触发压缩
-        KEEP_RECENT = 6
-        TRIGGER_AT  = 20
+        from agent_lab.app.services.context_meter import usage
 
-        if len(messages) <= TRIGGER_AT:
-            return {}   # 消息不多，直接跳过
+        messages = state["messages"]
+        KEEP_RECENT = 6
+
+        u = usage(messages)
+        if not u["will_compact"] or len(messages) <= KEEP_RECENT:
+            return {}   # 未达上下文窗口阈值，跳过
 
         to_compress = messages[:-KEEP_RECENT]
         recent      = messages[-KEEP_RECENT:]
 
-        logger.info("[Summarizer] 消息数 %d 超过阈值，开始压缩 %d 条旧消息",
-                    len(messages), len(to_compress))
+        logger.info("[Summarizer] token %d/%d 达阈值 %d，压缩 %d 条旧消息",
+                    u["tokens"], u["window"], u["trigger_tokens"], len(to_compress))
 
         summary = await sup_llm.ainvoke([
             SystemMessage(

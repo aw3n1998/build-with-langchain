@@ -17,7 +17,45 @@ class Settings(BaseSettings):
 
     # 网络高级配置
     SKIP_SSL_VERIFY: bool = True
-    REQUEST_TIMEOUT: int = 30
+    REQUEST_TIMEOUT: int = 60
+    # LLM 输出/上下文长度上限（可被前端 per-request 覆盖）
+    MAX_TOKENS: int = 4096
+    # 上下文窗口（token）与压缩触发：用量超过 窗口×比例 时自动压缩旧消息
+    CONTEXT_WINDOW: int = 65536          # deepseek-chat 约 64K
+    COMPACT_RATIO: float = 0.75          # 达到窗口 75% 触发压缩
+
+    # ── 小说转视频流水线 / 远程 GPU 配置 ──────────────────────────
+    # 远程 GPU 服务器（跑 FLUX 出图 + Wan2.2 图生视频）。SSH 凭据走 .env，不入库。
+    GPU_SSH_HOST: Optional[str] = None
+    GPU_SSH_PORT: int = 22
+    GPU_SSH_USER: str = "root"
+    GPU_SSH_KEY_PATH: Optional[str] = None          # 私钥路径（优先于密码）
+    GPU_SSH_PASSWORD: Optional[str] = None
+    # 服务器端路径
+    GPU_PYTHON: str = "/root/autodl-tmp/miniconda3/bin/python"
+    GPU_WAN_REPO: str = "/root/autodl-tmp/Wan2.2"
+    GPU_WAN_CKPT: str = "/root/autodl-tmp/models/Wan-AI/Wan2.2-TI2V-5B"
+    GPU_FLUX_SCRIPT: Optional[str] = None           # 旧版单图脚本（已弃用，保留向后兼容）
+    GPU_OUTPUT_DIR: str = "/root/autodl-tmp/pipeline_out"
+    GPU_SCENES_DIR: str = "/root/autodl-tmp/cael_scenes"
+    # FLUX 多候选出图（单次加载、多种子；本地源会自动上传，无需手动部署）
+    GPU_FLUX_CANDIDATES_SCRIPT: str = "/root/autodl-tmp/flux_candidates.py"
+    GPU_FLUX_BASE: str = "/root/autodl-tmp/models/flux-dev"
+    GPU_FLUX_LORA: str = "/root/autodl-tmp/output/cael_flux_lora_v1/cael_flux_lora_v1.safetensors"
+    GPU_FLUX_OUT_ROOT: str = "/root/autodl-tmp/flux_candidates_out"
+    FLUX_N: int = 4
+    FLUX_STEPS: int = 28
+    FLUX_GUIDANCE: float = 3.5
+    FLUX_WIDTH: int = 768
+    FLUX_HEIGHT: int = 1024
+    FLUX_OFFLOAD: str = "model"                      # model=快(压线24G)；sequential=慢但最稳
+    # Wan2.2 已验证可跑通的省显存配置（单卡 24G）
+    WAN_SIZE: str = "704*1280"
+    WAN_FRAME_NUM: int = 25
+    WAN_SAMPLE_STEPS: int = 25
+    # 本机产物落地目录
+    NP2V_DB_PATH: Optional[str] = None
+    NP2V_LOCAL_OUT: Optional[str] = None
 
     model_config = SettingsConfigDict(
         # 自动加载当前目录或上级目录的 .env 文件

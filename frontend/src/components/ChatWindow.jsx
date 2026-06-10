@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react'
 import MessageBubble from './MessageBubble'
 
-export default function ChatWindow({ messages, onResume }) {
+export default function ChatWindow({ messages, onResume, onSend, onGenerate, onSelectImage, onRenderVideo }) {
   const bottomRef = useRef(null)
 
   useEffect(() => {
@@ -21,9 +21,17 @@ export default function ChatWindow({ messages, onResume }) {
           flexDirection: 'column',
           gap: 20,
         }}>
-          {messages.map(msg => (
-            <MessageBubble key={msg.id} message={msg} onResume={onResume} />
-          ))}
+          {(() => {
+            // 最后一条用户消息之后才算"当前回合"；之前的交互卡片（参数卡/选图）失效，不可再点
+            let lastUserIdx = -1
+            messages.forEach((m, i) => { if (m.role === 'user') lastUserIdx = i })
+            return messages.map((msg, i) => (
+              <MessageBubble key={msg.id} message={msg} onResume={onResume} onSend={onSend}
+                             onGenerate={onGenerate} onSelectImage={onSelectImage}
+                             onRenderVideo={onRenderVideo}
+                             stale={i < lastUserIdx} />
+            ))
+          })()}
           <div ref={bottomRef} />
         </div>
       )}

@@ -230,7 +230,7 @@ function SessionItem({ session, isActive, timeStr, onClick, onDelete }) {
           fontSize: 11,
           color: 'var(--text-muted)',
         }}>
-          <span>💬 {session.message_count || 0}</span>
+          <span>{session.message_count || 0} 条</span>
           {timeStr && (
             <>
               <span>·</span>
