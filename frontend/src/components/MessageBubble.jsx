@@ -642,6 +642,21 @@ export function ProductionPanel({ message, workspace, sessionId }) {
   const cancelled = useRef(false)
   const batchJob = useRef(null)                    // 当前批量任务 job_id（供停止）
   const sceneJob = useRef({})                      // {sceneId: job_id}（供单镜停止）
+  const startAt = useRef({})                       // {key: 起始时间戳}，用于"已运行 Xs"
+  const [, setTick] = useState(0)                  // 每秒触发重渲染，刷新计时
+
+  // 有任务在跑时每秒走表，让"出片中"显示已运行时长（证明在干活、没冻住）
+  useEffect(() => {
+    if (!busy && Object.keys(sceneBusy).length === 0) return
+    const id = setInterval(() => setTick(t => t + 1), 1000)
+    return () => clearInterval(id)
+  }, [busy, sceneBusy])
+  const fmtElapsed = (key) => {
+    const t0 = startAt.current[key]
+    if (!t0) return ''
+    const s = Math.floor((Date.now() - t0) / 1000)
+    return s < 60 ? `${s}s` : `${Math.floor(s / 60)}分${s % 60}秒`
+  }
 
   // 出视频预估时长（秒）= 帧数 ÷ 帧率 × 接续段数。无 fps 字段（Wan）按 24fps。
   const estSec = (() => {
@@ -664,6 +679,7 @@ export function ProductionPanel({ message, workspace, sessionId }) {
 
   const runScene = async (kind, sceneId) => {
     if (busy || sceneBusy[sceneId]) return
+    startAt.current[sceneId] = Date.now()
     setSceneBusy(p => ({ ...p, [sceneId]: kind }))
     try {
       const submit = kind === 'generate' ? sceneGenerate : sceneRender
@@ -721,12 +737,14 @@ export function ProductionPanel({ message, workspace, sessionId }) {
         if (j.kind === 'batch_generate' || j.kind === 'batch_finish') {
           if (busy || batchJob.current) continue
           batchJob.current = j.job_id
+          startAt.current.batch = Date.now()   // 重连无法知真实起点，以重连时刻起算
           setBusy(j.kind === 'batch_generate' ? 'generate' : 'finish')
           setProgress('重新连接到进行中的任务…')
           consume(j.job_id).finally(() => { batchJob.current = null; setBusy('') })
         } else if (j.scene_id) {
           if (sceneJob.current[j.scene_id]) continue
           sceneJob.current[j.scene_id] = j.job_id
+          startAt.current[j.scene_id] = Date.now()
           setSceneBusy(p => ({ ...p, [j.scene_id]: j.kind === 'generate' ? 'generate' : 'render' }))
           consume(j.job_id).finally(() => {
             delete sceneJob.current[j.scene_id]
@@ -741,6 +759,7 @@ export function ProductionPanel({ message, workspace, sessionId }) {
 
   const runJob = async (kind) => {
     if (busy) return
+    startAt.current.batch = Date.now()
     setBusy(kind); setProgress('提交任务…')
     try {
       const submit = kind === 'generate' ? batchGenerate : batchFinish
@@ -873,7 +892,7 @@ export function ProductionPanel({ message, workspace, sessionId }) {
                      border: '1px solid rgba(239,68,68,0.4)', background: 'rgba(239,68,68,0.16)',
                      color: 'rgba(252,165,165,1)', fontSize: 12, fontWeight: 600, cursor: 'pointer',
                      display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-            <span style={{ width: 8, height: 8, borderRadius: 2, background: 'currentColor' }} />停止
+            <span style={{ width: 8, height: 8, borderRadius: 2, background: 'currentColor' }} />停止 {fmtElapsed('batch')}
           </button>
         )}
         {busy && <span style={{ fontSize: 11, color: 'var(--text-muted)', alignSelf: 'center' }}>{progress}</span>}
@@ -984,10 +1003,10 @@ export function ProductionPanel({ message, workspace, sessionId }) {
                   const sb = sceneBusy[s.scene_id]
                   if (sb) {   // 该镜正在跑 → 显示可点的「停止」
                     return (
-                      <button onClick={() => stopScene(s.scene_id)} title="停止这个分镜的任务"
+                      <button onClick={() => stopScene(s.scene_id)} title="点击停止这个分镜的任务"
                         style={{ ...miniAct(false), border: '1px solid rgba(239,68,68,0.4)',
                                  background: 'rgba(239,68,68,0.16)', color: 'rgba(252,165,165,1)' }}>
-                        {sb === 'generate' ? '出图中·停止' : '出片中·停止'}
+                        {sb === 'generate' ? '出图中' : '出片中'} {fmtElapsed(s.scene_id)} · 停止
                       </button>
                     )
                   }
