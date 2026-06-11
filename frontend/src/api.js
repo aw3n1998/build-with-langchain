@@ -243,6 +243,12 @@ export async function batchFinish(params) { return submitJob('/pipeline/batch_fi
 // 单个分镜独立出图 / 出片
 export async function sceneGenerate(params) { return submitJob('/pipeline/scene_generate', params) }
 export async function sceneRender(params) { return submitJob('/pipeline/scene_render', params) }
+// 列出某项目在跑/排队的任务（刷新后面板重连用）
+export async function listActiveJobs(projectId) {
+  const r = await fetch(`${getBase()}/pipeline/jobs?project_id=${encodeURIComponent(projectId)}`)
+  if (!r.ok) throw new Error(`status ${r.status}`)
+  return r.json()
+}
 // 删除产物（候选图 / 分镜成片 / 整集成片）
 export async function deleteCandidate(assetId, workspace = null) {
   const r = await fetch(`${getBase()}/pipeline/delete_candidate`, {

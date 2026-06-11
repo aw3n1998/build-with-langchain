@@ -248,6 +248,21 @@ class JobManager:
     def get(self, job_id: str) -> Optional[Job]:
         return self._jobs.get(job_id)
 
+    def list_active(self, project_id: Optional[str] = None,
+                    session_id: Optional[str] = None) -> list[dict]:
+        """列出未完成（排队/运行中）的任务，供刷新后前端重连。可按项目/会话过滤。"""
+        out = []
+        for j in self._jobs.values():
+            if j.terminal:
+                continue
+            if project_id and j.meta.get("project_id") != project_id:
+                continue
+            if session_id and j.meta.get("session_id") != session_id:
+                continue
+            out.append({"job_id": j.id, "kind": j.kind, "status": j.status,
+                        "scene_id": j.meta.get("scene_id")})
+        return out
+
 
 # 全局单例
 job_manager = JobManager()

@@ -1230,31 +1230,54 @@ class SceneRenderRequest(BaseModel):
     video_params: dict = {}
 
 
+def _scene_project_id(scene_id: str, workspace: str | None) -> str | None:
+    """查某分镜归属的项目 ID（给任务带上，供刷新后按项目重连）。"""
+    from agent_lab.app.pipeline.runtime import set_workspace
+    from agent_lab.app.pipeline.store import get_store
+    try:
+        set_workspace(workspace)
+        sc = get_store().get_scene(scene_id)
+        return sc["project_id"] if sc else None
+    except Exception:
+        return None
+
+
 @router.post("/pipeline/scene_generate")
 async def pipeline_scene_generate(req: SceneGenRequest):
     """单镜出图：后台任务，返回 job_id。"""
     from agent_lab.app.services.job_manager import job_manager
+    meta = {"session_id": req.session_id, "scene_id": req.scene_id,
+            "project_id": _scene_project_id(req.scene_id, req.workspace)}
     return {"job_id": job_manager.submit(
-        "generate", lambda: _scene_generate_events(req), meta={"session_id": req.session_id})}
+        "generate", lambda: _scene_generate_events(req), meta=meta)}
 
 
 @router.post("/pipeline/scene_render")
 async def pipeline_scene_render(req: SceneRenderRequest):
     """单镜出片：后台任务，返回 job_id。"""
     from agent_lab.app.services.job_manager import job_manager
+    meta = {"session_id": req.session_id, "scene_id": req.scene_id,
+            "project_id": _scene_project_id(req.scene_id, req.workspace)}
     return {"job_id": job_manager.submit(
-        "render", lambda: _scene_render_events(req), meta={"session_id": req.session_id})}
+        "render", lambda: _scene_render_events(req), meta=meta)}
+
+
+@router.get("/pipeline/jobs")
+async def pipeline_active_jobs(project_id: str | None = None, session_id: str | None = None):
+    """列出在跑/排队的任务，供刷新后面板重连（显示进度 + 停止按钮）。"""
+    from agent_lab.app.services.job_manager import job_manager
+    return {"jobs": job_manager.list_active(project_id, session_id)}
 
 
 @router.post("/pipeline/batch_generate")
 async def pipeline_batch_generate(req: BatchRequest):
     """一键全部出图：后台单飞任务，返回 job_id。"""
     from agent_lab.app.services.job_manager import job_manager
-    return {"job_id": job_manager.submit("batch_generate", lambda: _batch_generate_events(req), meta={"session_id": req.session_id})}
+    return {"job_id": job_manager.submit("batch_generate", lambda: _batch_generate_events(req), meta={"session_id": req.session_id, "project_id": req.project_id})}
 
 
 @router.post("/pipeline/batch_finish")
 async def pipeline_batch_finish(req: BatchRequest):
     """一键全部出片并合成整集：后台单飞任务，返回 job_id。"""
     from agent_lab.app.services.job_manager import job_manager
-    return {"job_id": job_manager.submit("batch_finish", lambda: _batch_finish_events(req), meta={"session_id": req.session_id})}
+    return {"job_id": job_manager.submit("batch_finish", lambda: _batch_finish_events(req), meta={"session_id": req.session_id, "project_id": req.project_id})}

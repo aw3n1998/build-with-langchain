@@ -3,7 +3,7 @@ import ReactMarkdown from 'react-markdown'
 import { fileUrl, getVideoProviders, getProject, batchGenerate, batchFinish,
          pipelineSelect, streamJobEvents, uploadCandidate, updateScenePrompts,
          deleteCandidate, deleteSceneVideo, deleteEpisode,
-         sceneGenerate, sceneRender, cancelJob } from '../api'
+         sceneGenerate, sceneRender, cancelJob, listActiveJobs } from '../api'
 
 /**
  * MessageBubble — 消息渲染
@@ -669,12 +669,7 @@ export function ProductionPanel({ message, workspace, sessionId }) {
       const submit = kind === 'generate' ? sceneGenerate : sceneRender
       const jobId = await submit(kind === 'generate' ? genPayload(sceneId) : renderPayload(sceneId))
       sceneJob.current[sceneId] = jobId
-      for await (const ev of streamJobEvents(jobId)) {
-        if (cancelled.current) break
-        if (ev.type === 'image' || ev.type === 'video' || ev.type === 'scene_ready') load()
-        else if (ev.type === 'tool_result' && ev.content) setProgress(ev.content)
-      }
-      await load()
+      await consume(jobId)
     } catch { /* ignore */ }
     finally { delete sceneJob.current[sceneId]; setSceneBusy(p => { const n = { ...p }; delete n[sceneId]; return n }) }
   }
@@ -705,6 +700,45 @@ export function ProductionPanel({ message, workspace, sessionId }) {
     }).catch(() => {})
   }, [])  // eslint-disable-line
 
+  // 统一消费任务事件流（首发与刷新重连共用）
+  const consume = async (jobId) => {
+    for await (const ev of streamJobEvents(jobId)) {
+      if (cancelled.current) break
+      if (ev.type === 'batch_progress') setProgress(ev.label || '处理中…')
+      else if (ev.type === 'scene_ready' || ev.type === 'image' || ev.type === 'video') load()
+      else if (ev.type === 'tool_result' && ev.content) setProgress(ev.content)
+      else if (ev.type === 'error') setProgress(ev.content || '已停止')
+    }
+    await load()
+  }
+
+  // 刷新后重连：把本项目在跑/排队的任务接回面板（恢复进度 + 停止按钮）
+  useEffect(() => {
+    let alive = true
+    listActiveJobs(pid).then(d => {
+      if (!alive) return
+      for (const j of (d.jobs || [])) {
+        if (j.kind === 'batch_generate' || j.kind === 'batch_finish') {
+          if (busy || batchJob.current) continue
+          batchJob.current = j.job_id
+          setBusy(j.kind === 'batch_generate' ? 'generate' : 'finish')
+          setProgress('重新连接到进行中的任务…')
+          consume(j.job_id).finally(() => { batchJob.current = null; setBusy('') })
+        } else if (j.scene_id) {
+          if (sceneJob.current[j.scene_id]) continue
+          sceneJob.current[j.scene_id] = j.job_id
+          setSceneBusy(p => ({ ...p, [j.scene_id]: j.kind === 'generate' ? 'generate' : 'render' }))
+          consume(j.job_id).finally(() => {
+            delete sceneJob.current[j.scene_id]
+            setSceneBusy(p => { const n = { ...p }; delete n[j.scene_id]; return n })
+          })
+        }
+      }
+    }).catch(() => {})
+    return () => { alive = false }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pid])
+
   const runJob = async (kind) => {
     if (busy) return
     setBusy(kind); setProgress('提交任务…')
@@ -727,15 +761,7 @@ export function ProductionPanel({ message, workspace, sessionId }) {
         img_offload: kind === 'generate' ? (imgAdv.offload || '') : '',
       })
       batchJob.current = jobId
-      for await (const ev of streamJobEvents(jobId)) {
-        if (cancelled.current) break
-        if (ev.type === 'batch_progress') setProgress(ev.label || '处理中…')
-        else if (ev.type === 'scene_ready') load()      // 某分镜出完→刷新缩略图
-        else if (ev.type === 'image' || ev.type === 'video') load()
-        else if (ev.type === 'tool_result' && ev.content) setProgress(ev.content)
-        else if (ev.type === 'error') setProgress(ev.content || '已停止')
-      }
-      await load()
+      await consume(jobId)
     } catch (e) {
       setProgress('任务失败：' + String(e.message || e))
     } finally {
