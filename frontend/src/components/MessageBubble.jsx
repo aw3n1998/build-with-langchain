@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
 import ReactMarkdown from 'react-markdown'
 import { fileUrl, getVideoProviders, getProject, batchGenerate, batchFinish,
-         pipelineSelect, streamJobEvents, uploadCandidate } from '../api'
+         pipelineSelect, streamJobEvents, uploadCandidate, updateScenePrompts } from '../api'
 
 /**
  * MessageBubble — 消息渲染
@@ -823,6 +823,9 @@ export function ProductionPanel({ message, workspace, sessionId }) {
               ) : (
                 <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>尚未出图</div>
               )}
+
+              {/* 提示词全透明：AI 写的也给用户看，且可改（改完再出图/出片更省 GPU） */}
+              <ScenePrompts scene={s} workspace={workspace} onSaved={load} />
             </div>
           )
         })}
@@ -835,6 +838,68 @@ export function ProductionPanel({ message, workspace, sessionId }) {
         }}>
           <img src={fileUrl(zoom.url)} alt={zoom.name}
                style={{ maxWidth: '90vw', maxHeight: '85vh', objectFit: 'contain', borderRadius: 8 }} />
+        </div>
+      )}
+    </div>
+  )
+}
+
+/* 分镜提示词（出图/运镜/旁白）：AI 生成的也全部可见，且可改完保存再出图/出片 */
+function ScenePrompts({ scene, workspace, onSaved }) {
+  const [open, setOpen] = useState(false)
+  const [img, setImg] = useState(scene.image_prompt || '')
+  const [mot, setMot] = useState(scene.motion_prompt || '')
+  const [nar, setNar] = useState(scene.narration || '')
+  const [saving, setSaving] = useState(false)
+  const dirty = img !== (scene.image_prompt || '') || mot !== (scene.motion_prompt || '')
+    || nar !== (scene.narration || '')
+
+  const save = async () => {
+    setSaving(true)
+    try {
+      await updateScenePrompts(scene.scene_id,
+        { image_prompt: img, motion_prompt: mot, narration: nar }, workspace)
+      onSaved?.()
+    } catch { /* 保持编辑态，用户可重试 */ }
+    setSaving(false)
+  }
+
+  const ta = (label, val, set, rows = 2) => (
+    <label style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+      <span style={{ fontSize: 10.5, color: 'var(--text-muted)' }}>{label}</span>
+      <textarea value={val} rows={rows} onChange={e => set(e.target.value)}
+        style={{ ...inputStyle, height: 'auto', padding: '5px 8px', resize: 'vertical',
+                 fontFamily: 'inherit', fontSize: 11.5, lineHeight: 1.5 }} />
+    </label>
+  )
+
+  return (
+    <div style={{ marginTop: 8 }}>
+      <button onClick={() => setOpen(o => !o)} style={{
+        background: 'none', border: 'none', cursor: 'pointer', padding: 0,
+        color: 'var(--text-muted)', fontSize: 11, display: 'inline-flex', alignItems: 'center', gap: 4,
+      }}>
+        <span style={{ display: 'inline-block', transform: open ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }}>▸</span>
+        提示词{!open && (scene.image_prompt
+          ? <span style={{ color: 'var(--text-dim)', maxWidth: 360, overflow: 'hidden',
+                           textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              ：{scene.image_prompt}</span>
+          : <span style={{ color: 'var(--text-dim)' }}>（空）</span>)}
+      </button>
+      {open && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 6 }}>
+          {ta('出图提示词（image_prompt，角色触发词自动注入）', img, setImg, 3)}
+          {ta('运镜/动态提示词（motion_prompt，出视频用）', mot, setMot)}
+          {ta('旁白（narration，合成时转 TTS + 字幕）', nar, setNar)}
+          <div>
+            <button onClick={save} disabled={!dirty || saving} style={{
+              height: 26, padding: '0 14px', borderRadius: 6,
+              border: '1px solid rgba(99,102,241,0.4)',
+              background: dirty ? 'rgba(99,102,241,0.22)' : 'rgba(255,255,255,0.05)',
+              color: dirty ? 'rgba(190,192,255,1)' : 'var(--text-muted)',
+              fontSize: 11.5, fontWeight: 600, cursor: dirty ? 'pointer' : 'default',
+            }}>{saving ? '保存中…' : dirty ? '保存修改' : '未修改'}</button>
+          </div>
         </div>
       )}
     </div>

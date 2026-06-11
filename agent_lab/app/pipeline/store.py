@@ -194,6 +194,27 @@ class PipelineStore:
         logger.info("[PipelineStore] 分镜 %s 状态: %s → %s", scene_id, cur.value, new_state.value)
         return self.get_scene(scene_id)
 
+    def update_scene_prompts(self, scene_id: str,
+                             image_prompt: str | None = None,
+                             motion_prompt: str | None = None,
+                             narration: str | None = None) -> dict:
+        """更新分镜的提示词/旁白（只改传入的非 None 字段）。面板上用户改完 AI 写的提示词再出图/出片。"""
+        sets, params = [], []
+        for col, val in (("image_prompt", image_prompt),
+                         ("motion_prompt", motion_prompt),
+                         ("narration", narration)):
+            if val is not None:
+                sets.append(f"{col}=?")
+                params.append(val)
+        if sets:
+            from datetime import datetime
+            sets.append("updated_at=?")
+            params.append(datetime.now().isoformat(timespec="seconds"))
+            params.append(scene_id)
+            with self._lock, self._conn() as conn:
+                conn.execute(f"UPDATE scenes SET {', '.join(sets)} WHERE id=?", params)
+        return self.get_scene(scene_id)
+
     def set_scene_video(self, scene_id: str, video_path: str) -> dict:
         with self._lock, self._conn() as conn:
             conn.execute(

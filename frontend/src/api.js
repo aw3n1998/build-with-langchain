@@ -240,6 +240,16 @@ export async function getProject(projectId, workspace = null) {
 }
 export async function batchGenerate(params) { return submitJob('/pipeline/batch_generate', params) }
 export async function batchFinish(params) { return submitJob('/pipeline/batch_finish', params) }
+// 更新分镜提示词/旁白（AI 写的提示词可见可改）
+export async function updateScenePrompts(sceneId, fields, workspace = null) {
+  const r = await fetch(`${getBase()}/pipeline/scene_prompts`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ scene_id: sceneId, workspace, ...fields }),
+  })
+  if (!r.ok) throw new Error(`status ${r.status}`)
+  return r.json()
+}
+
 // 已有分镜图直接上传当候选（跳过 GPU 生图）
 export async function uploadCandidate(sceneId, file, workspace = null) {
   const form = new FormData()

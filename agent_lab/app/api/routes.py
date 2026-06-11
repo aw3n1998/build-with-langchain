@@ -893,6 +893,8 @@ async def pipeline_project(project_id: str, workspace: str | None = None):
             "scene_id": s["id"], "scene_number": s["scene_number"],
             "title": s.get("title") or "", "state": s["state"],
             "narration": s.get("narration") or "",
+            "image_prompt": s.get("image_prompt") or "",
+            "motion_prompt": s.get("motion_prompt") or "",
             "candidates": cands,
             "selected": any(c["selected"] for c in cands),
             "video": ({"url": f"/api/file?path={_quote(vlocal)}",
@@ -1013,6 +1015,30 @@ async def _batch_finish_events(req: BatchRequest):
     yield {"type": "tool_result", "name": "batch_finish", "content": clean[:400]}
     for ev in events:
         yield ev
+
+
+class ScenePromptsRequest(BaseModel):
+    scene_id: str
+    workspace: str | None = None
+    image_prompt: str | None = None    # None=不改；空串=清空
+    motion_prompt: str | None = None
+    narration: str | None = None
+
+
+@router.post("/pipeline/scene_prompts")
+async def pipeline_scene_prompts(req: ScenePromptsRequest):
+    """更新分镜提示词/旁白：AI 生成的提示词在面板上可见、可改，改完再出图/出片。"""
+    from agent_lab.app.pipeline.runtime import set_workspace
+    from agent_lab.app.pipeline.store import get_store
+    set_workspace(req.workspace)
+    store = get_store()
+    if not store.get_scene(req.scene_id):
+        raise HTTPException(status_code=404, detail=f"分镜不存在: {req.scene_id}")
+    s = store.update_scene_prompts(
+        req.scene_id, image_prompt=req.image_prompt,
+        motion_prompt=req.motion_prompt, narration=req.narration)
+    return {"scene_id": s["id"], "image_prompt": s.get("image_prompt") or "",
+            "motion_prompt": s.get("motion_prompt") or "", "narration": s.get("narration") or ""}
 
 
 @router.post("/pipeline/upload_candidate")
