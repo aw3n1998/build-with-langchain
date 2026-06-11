@@ -7,6 +7,7 @@ from agent_lab.app.agents.file_agent import build_file_subgraph
 from agent_lab.app.services.tools import code_tools, file_tools, shell_tools, general_tools
 from agent_lab.app.services.stream_events import emit_tool_call, emit_tool_result
 from agent_lab.app.services.skill_registry import SkillRegistry
+from agent_lab.app.services.msg_utils import sanitize_messages
 from agent_lab.app.core.logger import get_logger
 
 logger = get_logger("supervisor")
@@ -124,7 +125,7 @@ def build_supervisor(llms: dict, registry: SkillRegistry):
             "只执行只读/查询类命令，严禁写文件、删除、网络操作。\n"
             "完成后用中文简洁汇报结果。"
         ))
-        response = await llm_with_tools.ainvoke([_shell_prompt] + state["messages"])
+        response = await llm_with_tools.ainvoke([_shell_prompt] + sanitize_messages(state["messages"]))
         messages = [response]
         while getattr(messages[-1], "tool_calls", None):
             tool_results = []
@@ -139,7 +140,7 @@ def build_supervisor(llms: dict, registry: SkillRegistry):
                     emit_tool_result(tc["name"], res)
                     tool_results.append(ToolMessage(content=str(res), tool_call_id=tc["id"]))
             messages.extend(tool_results)
-            response = await llm_with_tools.ainvoke([_shell_prompt] + state["messages"] + messages)
+            response = await llm_with_tools.ainvoke([_shell_prompt] + sanitize_messages(state["messages"]) + messages)
             messages.append(response)
         final = messages[-1]
         return {"shell_result": final.content if isinstance(final, AIMessage) else ""}
@@ -156,7 +157,7 @@ def build_supervisor(llms: dict, registry: SkillRegistry):
         llm_dynamic = general_llm.bind_tools(retrieved)
         tools_map = {t.name: t for t in retrieved}
 
-        response = await llm_dynamic.ainvoke([_GENERAL_PROMPT] + state["messages"])
+        response = await llm_dynamic.ainvoke([_GENERAL_PROMPT] + sanitize_messages(state["messages"]))
         messages = [response]
         while getattr(messages[-1], "tool_calls", None):
             tool_results = []
@@ -179,7 +180,7 @@ def build_supervisor(llms: dict, registry: SkillRegistry):
                 tool_results.append(ToolMessage(content=str(result), tool_call_id=tc["id"]))
             messages.extend(tool_results)
             follow_up = await llm_dynamic.ainvoke(
-                [_GENERAL_PROMPT] + state["messages"] + messages
+                [_GENERAL_PROMPT] + sanitize_messages(state["messages"]) + messages
             )
             messages.append(follow_up)
         return {"general_result": messages[-1].content}
@@ -240,7 +241,7 @@ def build_supervisor(llms: dict, registry: SkillRegistry):
                 "请简洁总结以下对话的核心内容，保留：已完成的事项、重要决策、关键结论。"
                 "不要遗漏任何重要信息，但去掉无意义的闲聊。"
             ),
-            *to_compress,
+            *sanitize_messages(to_compress),
         ])
 
         compressed = [

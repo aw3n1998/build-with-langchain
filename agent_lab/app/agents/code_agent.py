@@ -3,6 +3,7 @@ from typing_extensions import TypedDict
 from langchain_core.messages import ToolMessage, SystemMessage
 from langgraph.graph import StateGraph, END
 from langgraph.graph.message import add_messages
+from agent_lab.app.services.msg_utils import sanitize_messages
 from agent_lab.app.services.skill_registry import SkillRegistry
 from agent_lab.app.services.stream_events import emit_tool_call, emit_tool_result
 from agent_lab.app.core.logger import get_logger
@@ -42,7 +43,7 @@ def build_code_subgraph(llm, registry: SkillRegistry, checkpointer=None):
         """动态绑定工具：每次请求只把检索到的工具传给 LLM，不传全量工具。"""
         tools = [registry.get(n) for n in state["active_tools"]]
         llm_dynamic = llm.bind_tools(tools)
-        response = await llm_dynamic.ainvoke([_PROMPT] + state["messages"])
+        response = await llm_dynamic.ainvoke([_PROMPT] + sanitize_messages(state["messages"]))
         return {"messages": [response]}
 
     async def tools_node(state: CodeState) -> dict:

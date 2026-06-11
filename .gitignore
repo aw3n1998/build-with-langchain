@@ -58,3 +58,10 @@ frontend/dist/
 # Gemini session data
 .gemini/
 
+
+# 本地运行日志（后端/前端 dev server 输出）
+backend_run.log*
+frontend_dev.log
+frontend_dev.err
+# Claude 本地工作配置
+.claude/

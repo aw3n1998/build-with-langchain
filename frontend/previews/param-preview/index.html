@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>出视频参数卡 预览</title>
+<style>
+  :root{
+    --bg:#0d0d0d; --card:#161616; --border:rgba(255,255,255,0.07);
+    --text:#e6e8ec; --text-dim:rgba(255,255,255,0.55); --text-muted:rgba(255,255,255,0.45);
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; background:var(--bg); color:var(--text);
+    font-family:-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;
+    padding:28px;
+  }
+  h1{font-size:14px;font-weight:700;letter-spacing:.04em;color:var(--text-dim);margin:0 0 4px}
+  .sub{font-size:12px;color:var(--text-muted);margin:0 0 22px}
+  .col{display:flex;flex-direction:column;gap:22px;max-width:712px}
+
+  /* 原生下拉深色化（与 index.css 同款修复） */
+  select,option,input,textarea{color-scheme:dark}
+  select option{background-color:#1c1d22;color:rgba(255,255,255,.88)}
+
+  .card{border:1px solid rgba(0,189,176,.3);background:rgba(0,189,176,.06);
+    border-radius:12px;padding:16px 18px}
+  .lab{font-size:11px;color:var(--text-muted)}
+  .inp,select,input{height:30px;padding:0 8px;border-radius:6px;border:1px solid var(--border);
+    background:rgba(255,255,255,.04);color:rgba(255,255,255,.85);font-size:12px;width:100%}
+  textarea{padding:6px 8px;border-radius:6px;border:1px solid var(--border);
+    background:rgba(255,255,255,.04);color:rgba(255,255,255,.85);font-size:12px;width:100%;
+    font-family:inherit;resize:vertical}
+
+  .top{display:flex;align-items:center;flex-wrap:wrap;gap:12px;margin-bottom:12px}
+  .ttl{font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:rgba(94,234,212,.85)}
+  .mdl{display:flex;align-items:center;gap:6px}
+  .mdl select{width:auto}
+  .dur{margin-left:auto;display:flex;align-items:baseline;gap:6px;padding:5px 12px;border-radius:8px;
+    background:rgba(0,189,176,.08);border:1px solid rgba(0,189,176,.2)}
+  .dur .s{font-size:16px;font-weight:700;color:rgba(94,234,212,1)}
+
+  .field{display:flex;flex-direction:column;gap:4px;flex:1 1 130px;min-width:120px}
+  .q{display:inline-flex;align-items:center;justify-content:center;width:13px;height:13px;border-radius:50%;
+    border:1px solid var(--text-muted);color:var(--text-muted);font-size:9px;font-weight:700;margin-left:5px;cursor:help;position:relative}
+  .q .tip{display:none;position:absolute;bottom:150%;left:50%;transform:translateX(-50%);width:210px;
+    padding:8px 11px;border-radius:8px;background:#0b0c0e;border:1px solid var(--border);color:rgba(255,255,255,.85);
+    font-size:11px;line-height:1.55;font-weight:400;z-index:60;box-shadow:0 6px 22px rgba(0,0,0,.55);text-align:left}
+  .q:hover .tip,.q.open .tip{display:block}
+  .lab{display:inline-flex;align-items:center}
+  .params{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;margin-top:12px}
+  .btn{flex:0 0 auto;height:30px;padding:0 22px;border-radius:6px;border:1px solid rgba(0,189,176,.4);
+    background:rgba(0,189,176,.22);color:rgba(94,234,212,1);font-size:13px;font-weight:600;cursor:pointer}
+  .pl{display:flex;flex-direction:column;gap:4px;margin-bottom:0}
+</style>
+</head>
+<body>
+  <h1>出视频参数卡 · 预览（横向布局 + 下拉已修复）</h1>
+  <p class="sub">实际宽度按聊天列（约 712px）。顶部一行：标题 / 模型 / 预计时长；参数横向铺开，按钮跟在末尾。切模型字段自动变。</p>
+
+  <div class="col">
+
+    <!-- Wan2.2 -->
+    <div class="card">
+      <div class="top">
+        <div class="ttl">出视频参数</div>
+        <div class="mdl"><span class="lab">模型</span>
+          <select><option>Wan2.2-TI2V-5B</option><option>LTX-Video (i2v)</option></select></div>
+        <div class="dur"><span class="lab">预计时长</span><span class="s">≈ 1.0s</span>
+          <span class="lab">（25帧÷24fps）</span></div>
+      </div>
+
+      <div class="pl"><span class="lab">运镜 / 动态提示词</span>
+        <textarea rows="2">缓慢推镜，少女回眸，电影质感，自然光影</textarea></div>
+
+      <div class="params">
+        <div class="field"><span class="lab">分辨率<span class="q open">?<span class="tip">成片画面尺寸。竖屏适合手机短视频，横屏适合横版播放。</span></span></span>
+          <select><option>704×1280 竖屏</option><option>1280×704 横屏</option><option>960×960 方形</option></select></div>
+        <div class="field"><span class="lab">帧数(≤25稳)<span class="q">?<span class="tip">总帧数，决定视频长度（约 帧数÷24 秒）。越多越长越吃显存，24G 显卡建议不超过 25 帧。</span></span></span><input type="number" value="25"></div>
+        <div class="field"><span class="lab">采样步数<span class="q">?<span class="tip">去噪迭代次数。越大画质/稳定性略好但越慢，一般 20-30。</span></span></span><input type="number" value="25"></div>
+        <button class="btn">出视频</button>
+      </div>
+    </div>
+
+    <!-- LTX -->
+    <div class="card">
+      <div class="top">
+        <div class="ttl">出视频参数</div>
+        <div class="mdl"><span class="lab">模型</span>
+          <select><option>LTX-Video (i2v)</option><option>Wan2.2-TI2V-5B</option></select></div>
+        <div class="dur"><span class="lab">预计时长</span><span class="s">≈ 5.0s</span>
+          <span class="lab">（121帧÷24fps）</span></div>
+      </div>
+
+      <div class="pl"><span class="lab">运镜 / 动态提示词</span>
+        <textarea rows="2">镜头缓缓拉远，风吹动发丝，光斑流动</textarea></div>
+
+      <div class="params">
+        <div class="field"><span class="lab">分辨率(宽*高,需为32倍数)</span>
+          <select><option>704×1280 竖屏</option><option>832×480 宽屏快出</option></select></div>
+        <div class="field"><span class="lab">帧数(8n+1)</span>
+          <select><option>121 (~5s)</option><option>89 (~3.7s)</option><option>161 (~6.7s)</option></select></div>
+        <div class="field"><span class="lab">帧率</span><input type="number" value="24"></div>
+        <div class="field"><span class="lab">采样步数</span><input type="number" value="40"></div>
+        <div class="field"><span class="lab">guidance</span><input type="number" value="3"></div>
+        <div class="field"><span class="lab">seed(-1随机)</span><input type="number" value="-1"></div>
+        <button class="btn">出视频</button>
+      </div>
+    </div>
+
+  </div>
+</body>
+</html>

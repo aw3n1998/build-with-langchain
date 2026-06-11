@@ -143,26 +143,62 @@ class GpuClient:
         code = stdout.channel.recv_exit_status()
         return RemoteResult(code, out, err)
 
-    def upload(self, local_path: str, remote_path: str) -> None:
-        client = self._connect()
-        sftp = client.open_sftp()
-        try:
-            self._sftp_makedirs(sftp, posixpath.dirname(remote_path))
-            sftp.put(local_path, remote_path)
-            logger.info("[GpuClient] 上传 %s → %s", local_path, remote_path)
-        finally:
-            sftp.close()
+    def upload(self, local_path: str, remote_path: str, *,
+               stall_timeout: int = 90, retries: int = 3) -> None:
+        """上传文件。云 GPU 网络不稳时传输可能中途卡死，故加「停顿超时 + 断线重连重试」。"""
+        last_err = None
+        for attempt in range(1, retries + 1):
+            try:
+                client = self._connect()
+                sftp = client.open_sftp()
+                try:
+                    chan = sftp.get_channel()
+                    if chan is not None:
+                        chan.settimeout(stall_timeout)  # 传输停顿超过该秒数即报错，避免永久挂起
+                    self._sftp_makedirs(sftp, posixpath.dirname(remote_path))
+                    sftp.put(local_path, remote_path)
+                    logger.info("[GpuClient] 上传 %s → %s", local_path, remote_path)
+                    return
+                finally:
+                    sftp.close()
+            except Exception as e:  # noqa: BLE001
+                last_err = e
+                logger.warning("[GpuClient] 上传失败(第%d/%d次) %s: %s，重连重试",
+                               attempt, retries, remote_path, e)
+                self.close()  # 丢弃可能已坏的连接，下次重连
+                time.sleep(2)
+        raise GpuRunError(f"上传 {remote_path} 失败（重试 {retries} 次）：{last_err}")
 
-    def download(self, remote_path: str, local_path: str) -> str:
-        client = self._connect()
+    def download(self, remote_path: str, local_path: str, *,
+                 stall_timeout: int = 90, retries: int = 3) -> str:
+        """下载文件。同 upload：停顿超时 + 断线重连重试，杜绝因传输卡死导致整轮挂起。"""
         os.makedirs(os.path.dirname(os.path.abspath(local_path)), exist_ok=True)
-        sftp = client.open_sftp()
-        try:
-            sftp.get(remote_path, local_path)
-            logger.info("[GpuClient] 下载 %s → %s", remote_path, local_path)
-        finally:
-            sftp.close()
-        return local_path
+        last_err = None
+        for attempt in range(1, retries + 1):
+            try:
+                client = self._connect()
+                sftp = client.open_sftp()
+                try:
+                    chan = sftp.get_channel()
+                    if chan is not None:
+                        chan.settimeout(stall_timeout)
+                    sftp.get(remote_path, local_path)
+                    logger.info("[GpuClient] 下载 %s → %s", remote_path, local_path)
+                    return local_path
+                finally:
+                    sftp.close()
+            except Exception as e:  # noqa: BLE001
+                last_err = e
+                logger.warning("[GpuClient] 下载失败(第%d/%d次) %s: %s，重连重试",
+                               attempt, retries, remote_path, e)
+                try:
+                    if os.path.exists(local_path):
+                        os.remove(local_path)  # 删掉可能的半截文件，下次从头下
+                except OSError:
+                    pass
+                self.close()
+                time.sleep(2)
+        raise GpuRunError(f"下载 {remote_path} 失败（重试 {retries} 次）：{last_err}")
 
     def exists(self, remote_path: str) -> bool:
         client = self._connect()
@@ -259,41 +295,8 @@ class GpuClient:
             )
         return saved
 
-    def generate_video(
-        self,
-        image_remote_path: str,
-        motion_prompt: str,
-        out_remote_path: str,
-        *,
-        size: Optional[str] = None,
-        frame_num: Optional[int] = None,
-        sample_steps: Optional[int] = None,
-        timeout: int = 3600,
-    ) -> RemoteResult:
-        """对已选定的图跑 Wan2.2-TI2V-5B 图生视频，产出 mp4（用已验证的省显存配置）。"""
-        py = settings.GPU_PYTHON
-        repo = settings.GPU_WAN_REPO
-        ckpt = settings.GPU_WAN_CKPT
-        size = size or settings.WAN_SIZE
-        frame_num = frame_num or settings.WAN_FRAME_NUM
-        sample_steps = sample_steps or settings.WAN_SAMPLE_STEPS
-
-        cmd = (
-            f"cd {shlex.quote(repo)} && {shlex.quote(py)} generate.py "
-            f"--task ti2v-5B --size {shlex.quote(size)} "
-            f"--ckpt_dir {shlex.quote(ckpt)} "
-            f"--offload_model True --convert_model_dtype --t5_cpu "
-            f"--frame_num {int(frame_num)} --sample_steps {int(sample_steps)} "
-            f"--image {shlex.quote(image_remote_path)} "
-            f"--prompt {shlex.quote(motion_prompt)} "
-            f"--save_file {shlex.quote(out_remote_path)}"
-        )
-        t0 = time.time()
-        res = self.run(cmd, timeout=timeout)
-        logger.info("[GpuClient] Wan2.2 耗时 %.0fs, exit=%s", time.time() - t0, res.exit_code)
-        if not res.ok:
-            raise GpuRunError(f"Wan2.2 图生视频失败 (exit {res.exit_code}):\n{res.stderr[-2000:]}")
-        return res
+    # 图生视频已解耦到 pipeline/providers/*（Wan2.2 / LTX ...）；
+    # GpuClient 只保留传输与 FLUX 出图，不再认识具体视频模型。
 
 
 _CLIENT_SINGLETON: Optional[GpuClient] = None

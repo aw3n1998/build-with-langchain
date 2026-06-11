@@ -3,6 +3,7 @@ from typing_extensions import TypedDict
 from langchain_core.messages import ToolMessage, SystemMessage
 from langgraph.graph import StateGraph, END
 from langgraph.graph.message import add_messages
+from agent_lab.app.services.msg_utils import sanitize_messages
 from agent_lab.app.services.skill_registry import SkillRegistry
 from agent_lab.app.core.logger import get_logger
 
@@ -37,7 +38,7 @@ def build_shell_subgraph(llm, registry: SkillRegistry, checkpointer=None):
     async def agent_node(state: ShellState) -> dict:
         tools = [registry.get(n) for n in state["active_tools"]]
         llm_dynamic = llm.bind_tools(tools)
-        response = await llm_dynamic.ainvoke([_PROMPT] + state["messages"])
+        response = await llm_dynamic.ainvoke([_PROMPT] + sanitize_messages(state["messages"]))
         return {"messages": [response]}
 
     async def tools_node(state: ShellState) -> dict:

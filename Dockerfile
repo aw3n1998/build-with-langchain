@@ -5,13 +5,17 @@ FROM python:3.11-slim AS builder
 WORKDIR /app
 
 # 先复制依赖文件，利用 Docker 层缓存
-# 只要 requirements.txt 没变，这一层就不会重新构建
-COPY requirements.txt .
+# 优先用锁定版本 requirements.lock（精确 ==，保证可复现）；缺失时回退 requirements.txt
+COPY requirements*.txt requirements.lock* ./
 
 ARG PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
 
 RUN pip install --no-cache-dir --upgrade pip \
-    && pip install --no-cache-dir -r requirements.txt
+    && if [ -f requirements.lock ]; then \
+         pip install --no-cache-dir -r requirements.lock; \
+       else \
+         pip install --no-cache-dir -r requirements.txt; \
+       fi
 
 # 从构建上下文复制本地预下载的 FastEmbed 模型（100% 离线构建，避免容器联网 SSL 报错）
 ENV FASTEMBED_CACHE_PATH=/app/.cache/fastembed

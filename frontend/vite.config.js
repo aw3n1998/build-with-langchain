@@ -10,6 +10,7 @@ export default defineConfig({
       '/api': {
         target: 'http://localhost:8000',
         changeOrigin: true,
+        ws: true,   // 任务完成推送走 WebSocket（/api/ws/jobs）
       },
     },
   },

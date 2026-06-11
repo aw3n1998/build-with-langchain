@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react'
 import MessageBubble from './MessageBubble'
 
-export default function ChatWindow({ messages, onResume, onSend, onGenerate, onSelectImage, onRenderVideo }) {
+export default function ChatWindow({ messages, onResume, onSend, onGenerate, onSelectImage, onRenderVideo, workspace, sessionId }) {
   const bottomRef = useRef(null)
 
   useEffect(() => {
@@ -29,6 +29,7 @@ export default function ChatWindow({ messages, onResume, onSend, onGenerate, onS
               <MessageBubble key={msg.id} message={msg} onResume={onResume} onSend={onSend}
                              onGenerate={onGenerate} onSelectImage={onSelectImage}
                              onRenderVideo={onRenderVideo}
+                             workspace={workspace} sessionId={sessionId}
                              stale={i < lastUserIdx} />
             ))
           })()}

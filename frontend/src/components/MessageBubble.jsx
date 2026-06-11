@@ -1,6 +1,7 @@
-import { useState } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import ReactMarkdown from 'react-markdown'
-import { fileUrl } from '../api'
+import { fileUrl, getVideoProviders, getProject, batchGenerate, batchFinish,
+         pipelineSelect, streamJobEvents, uploadCandidate } from '../api'
 
 /**
  * MessageBubble — 消息渲染
@@ -10,7 +11,7 @@ import { fileUrl } from '../api'
  * Interrupt：HITL 确认卡片
  * param_form：出图参数交互卡
  */
-export default function MessageBubble({ message, onResume, onSend, onGenerate, onSelectImage, onRenderVideo, stale }) {
+export default function MessageBubble({ message, onResume, onSend, onGenerate, onSelectImage, onRenderVideo, workspace, sessionId, stale }) {
   if (message.role === 'user') {
     return <UserMessage content={message.content} />
   }
@@ -22,6 +23,9 @@ export default function MessageBubble({ message, onResume, onSend, onGenerate, o
   }
   if (message.role === 'video_param_form') {
     return <VideoParamCard message={message} onRenderVideo={onRenderVideo} stale={stale} />
+  }
+  if (message.role === 'production') {
+    return <ProductionPanel message={message} workspace={workspace} sessionId={sessionId} />
   }
   return <AssistantMessage message={message} onSend={onSend} onSelectImage={onSelectImage} stale={stale} />
 }
@@ -314,16 +318,15 @@ function ParamCard({ message, onGenerate, stale }) {
       </div>
 
       <label style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 10 }}>
-        <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>提示词（含触发词 ch4r_cael）</span>
+        <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>提示词（角色触发词已自动加好）</span>
         <textarea value={p.image_prompt} disabled={submitted} rows={2}
           onChange={e => setP({ ...p, image_prompt: e.target.value })}
           style={{ ...inputStyle, resize: 'vertical', fontFamily: 'inherit' }} />
       </label>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 10, marginBottom: 12 }}>
+      {/* 常用：张数 + 尺寸（小白只看这些）*/}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: 10, marginBottom: 10 }}>
         {field('张数', 'n')}
-        {field('步数', 'steps')}
-        {field('guidance', 'guidance', 'number')}
         <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
           <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>尺寸</span>
           <select value={sizePreset} disabled={submitted}
@@ -335,14 +338,23 @@ function ParamCard({ message, onGenerate, stale }) {
             <option value={sizePreset}>{sizePreset}（当前）</option>
           </select>
         </label>
-        {field('seed(-1随机)', 'seed')}
-        {field('显存', 'offload', 'text', [{ v: 'model', label: 'model 快' }, { v: 'sequential', label: 'sequential 省显存' }])}
       </div>
+
+      {/* 高级：步数 / guidance / seed / 显存（折叠）*/}
+      <AdvancedSection>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: 10 }}>
+          {field('步数', 'steps')}
+          {field('guidance', 'guidance', 'number')}
+          {field('seed(-1随机)', 'seed')}
+          {field('显存', 'offload', 'text', [{ v: 'model', label: 'model 快' }, { v: 'sequential', label: 'sequential 省显存' }])}
+        </div>
+      </AdvancedSection>
 
       <button
         onClick={() => onGenerate?.(message.id, p)}
         disabled={submitted}
         style={{
+          marginTop: 12,
           height: 34, padding: '0 20px', borderRadius: 8, border: '1px solid rgba(99,102,241,0.35)',
           background: submitted ? 'rgba(255,255,255,0.06)' : 'rgba(99,102,241,0.22)',
           color: submitted ? 'var(--text-muted)' : 'rgba(190,192,255,1)',
@@ -354,69 +366,497 @@ function ParamCard({ message, onGenerate, stale }) {
   )
 }
 
-/* ── 出视频参数交互卡 ───────────────────────────────── */
+/* ── 出视频参数交互卡（多模型 + schema 驱动）─────────── */
+
+// 小问号 + 悬停说明气泡
+function HelpTip({ text }) {
+  const [show, setShow] = useState(false)
+  if (!text) return null
+  return (
+    <span style={{ position: 'relative', display: 'inline-flex', verticalAlign: 'middle' }}
+      onMouseEnter={() => setShow(true)} onMouseLeave={() => setShow(false)}>
+      <span style={{
+        width: 13, height: 13, borderRadius: '50%', border: '1px solid var(--text-muted)',
+        color: 'var(--text-muted)', fontSize: 9, fontWeight: 700, lineHeight: '11px',
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+        marginLeft: 5, cursor: 'help',
+      }}>?</span>
+      {show && (
+        <span style={{
+          position: 'absolute', bottom: '150%', left: '50%', transform: 'translateX(-50%)',
+          width: 210, padding: '8px 11px', borderRadius: 8, background: '#0b0c0e',
+          border: '1px solid var(--border)', color: 'rgba(255,255,255,0.85)',
+          fontSize: 11, lineHeight: 1.55, fontWeight: 400, textTransform: 'none', letterSpacing: 0,
+          zIndex: 60, boxShadow: '0 6px 22px rgba(0,0,0,0.55)', whiteSpace: 'normal', textAlign: 'left',
+        }}>{text}</span>
+      )}
+    </span>
+  )
+}
+
+// 老事件没有 fields 时，用扁平字段合成 Wan2.2 的默认 schema，保证旧会话仍可渲染
+function legacyVideoFields(params) {
+  return [
+    { key: 'size', label: '分辨率', type: 'select', default: params.size || '704*1280',
+      help: '成片画面尺寸。竖屏适合手机短视频，横屏适合横版播放。',
+      options: [
+        { value: '704*1280', label: '704×1280 竖屏' },
+        { value: '1280*704', label: '1280×704 横屏' },
+        { value: '960*960', label: '960×960 方形' },
+      ] },
+    { key: 'frame_num', label: '帧数(≤25稳)', type: 'number', default: params.frame_num ?? 25,
+      help: '总帧数，决定视频长度（约 帧数÷24 秒）。越多越长越吃显存，24G 显卡建议不超过 25 帧。' },
+    { key: 'sample_steps', label: '采样步数', type: 'number', default: params.sample_steps ?? 25,
+      help: '去噪迭代次数。越大画质/稳定性略好但越慢，一般 20-30。' },
+  ]
+}
+
+function fieldsToValues(fields) {
+  const v = {}
+  for (const f of fields) v[f.key] = f.default
+  return v
+}
+
 function VideoParamCard({ message, onRenderVideo, stale }) {
-  const [p, setP] = useState(message.params)
   const submitted = message.submitted || stale
+  const init = message.params || {}
+
+  // 全部模型的 schema（注册即出现）：优先从后端拉取，失败则用事件里携带的当前模型 schema 兜底
+  const [providers, setProviders] = useState(null)   // [{name, display_name, fields}]
+  const [model, setModel] = useState(init.model || '')
+  const [motionPrompt, setMotionPrompt] = useState(init.motion_prompt || '')
+
+  // 当前模型的字段定义
+  const curFields = useMemo(() => {
+    const fromProviders = providers?.find(p => p.name === model)?.fields
+    if (fromProviders) return fromProviders
+    if (init.fields && (model === init.model || !model)) return init.fields
+    return legacyVideoFields(init)
+  }, [providers, model, init])
+
+  const [values, setValues] = useState(() =>
+    fieldsToValues(init.fields || legacyVideoFields(init)))
+
+  const simpleFields = curFields.filter(f => !f.advanced)
+  const advancedFields = curFields.filter(f => f.advanced)
+
+  // 拉取所有模型（仅活跃卡片需要；stale/已提交的历史卡片不必）
+  useEffect(() => {
+    if (submitted) return
+    let alive = true
+    getVideoProviders()
+      .then(d => {
+        if (!alive) return
+        setProviders(d.providers || [])
+        if (!model && d.default) setModel(d.default)
+      })
+      .catch(() => {})
+    return () => { alive = false }
+  }, [submitted])  // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 切换模型时，按该模型 schema 重置参数值
+  const switchModel = (name) => {
+    setModel(name)
+    const f = providers?.find(p => p.name === name)?.fields
+    if (f) setValues(fieldsToValues(f))
+  }
+
+  const models = (providers && providers.length)
+    ? providers.map(p => ({ name: p.name, display_name: p.display_name }))
+    : (init.models || (init.model ? [{ name: init.model, display_name: init.model }] : []))
+
+  const submit = () => {
+    onRenderVideo?.(message.id, {
+      scene_id: init.scene_id,
+      motion_prompt: motionPrompt,
+      model,
+      params: values,
+    })
+  }
+
+  // 预计时长 = 帧数 ÷ 帧率 × 接续段数。Wan 用 frame_num + 固定 24fps；LTX 用 num_frames + 可调 fps。
+  const estDuration = useMemo(() => {
+    const frames = Number(values.frame_num ?? values.num_frames)
+    const fps = Number(values.fps) || 24   // 无 fps 字段（如 Wan2.2）按 24fps 估
+    const segs = Math.max(1, Number(values.segments) || 1)
+    if (!frames || !fps) return null
+    return { sec: (frames / fps) * segs, frames, fps, segs }
+  }, [values])
+
+  const renderField = (f) => {
+    const val = values[f.key]
+    const set = (v) => setValues(prev => ({ ...prev, [f.key]: v }))
+    return (
+      <label key={f.key} style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: '1 1 130px', minWidth: 120 }}>
+        <span style={{ fontSize: 11, color: 'var(--text-muted)', display: 'inline-flex', alignItems: 'center' }}>
+          {f.label}<HelpTip text={f.help} />
+        </span>
+        {f.type === 'select' ? (
+          <select value={val} disabled={submitted}
+            onChange={e => {
+              const opt = f.options?.find(o => String(o.value) === e.target.value)
+              set(opt ? opt.value : e.target.value)
+            }} style={inputStyle}>
+            {(f.options || []).map(o => (
+              <option key={String(o.value)} value={String(o.value)}>{o.label}</option>
+            ))}
+          </select>
+        ) : (
+          <input type={f.type === 'number' ? 'number' : 'text'} value={val ?? ''} disabled={submitted}
+            onChange={e => set(f.type === 'number' ? Number(e.target.value) : e.target.value)}
+            style={inputStyle} />
+        )}
+      </label>
+    )
+  }
 
   return (
     <div style={{
       border: '1px solid rgba(0,189,176,0.3)', background: 'rgba(0,189,176,0.06)',
       borderRadius: 12, padding: '16px 18px',
     }}>
-      <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase',
-                    color: 'rgba(94,234,212,0.85)', marginBottom: 12 }}>
-        出视频参数 · 确认后生成
+      {/* 顶部横条：标题 + 模型选择 + 预计时长，一行读完 */}
+      <div style={{
+        display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 12, marginBottom: 12,
+      }}>
+        <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase',
+                      color: 'rgba(94,234,212,0.85)' }}>
+          出视频参数
+        </div>
+
+        {/* 模型选择（≥2 个模型时显示） */}
+        {models.length > 1 && (
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ fontSize: 11, color: 'var(--text-muted)', display: 'inline-flex', alignItems: 'center' }}>
+              模型<HelpTip text="选择视频生成模型。Wan2.2 画质更高但更慢；LTX 出片更快，适合先预演看效果。" />
+            </span>
+            <select value={model} disabled={submitted}
+              onChange={e => switchModel(e.target.value)} style={{ ...inputStyle, width: 'auto' }}>
+              {models.map(m => <option key={m.name} value={m.name}>{m.display_name}</option>)}
+            </select>
+          </label>
+        )}
+
+        {/* 预计时长：新手不用心算，改帧数/帧率会实时变 */}
+        {estDuration && (
+          <div style={{
+            marginLeft: 'auto', display: 'flex', alignItems: 'baseline', gap: 6,
+            padding: '5px 12px', borderRadius: 8,
+            background: 'rgba(0,189,176,0.08)', border: '1px solid rgba(0,189,176,0.2)',
+          }}>
+            <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>预计时长</span>
+            <span style={{ fontSize: 16, fontWeight: 700, color: 'rgba(94,234,212,1)' }}>
+              ≈ {estDuration.sec.toFixed(1)}s
+            </span>
+            <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+              （{estDuration.frames}帧÷{estDuration.fps}fps{estDuration.segs > 1 ? `×${estDuration.segs}段` : ''}）
+            </span>
+          </div>
+        )}
       </div>
 
-      <label style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 10 }}>
-        <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>运镜 / 动态提示词</span>
-        <textarea value={p.motion_prompt} disabled={submitted} rows={2}
-          onChange={e => setP({ ...p, motion_prompt: e.target.value })}
-          style={{ ...inputStyle, resize: 'vertical', fontFamily: 'inherit' }} />
+      <label style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 12 }}>
+        <span style={{ fontSize: 11, color: 'var(--text-muted)', display: 'inline-flex', alignItems: 'center' }}>
+          运镜 / 动态提示词<HelpTip text="描述镜头怎么动、画面怎么变：如推近、拉远、摇镜、人物动作、光影流动等，越具体效果越好。" />
+        </span>
+        <textarea value={motionPrompt} disabled={submitted} rows={2}
+          onChange={e => setMotionPrompt(e.target.value)}
+          style={{ ...inputStyle, height: 'auto', padding: '6px 8px', resize: 'vertical', fontFamily: 'inherit' }} />
       </label>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 10, marginBottom: 12 }}>
-        <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>分辨率</span>
-          <select value={p.size} disabled={submitted}
-            onChange={e => setP({ ...p, size: e.target.value })} style={inputStyle}>
-            <option value="704*1280">704×1280 竖屏</option>
-            <option value="1280*704">1280×704 横屏</option>
-            <option value="960*960">960×960 方形</option>
-            <option value={p.size}>{p.size}（当前）</option>
-          </select>
-        </label>
-        <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>帧数(≤25稳)</span>
-          <input type="number" value={p.frame_num} disabled={submitted}
-            onChange={e => setP({ ...p, frame_num: Number(e.target.value) })} style={inputStyle} />
-        </label>
-        <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>采样步数</span>
-          <input type="number" value={p.sample_steps} disabled={submitted}
-            onChange={e => setP({ ...p, sample_steps: Number(e.target.value) })} style={inputStyle} />
-        </label>
+      {/* 常用参数横向铺开（小白只看这些）；高级参数折叠 */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: 12, alignItems: 'flex-end' }}>
+        {simpleFields.map(renderField)}
+        <button
+          onClick={submit}
+          disabled={submitted}
+          style={{
+            flex: '0 0 auto', height: 30, padding: '0 22px', borderRadius: 6,
+            border: '1px solid rgba(0,189,176,0.4)',
+            background: submitted ? 'rgba(255,255,255,0.06)' : 'rgba(0,189,176,0.22)',
+            color: submitted ? 'var(--text-muted)' : 'rgba(94,234,212,1)',
+            fontSize: 13, fontWeight: 600, cursor: submitted ? 'default' : 'pointer',
+          }}>
+          {submitted ? '已提交' : '出视频'}
+        </button>
       </div>
 
-      <button
-        onClick={() => onRenderVideo?.(message.id, p)}
-        disabled={submitted}
-        style={{
-          height: 34, padding: '0 20px', borderRadius: 8, border: '1px solid rgba(0,189,176,0.4)',
-          background: submitted ? 'rgba(255,255,255,0.06)' : 'rgba(0,189,176,0.22)',
-          color: submitted ? 'var(--text-muted)' : 'rgba(94,234,212,1)',
-          fontSize: 13, fontWeight: 600, cursor: submitted ? 'default' : 'pointer',
-        }}>
-        {submitted ? '已提交出视频' : '出视频'}
-      </button>
+      {advancedFields.length > 0 && (
+        <AdvancedSection>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'flex-end' }}>
+            {advancedFields.map(renderField)}
+          </div>
+        </AdvancedSection>
+      )}
     </div>
   )
+}
+
+/* 折叠的「高级参数」区：小白默认看不到，进阶用户点开 */
+function AdvancedSection({ children }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div style={{ marginTop: 2 }}>
+      <button onClick={() => setOpen(o => !o)} style={{
+        background: 'none', border: 'none', cursor: 'pointer', padding: '2px 0',
+        color: 'var(--text-muted)', fontSize: 11, display: 'inline-flex', alignItems: 'center', gap: 4,
+      }}>
+        <span style={{ display: 'inline-block', transform: open ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }}>▸</span>
+        高级参数
+      </button>
+      {open && <div style={{ marginTop: 8 }}>{children}</div>}
+    </div>
+  )
+}
+
+/* ── 制作面板：确定性整片流程（一键出图 → 点选 → 一键出片合成）──────── */
+const STATE_LABEL = {
+  DRAFT: { t: '待出图', c: 'var(--text-muted)' },
+  PENDING_FLUX_GEN: { t: '出图中', c: 'rgba(234,179,8,0.9)' },
+  PENDING_HUMAN_SELECTION: { t: '待选图', c: 'rgba(99,102,241,0.95)' },
+  PENDING_VIDEO_GEN: { t: '已选·待出片', c: 'rgba(94,234,212,0.95)' },
+  COMPLETED: { t: '已出片', c: 'rgba(34,197,94,0.95)' },
+  FAILED: { t: '失败', c: 'rgba(239,68,68,0.95)' },
+}
+
+export function ProductionPanel({ message, workspace, sessionId }) {
+  const pid = message.project_id
+  const [proj, setProj] = useState(null)
+  const [err, setErr] = useState('')
+  const [busy, setBusy] = useState('')       // '' | 'generate' | 'finish'
+  const [progress, setProgress] = useState('')
+  const [zoom, setZoom] = useState(null)
+  const [models, setModels] = useState([])
+  const [model, setModel] = useState('')
+  const [segments, setSegments] = useState(1)
+  const [imgN, setImgN] = useState(4)              // 出图：每镜候选张数
+  const [imgSize, setImgSize] = useState('768x1024')  // 出图：尺寸
+  const [vidSize, setVidSize] = useState('')       // 出片：分辨率（空=默认）
+  const cancelled = useRef(false)
+
+  const load = async () => {
+    try { setProj(await getProject(pid, workspace)); setErr('') }
+    catch (e) { setErr(String(e.message || e)) }
+  }
+  useEffect(() => { cancelled.current = false; load(); return () => { cancelled.current = true } }, [pid])  // eslint-disable-line
+  useEffect(() => {
+    getVideoProviders().then(d => {
+      setModels(d.providers || [])
+      if (!model && d.default) setModel(d.default)
+    }).catch(() => {})
+  }, [])  // eslint-disable-line
+
+  const runJob = async (kind) => {
+    if (busy) return
+    setBusy(kind); setProgress('提交任务…')
+    try {
+      const submit = kind === 'generate' ? batchGenerate : batchFinish
+      const [iw, ih] = (imgSize || '0x0').split('x').map(Number)
+      const jobId = await submit({
+        project_id: pid, workspace, session_id: sessionId,
+        model: kind === 'finish' ? model : '',
+        segments: kind === 'finish' ? segments : 1,
+        size: kind === 'finish' ? vidSize : '',
+        n: kind === 'generate' ? imgN : 0,
+        width: kind === 'generate' ? (iw || 0) : 0,
+        height: kind === 'generate' ? (ih || 0) : 0,
+      })
+      for await (const ev of streamJobEvents(jobId)) {
+        if (cancelled.current) break
+        if (ev.type === 'batch_progress') setProgress(ev.label || '处理中…')
+        else if (ev.type === 'scene_ready') load()      // 某分镜出完→刷新缩略图
+        else if (ev.type === 'image' || ev.type === 'video') load()
+        else if (ev.type === 'tool_result' && ev.content) setProgress(ev.content)
+      }
+      await load()
+    } catch (e) {
+      setProgress('任务失败：' + String(e.message || e))
+    } finally {
+      setBusy('')
+    }
+  }
+
+  const select = async (sceneId, assetId) => {
+    try {
+      await pipelineSelect(sceneId, assetId, workspace)
+      load()
+    } catch (e) { /* ignore */ }
+  }
+
+  const c = proj?.counts || { total: 0, with_candidates: 0, selected: 0, done: 0 }
+  const allSelected = c.total > 0 && c.selected === c.total
+  const someSelected = c.selected > 0
+
+  return (
+    <div style={{
+      border: '1px solid rgba(99,102,241,0.3)', background: 'rgba(99,102,241,0.05)',
+      borderRadius: 12, padding: '16px 18px',
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 10, marginBottom: 12 }}>
+        <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: '0.05em', color: 'rgba(190,192,255,1)' }}>
+          短剧制作面板 · {proj?.title || pid}
+        </div>
+        <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+          {c.total} 分镜 · 已出图 {c.with_candidates} · 已选 {c.selected} · 已出片 {c.done}
+        </div>
+        <button onClick={load} title="刷新" style={miniBtn}>↻</button>
+      </div>
+
+      {/* 第①步：出图（张数/尺寸可选）*/}
+      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+        <button onClick={() => runJob('generate')} disabled={!!busy}
+          style={panelBtn(busy === 'generate')}>
+          {busy === 'generate' ? '出图中…' : '① 一键全部出图'}
+        </button>
+        <select value={imgN} disabled={!!busy} onChange={e => setImgN(Number(e.target.value))}
+          title="每个分镜出几张候选" style={{ ...inputStyle, width: 'auto', height: 32 }}>
+          <option value={2}>每镜2张</option>
+          <option value={4}>每镜4张</option>
+          <option value={6}>每镜6张</option>
+        </select>
+        <select value={imgSize} disabled={!!busy} onChange={e => setImgSize(e.target.value)}
+          title="出图尺寸" style={{ ...inputStyle, width: 'auto', height: 32 }}>
+          <option value="768x1024">768×1024 竖屏</option>
+          <option value="1024x768">1024×768 横屏</option>
+          <option value="1024x1024">1024×1024 方形</option>
+        </select>
+        <span style={{ fontSize: 11, color: 'var(--text-dim)' }}>已有图的分镜可在下方直接「上传图片」跳过生图</span>
+      </div>
+
+      {/* 第③步：出片并合成（模型/段数/分辨率可选）*/}
+      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+        <button onClick={() => runJob('finish')} disabled={!!busy || !someSelected}
+          style={panelBtn(busy === 'finish', !someSelected)}>
+          {busy === 'finish' ? '出片合成中…' : (allSelected ? '③ 一键出片并合成' : `③ 出片并合成（已选${c.selected}/${c.total}）`)}
+        </button>
+        {models.length > 0 && (
+          <select value={model} disabled={!!busy} onChange={e => setModel(e.target.value)}
+            title="视频模型：LTX 快适合预演，Wan 慢画质高" style={{ ...inputStyle, width: 'auto', height: 32 }}>
+            {models.map(m => <option key={m.name} value={m.name}>{m.display_name}</option>)}
+          </select>
+        )}
+        <select value={segments} disabled={!!busy} onChange={e => setSegments(Number(e.target.value))}
+          title="尾帧接续段数：越多镜头越长越连贯" style={{ ...inputStyle, width: 'auto', height: 32 }}>
+          <option value={1}>单段</option>
+          <option value={2}>接续×2</option>
+          <option value={3}>接续×3</option>
+        </select>
+        <select value={vidSize} disabled={!!busy} onChange={e => setVidSize(e.target.value)}
+          title="出片分辨率" style={{ ...inputStyle, width: 'auto', height: 32 }}>
+          <option value="">默认分辨率</option>
+          <option value="704*1280">704×1280 竖屏</option>
+          <option value="1280*704">1280×704 横屏</option>
+        </select>
+        {busy && <span style={{ fontSize: 11, color: 'var(--text-muted)', alignSelf: 'center' }}>{progress}</span>}
+      </div>
+      {!busy && progress && (
+        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 10 }}>{progress}</div>
+      )}
+      {err && <div style={{ fontSize: 11, color: 'rgba(239,68,68,0.9)', marginBottom: 10 }}>读取失败：{err}（确认工作目录正确）</div>}
+
+      {/* 成片 */}
+      {proj?.episode && (
+        <div style={{ marginBottom: 12, padding: 10, borderRadius: 10,
+                      background: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.25)' }}>
+          <div style={{ fontSize: 11, color: 'rgba(134,239,172,1)', marginBottom: 6 }}>整集成片</div>
+          <video src={fileUrl(proj.episode.url)} controls
+                 style={{ width: '100%', maxHeight: 420, borderRadius: 8, display: 'block' }} />
+        </div>
+      )}
+
+      {/* 分镜列表 */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {(proj?.scenes || []).map(s => {
+          const sl = STATE_LABEL[s.state] || { t: s.state, c: 'var(--text-muted)' }
+          return (
+            <div key={s.scene_id} style={{
+              border: '1px solid var(--border)', borderRadius: 10, padding: '10px 12px',
+              background: 'rgba(255,255,255,0.02)',
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                <span style={{ fontSize: 12, fontWeight: 700, color: 'rgba(255,255,255,0.8)' }}>
+                  #{s.scene_number}
+                </span>
+                <span style={{ fontSize: 12, color: 'var(--text-sec)', flex: 1, overflow: 'hidden',
+                               textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.title || '(无题)'}</span>
+                {!s.video && (
+                  <label title="已有这镜的图？直接上传当候选，跳过生图"
+                    style={{ fontSize: 11, color: 'rgba(165,168,255,0.9)', cursor: 'pointer',
+                             border: '1px solid rgba(99,102,241,0.35)', borderRadius: 6, padding: '2px 8px' }}>
+                    上传图片
+                    <input type="file" accept=".png,.jpg,.jpeg,.webp" style={{ display: 'none' }}
+                      onChange={async e => {
+                        const f = e.target.files?.[0]
+                        e.target.value = ''
+                        if (!f) return
+                        setProgress(`上传 #${s.scene_number} 的图片…`)
+                        try { await uploadCandidate(s.scene_id, f, workspace); setProgress(''); load() }
+                        catch (err) { setProgress('上传失败：' + String(err.message || err)) }
+                      }} />
+                  </label>
+                )}
+                <span style={{ fontSize: 11, fontWeight: 600, color: sl.c }}>{sl.t}</span>
+              </div>
+
+              {s.video ? (
+                <video src={fileUrl(s.video.url)} controls
+                       style={{ width: '100%', maxHeight: 300, borderRadius: 8, display: 'block' }} />
+              ) : s.candidates.length > 0 ? (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(96px,1fr))', gap: 8 }}>
+                  {s.candidates.map(img => (
+                    <div key={img.assetId} style={{
+                      position: 'relative', borderRadius: 8, overflow: 'hidden', cursor: 'pointer',
+                      border: img.selected ? '2px solid rgba(34,197,94,0.9)' : '1px solid var(--border)',
+                    }}>
+                      <img src={fileUrl(img.url)} alt={img.name} onClick={() => setZoom(img)}
+                           style={{ width: '100%', aspectRatio: '3/4', objectFit: 'cover', display: 'block' }} />
+                      <button onClick={() => select(s.scene_id, img.assetId)}
+                        title={img.selected ? '已选' : '选这张'}
+                        style={{
+                          position: 'absolute', top: 4, right: 4, width: 22, height: 22, borderRadius: 6,
+                          border: 'none', cursor: 'pointer', fontSize: 12, color: '#fff',
+                          background: img.selected ? 'rgba(34,197,94,0.9)' : 'rgba(0,0,0,0.55)',
+                        }}>{img.selected ? '✓' : '○'}</button>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>尚未出图</div>
+              )}
+            </div>
+          )
+        })}
+      </div>
+
+      {zoom && (
+        <div onClick={() => setZoom(null)} style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', zIndex: 2000,
+          display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24,
+        }}>
+          <img src={fileUrl(zoom.url)} alt={zoom.name}
+               style={{ maxWidth: '90vw', maxHeight: '85vh', objectFit: 'contain', borderRadius: 8 }} />
+        </div>
+      )}
+    </div>
+  )
+}
+
+const panelBtn = (active, disabled) => ({
+  height: 32, padding: '0 16px', borderRadius: 8,
+  border: '1px solid rgba(99,102,241,0.4)',
+  background: disabled ? 'rgba(255,255,255,0.05)' : active ? 'rgba(99,102,241,0.35)' : 'rgba(99,102,241,0.2)',
+  color: disabled ? 'var(--text-muted)' : 'rgba(190,192,255,1)',
+  fontSize: 12.5, fontWeight: 600, cursor: disabled ? 'default' : 'pointer',
+})
+const miniBtn = {
+  width: 24, height: 24, borderRadius: 6, border: '1px solid var(--border)',
+  background: 'rgba(255,255,255,0.05)', color: 'var(--text-sec)', cursor: 'pointer', fontSize: 13,
 }
 
 const inputStyle = {
   height: 30, padding: '0 8px', borderRadius: 6, border: '1px solid var(--border)',
   background: 'rgba(255,255,255,0.04)', color: 'rgba(255,255,255,0.85)', fontSize: 12,
+  width: '100%', colorScheme: 'dark',
 }
 
 /* ── 工具调用链渲染 ─────────────────────────────────── */

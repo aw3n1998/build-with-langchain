@@ -22,6 +22,8 @@ from agent_lab.app.pipeline.runtime import (
     candidates_dir,
     get_workspace,
     is_within_known_root,
+    model_config,
+    set_model_config,
     video_dir,
 )
 from agent_lab.app.pipeline.store import SceneState, get_store
@@ -30,6 +32,7 @@ from agent_lab.app.pipeline.gpu_client import (
     GpuRunError,
     get_gpu_client,
 )
+from agent_lab.app.pipeline.providers import video_provider_registry
 
 logger = get_logger("pipeline.tools")
 
@@ -188,7 +191,7 @@ def add_scene(
         project_id: create_video_project 返回的项目 ID。
         scene_number: 镜头序号（决定成片拼接顺序）。
         narration: 旁白/台词。
-        image_prompt: 出图提示词（FLUX 用，含触发词如 ch4r_cael）。
+        image_prompt: 出图提示词（FLUX 用；角色触发词由工作目录配置自动注入，无需手写）。
         motion_prompt: 运镜/动态提示词（Wan2.2 图生视频用）。
         title: 镜头简短标题。
     """
@@ -245,6 +248,33 @@ def register_candidate_image(scene_id: str, remote_image_path: str) -> str:
     )
 
 
+def _gpu_retry(fn, *, what: str, retries: int = 1):
+    """跑一次 GPU 任务，遇到 GpuRunError（连接抖动/偶发 OOM 等）原参自动重试。
+
+    小白最怕"红字恐慌"：共享 GPU 偶发失败时静默重试一次，多半就过了。
+    GpuConfigError（没配 GPU）不重试，直接抛。
+    """
+    last = None
+    for attempt in range(retries + 1):
+        try:
+            return fn()
+        except GpuRunError as e:
+            last = e
+            if attempt < retries:
+                logger.warning("[retry] %s 第%d次失败，自动重试：%s", what, attempt + 1, e)
+                import time
+                time.sleep(3)
+    raise last
+
+
+def _apply_trigger(prompt: str) -> str:
+    """把工作目录配置的角色触发词自动加在提示词最前（已含则不重复）。"""
+    tw = model_config().get("trigger_word")
+    if tw and tw.lower() not in (prompt or "").lower():
+        return f"{tw}, {prompt}".strip(", ").strip()
+    return prompt
+
+
 @tool
 def request_image_params(scene_id: str, image_prompt: str = "") -> str:
     """【出图前必调】请求用户确认出图参数：返回一个参数卡占位，前端会弹出可编辑的参数表单
@@ -260,7 +290,7 @@ def request_image_params(scene_id: str, image_prompt: str = "") -> str:
     scene = store.get_scene(scene_id)
     if not scene:
         return f"分镜不存在: {scene_id}"
-    prompt = image_prompt or scene.get("image_prompt") or ""
+    prompt = _apply_trigger(image_prompt or scene.get("image_prompt") or "")
     # 机器可读载荷：流式层会解析成 param_form 事件弹卡片，并从展示文本里剥掉这一行。
     payload = {
         "scene_id": scene_id,
@@ -295,7 +325,7 @@ def generate_candidates(
 
     Args:
         scene_id: 目标分镜 ID。
-        image_prompt: 出图提示词；留空则用分镜自带的 image_prompt（含触发词如 ch4r_cael）。
+        image_prompt: 出图提示词；留空则用分镜自带的 image_prompt（角色触发词自动注入）。
         n: 出图张数；0=用默认（settings.FLUX_N）。
         steps: 采样步数；0=默认。
         guidance: 提示词贴合度；<0=默认。
@@ -307,21 +337,26 @@ def generate_candidates(
     scene = store.get_scene(scene_id)
     if not scene:
         return f"分镜不存在: {scene_id}"
-    prompt = image_prompt or scene.get("image_prompt") or ""
+    prompt = _apply_trigger(image_prompt or scene.get("image_prompt") or "")
     if not prompt:
         return "没有出图提示词（image_prompt 为空）。"
     out_remote_dir = posixpath.join(settings.GPU_FLUX_OUT_ROOT, scene_id)
+    lora_override = model_config().get("flux_lora") or None  # 工作目录级 LoRA 覆盖
     try:
         store.set_scene_state(scene_id, SceneState.PENDING_FLUX_GEN, force=True)
-        remote_imgs = get_gpu_client().generate_candidates(
-            prompt, out_remote_dir,
-            n=(n or None),
-            steps=(steps or None),
-            guidance=(None if guidance < 0 else guidance),
-            width=(width or None),
-            height=(height or None),
-            seed=seed,
-            offload=(offload or None),
+        remote_imgs = _gpu_retry(
+            lambda: get_gpu_client().generate_candidates(
+                prompt, out_remote_dir,
+                n=(n or None),
+                steps=(steps or None),
+                guidance=(None if guidance < 0 else guidance),
+                width=(width or None),
+                height=(height or None),
+                seed=seed,
+                offload=(offload or None),
+                lora=lora_override,
+            ),
+            what=f"出图 {scene_id}",
         )
     except GpuConfigError as e:
         return f"GPU 未配置: {e}"
@@ -379,15 +414,17 @@ def select_candidate(scene_id: str, asset_id: str) -> str:
 
 # ── 图生视频（Wan2.2） ────────────────────────────────────────────
 @tool
-def request_video_params(scene_id: str, motion_prompt: str = "") -> str:
+def request_video_params(scene_id: str, motion_prompt: str = "", model: str = "") -> str:
     """【出视频前必调】请求用户确认出视频参数：前端会弹出可编辑的参数表单
-    （运镜提示词 / 分辨率 / 帧数 / 采样步数），由用户改好点"出视频"后才真正生成。
+    （运镜提示词 + 该视频模型的专属参数），由用户选模型/改参数后点"出视频"才真正生成。
 
     用户说"出视频/生成视频/图生视频"时，先调用本工具弹参数卡，**不要直接** render_scene_video。
+    支持多视频模型（如 wan2.2 / ltx），参数卡字段由所选模型自动决定。
 
     Args:
         scene_id: 目标分镜 ID（须已 select_candidate 选好图）。
         motion_prompt: 运镜/动态提示词；留空则用分镜自带的 motion_prompt。
+        model: 视频模型名（wan2.2 / ltx ...）；留空用默认模型，用户也可在卡片上切换。
     """
     store = get_store()
     scene = store.get_scene(scene_id)
@@ -397,82 +434,176 @@ def request_video_params(scene_id: str, motion_prompt: str = "") -> str:
         return (f"分镜当前状态 {scene['state']}，需先选图（select_candidate）"
                 f"进入 PENDING_VIDEO_GEN 才能出视频。")
     prompt = motion_prompt or scene.get("motion_prompt") or "缓慢推镜，电影质感，自然光影。"
+    provider = video_provider_registry.get(model)
     payload = {
         "scene_id": scene_id,
         "motion_prompt": prompt,
-        "size": settings.WAN_SIZE,
-        "frame_num": settings.WAN_FRAME_NUM,
-        "sample_steps": settings.WAN_SAMPLE_STEPS,
+        "model": provider.name,                       # 当前选中的模型
+        "models": [                                   # 供卡片下拉切换的全部模型
+            {"name": p["name"], "display_name": p["display_name"]}
+            for p in video_provider_registry.list_providers()
+        ],
+        # 该模型的专属可调字段 + 通用的「接续段数」（尾帧接续：段越多镜头越长且连贯）
+        "fields": provider.param_schema() + [{
+            "key": "segments", "label": "接续段数(连贯加长)", "type": "select", "default": 1,
+            "help": "尾帧接续：每段结束取最后一帧作为下一段的起始画面继续生成，再无缝拼接成"
+                    "一条连续镜头。段数越多镜头越长（总时长≈单段×段数），3-4 段内画质几乎无损。",
+            "options": [
+                {"value": 1, "label": "1 段（默认）"},
+                {"value": 2, "label": "2 段（×2 时长）"},
+                {"value": 3, "label": "3 段（×3 时长）"},
+                {"value": 4, "label": "4 段（×4 时长）"},
+            ],
+        }],
     }
     return ("已弹出出视频参数卡，请在卡片里确认参数后点「出视频」。\n"
             f"VIDEO_PARAM_FORM::{json.dumps(payload, ensure_ascii=False)}")
+
+
+def do_render_scene_video(
+    scene_id: str,
+    motion_prompt: str = "",
+    model: str = "",
+    params: dict | None = None,
+    download: bool = True,
+) -> str:
+    """出片核心（模型无关）：按所选 Provider 出图生视频 mp4 并下载回工作目录。
+
+    被 @tool render_scene_video 与 /api/pipeline/render 共用。具体模型逻辑全在 Provider 里，
+    这里只负责状态机校验、调度、下载、写回状态。
+    """
+    params = params or {}
+    store = get_store()
+    scene = store.get_scene(scene_id)
+    if not scene:
+        return f"分镜不存在: {scene_id}"
+    # 出片的真实前提是「已选好一张图」，而不是 state 恰好等于某枚举。
+    # 早先的中断/重生成可能让 state 漂移（选过图但 state 回退），这里以选中资产为准，更稳。
+    asset = store.get_asset(scene["selected_asset_id"]) if scene.get("selected_asset_id") else None
+    if not asset:
+        return (f"分镜还没有选定候选图（当前状态 {scene['state']}）："
+                f"请先出图并点选一张，再出视频。")
+    if scene["state"] != SceneState.PENDING_VIDEO_GEN.value:
+        store.set_scene_state(scene_id, SceneState.PENDING_VIDEO_GEN, force=True)  # 纠正漂移
+
+    provider = video_provider_registry.get(model)
+    merged = {**provider.default_params(), **{k: v for k, v in params.items() if v not in (None, "", 0)}}
+    # 尾帧接续段数（流水线级参数，不传给模型）：每段取末帧作为下一段输入，拼成连续长镜头
+    try:
+        segments = max(1, min(6, int(merged.pop("segments", 1) or 1)))
+    except (TypeError, ValueError):
+        segments = 1
+    prompt = motion_prompt or scene.get("motion_prompt") or "缓慢推镜，电影质感，自然光影。"
+
+    # 参考图就绪保障：候选图的 storage_path 是「出图时那台 GPU」的服务器路径。
+    # 换 GPU 机器或服务器清理后该文件会缺失，导致出片读图失败。
+    # 缺则用本地工作目录里的候选副本自动回传，做到换机器也能出片。
+    try:
+        gpu = get_gpu_client()
+        remote_img = asset["storage_path"]
+        if not gpu.exists(remote_img):
+            local_img = os.path.join(candidates_dir(scene_id), posixpath.basename(remote_img))
+            if not os.path.exists(local_img):
+                return (f"参考图在 GPU 服务器和本地都找不到：{remote_img}。"
+                        f"可能是换了 GPU 机器且本地副本已删，请对该分镜重新出图后再出视频。")
+            gpu.upload(local_img, remote_img)
+    except GpuConfigError as e:
+        return f"GPU 未配置: {e}"
+
+    local_dir = video_dir()  # 落到当前工作目录
+    final_local = os.path.join(local_dir, f"{scene['scene_number']:02d}_{scene_id}.mp4")
+    base = f"{scene_id}_{scene['scene_number']}"
+    seg_locals: list[str] = []
+    cur_image = remote_img
+    out_remote = ""
+    try:
+        for k in range(segments):
+            out_remote = posixpath.join(
+                settings.GPU_OUTPUT_DIR,
+                f"{base}.mp4" if segments == 1 else f"{base}_seg{k + 1}.mp4",
+            )
+            _gpu_retry(
+                lambda: provider.generate(gpu, image_path=cur_image, prompt=prompt,
+                                          out_remote=out_remote, params=merged),
+                what=f"出片 {scene_id} 段{k + 1}",
+            )
+            # 每段都拉回本地（接续抽帧 / 最终拼接都在本地做，复用带重试的传输）
+            seg_local = final_local if segments == 1 else os.path.join(
+                local_dir, f"{scene['scene_number']:02d}_{scene_id}_seg{k + 1}.mp4")
+            gpu.download(out_remote, seg_local)
+            seg_locals.append(seg_local)
+            if k < segments - 1:
+                # 尾帧接续：抽本段末帧 → 回传 GPU → 作为下一段 i2v 的起始画面
+                from agent_lab.app.pipeline.assembler import extract_last_frame
+                frame_local = os.path.join(local_dir, f"{base}_seg{k + 1}_last.png")
+                extract_last_frame(seg_local, frame_local)
+                cur_image = posixpath.join(settings.GPU_OUTPUT_DIR,
+                                           f"{base}_seg{k + 1}_last.png")
+                gpu.upload(frame_local, cur_image)
+                logger.info("[render] 接续 %d/%d：末帧已回传，继续生成", k + 1, segments)
+    except GpuConfigError as e:
+        return f"GPU 未配置: {e}"
+    except (GpuRunError, RuntimeError, OSError) as e:
+        store.set_scene_state(scene_id, SceneState.FAILED, force=True)
+        done = len(seg_locals)
+        hint = f"（已完成 {done}/{segments} 段）" if segments > 1 and done else ""
+        return f"图生视频失败{hint}: {e}"
+
+    if segments > 1:
+        # 多段无缝拼接为最终成片（同源片段流复制，秒级完成）
+        from agent_lab.app.pipeline.assembler import concat_videos
+        try:
+            concat_videos(seg_locals, final_local)
+        except Exception as e:  # noqa: BLE001
+            store.set_scene_state(scene_id, SceneState.FAILED, force=True)
+            return f"接续段拼接失败: {e}"
+
+    store.set_scene_video(scene_id, out_remote)
+    store.set_scene_state(scene_id, SceneState.COMPLETED)
+    seg_note = f"（尾帧接续 {segments} 段连续镜头）" if segments > 1 else ""
+    msg = f"{provider.display_name} 出片完成{seg_note}，分镜 {scene_id} 标记 COMPLETED。"
+    msg += f"\n已下载到本机: {final_local}"
+    vid_marker = f"\nVIDFILE::{scene_id}::{final_local}"  # 供前端内嵌播放
+    return msg + vid_marker
 
 
 @tool
 def render_scene_video(
     scene_id: str,
     motion_prompt: str = "",
+    model: str = "",
     size: str = "",
     frame_num: int = 0,
     sample_steps: int = 0,
+    segments: int = 1,
     download: bool = True,
 ) -> str:
-    """对已选图的分镜调用远程 Wan2.2-TI2V-5B 出图生视频 mp4，完成后下载回工作目录。
+    """对已选图的分镜调用远程视频模型出图生视频 mp4，完成后下载回工作目录。
 
     通常由参数卡确认后触发（见 request_video_params）。需先 select_candidate 选好图。
+    支持多模型（wan2.2 / ltx ...），具体参数由模型决定。
+    segments>1 时启用尾帧接续：每段末帧作为下一段起始画面连续生成并无缝拼接，
+    生成 N 倍时长的连续长镜头（用户说"长一点/连贯/30秒"时可设 2-4）。
 
     Args:
         scene_id: 分镜 ID。
         motion_prompt: 运镜/动态提示词；留空则用分镜自带的 motion_prompt。
+        model: 视频模型名（wan2.2 / ltx）；空=默认模型。
         size: 分辨率（如 704*1280 竖屏 / 1280*704 横屏）；空=默认。
-        frame_num: 帧数（越多越长越吃显存，24G 建议 ≤25）；0=默认。
+        frame_num: 帧数（Wan2.2 24G 建议 ≤25）；0=默认。
         sample_steps: 采样步数；0=默认。
         download: 是否把成片下载到工作目录 video_out。
     """
-    store = get_store()
-    scene = store.get_scene(scene_id)
-    if not scene:
-        return f"分镜不存在: {scene_id}"
-    if scene["state"] != SceneState.PENDING_VIDEO_GEN.value:
-        return (
-            f"分镜当前状态 {scene['state']}，需先 select_candidate 选图"
-            f"（进入 PENDING_VIDEO_GEN）才能出视频。"
-        )
-    asset = store.get_asset(scene["selected_asset_id"]) if scene.get("selected_asset_id") else None
-    if not asset:
-        return "未找到选中的候选图。"
-    prompt = motion_prompt or scene.get("motion_prompt") or "缓慢推镜，电影质感，自然光影。"
-    out_remote = posixpath.join(
-        settings.GPU_OUTPUT_DIR, f"{scene_id}_{scene['scene_number']}.mp4"
-    )
-    try:
-        get_gpu_client().generate_video(
-            asset["storage_path"], prompt, out_remote,
-            size=(size or None),
-            frame_num=(frame_num or None),
-            sample_steps=(sample_steps or None),
-        )
-    except GpuConfigError as e:
-        return f"GPU 未配置: {e}"
-    except GpuRunError as e:
-        store.set_scene_state(scene_id, SceneState.FAILED, force=True)
-        return f"图生视频失败: {e}"
-
-    store.set_scene_video(scene_id, out_remote)
-    store.set_scene_state(scene_id, SceneState.COMPLETED)
-    msg = f"Wan2.2 出片完成 → {out_remote}，分镜 {scene_id} 标记 COMPLETED。"
-
-    vid_marker = ""
-    if download:
-        local_dir = video_dir()  # 落到当前工作目录
-        local_path = os.path.join(local_dir, f"{scene['scene_number']:02d}_{scene_id}.mp4")
-        try:
-            get_gpu_client().download(out_remote, local_path)
-            msg += f"\n已下载到本机: {local_path}"
-            vid_marker = f"\nVIDFILE::{scene_id}::{local_path}"  # 供前端内嵌播放
-        except Exception as e:  # noqa: BLE001 - 下载失败不应回滚渲染结果
-            msg += f"\n下载失败（成片仍在服务器）: {e}"
-    return msg + vid_marker
+    params: dict = {}
+    if size:
+        params["size"] = size
+    if frame_num:
+        params["frame_num"] = frame_num
+    if sample_steps:
+        params["sample_steps"] = sample_steps
+    if segments and segments > 1:
+        params["segments"] = segments
+    return do_render_scene_video(scene_id, motion_prompt, model, params, download)
 
 
 @tool
@@ -485,7 +616,101 @@ def project_status(project_id: str) -> str:
     return json.dumps(st, ensure_ascii=False, indent=2)
 
 
+@tool
+def open_production_panel(project_id: str) -> str:
+    """【拆完分镜后必调】为项目打开「制作面板」：用户在面板上一键全部出图、逐个点选、一键出片合成，
+    全程点按钮、不用再逐条对话。拆好所有分镜后调用本工具，然后让用户去面板操作即可，不要自己逐个出图。
+
+    Args:
+        project_id: 项目 ID。
+    """
+    return (f"已为项目打开制作面板，请在下方面板里操作：先「一键全部出图」，"
+            f"每个分镜点选一张满意的图，再「一键出片并合成」。\nPRODUCTION::{project_id}")
+
+
+@tool
+def assemble_episode(project_id: str, voice: str = "", with_subtitles: bool = True) -> str:
+    """【成片合成】把项目下所有已出片的分镜按顺序拼成一条完整短剧 mp4（本地完成，不占 GPU）。
+
+    自动：分镜旁白(narration)经 TTS 配音、音画对齐（旁白长则末帧冻结）、统一分辨率、
+    旁白字幕（烧录优先）。产物 episode_<project>.mp4 落工作目录 video_out 并内嵌播放。
+
+    用户说"合成/拼起来/出完整视频/成片"时调用。需至少一个分镜已完成出片。
+
+    Args:
+        project_id: 项目 ID。
+        voice: TTS 音色；空=默认男声 zh-CN-YunxiNeural（女声可用 zh-CN-XiaoxiaoNeural）。
+        with_subtitles: 是否加旁白字幕（默认加）。
+    """
+    from agent_lab.app.pipeline.assembler import assemble_clips, DEFAULT_VOICE
+
+    store = get_store()
+    try:
+        st = store.status(project_id)
+    except ValueError as e:
+        return f"{e}"
+    scenes = sorted(st["scenes"], key=lambda s: s["scene_number"])
+    if not scenes:
+        return "项目下没有分镜。"
+
+    local = video_dir()
+    clips, missing = [], []
+    for s in scenes:
+        p = os.path.join(local, f"{s['scene_number']:02d}_{s['id']}.mp4")
+        if os.path.isfile(p):
+            clips.append({"path": p, "narration": s.get("narration") or "", "title": s.get("title") or ""})
+        else:
+            missing.append(f"#{s['scene_number']} {s['title'] or s['id']}（状态 {s['state']}）")
+    if not clips:
+        return "没有任何分镜已出片，请先对各分镜出图→选图→出视频。"
+
+    out = os.path.join(local, f"episode_{project_id}.mp4")
+    try:
+        info = assemble_clips(clips, out, voice=(voice or DEFAULT_VOICE),
+                              with_subtitles=with_subtitles)
+    except Exception as e:  # noqa: BLE001
+        return f"成片合成失败: {type(e).__name__}: {e}"
+
+    msg = (f"成片完成：{info['scenes']} 段分镜 → {info['duration']:.1f} 秒"
+           f"（旁白TTS={'有' if info['tts'] else '无'}，字幕={info['subtitles']}）。\n"
+           f"输出: {out}")
+    if missing:
+        msg += "\n未纳入（尚未出片）: " + "、".join(missing)
+    return msg + f"\nVIDFILE::episode::{out}"
+
+
+@tool
+def configure_character(trigger_word: str = "", flux_lora: str = "", negative_prompt: str = "") -> str:
+    """配置本工作目录的角色/风格（写入 .agent/config.json），出图时自动注入，无需写死在提示词里。
+
+    用户说"这个角色的触发词是 X""用这个 LoRA""换成 XX 风格"等时调用本工具。
+    只更新填了的字段，留空的不动。
+
+    Args:
+        trigger_word: 角色/LoRA 触发词，出图时自动加在提示词最前（如某个角色的专属触发词）。
+        flux_lora: FLUX LoRA 文件在 GPU 上的路径；留空则用 .env 默认。
+        negative_prompt: 可选负向提示词。
+    """
+    m = set_model_config(
+        trigger_word=(trigger_word if trigger_word != "" else None),
+        flux_lora=(flux_lora if flux_lora != "" else None),
+        negative_prompt=(negative_prompt if negative_prompt != "" else None),
+    )
+    return (f"已更新工作目录角色配置：触发词='{m['trigger_word'] or '（无）'}'，"
+            f"LoRA='{m['flux_lora'] or '默认(.env)'}'。出图时会自动注入触发词。")
+
+
+@tool
+def get_character_config() -> str:
+    """查看本工作目录当前的角色/风格配置（触发词 / LoRA / 负向词）。"""
+    m = model_config()
+    return json.dumps(m, ensure_ascii=False)
+
+
 # ── 分组导出（供 ai_service 注入 SkillRegistry） ───────────────────
+# 单轨化：request_image_params / request_video_params（对话内弹参数卡）已下线——
+# 出图/选图/出片/合成一律走「制作面板」（open_production_panel），对话只负责拆分镜与答疑，
+# 避免"对话卡片 + 面板"两套交互并存把用户绕晕。函数保留以兼容旧会话历史的标记重建。
 pipeline_tools = [
     list_workspace_files,
     read_text_file,
@@ -493,11 +718,13 @@ pipeline_tools = [
     add_scene,
     list_project_scenes,
     register_candidate_image,
-    request_image_params,
     generate_candidates,
     list_candidates,
     select_candidate,
-    request_video_params,
     render_scene_video,
     project_status,
+    open_production_panel,
+    assemble_episode,
+    configure_character,
+    get_character_config,
 ]

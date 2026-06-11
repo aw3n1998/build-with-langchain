@@ -136,6 +136,12 @@ class PipelineStore:
             row = conn.execute("SELECT * FROM projects WHERE id=?", (project_id,)).fetchone()
         return dict(row) if row else None
 
+    def list_projects(self) -> list[dict]:
+        """本工作目录的全部项目（新→旧），供制作面板入口选择/默认取最新。"""
+        with self._conn() as conn:
+            rows = conn.execute("SELECT * FROM projects ORDER BY created_at DESC").fetchall()
+        return [dict(r) for r in rows]
+
     # ── 分镜 ──────────────────────────────────────────────────────
     def add_scene(
         self,

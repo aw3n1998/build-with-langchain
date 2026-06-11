@@ -30,6 +30,10 @@ class AIService:
 
         self._agent = None          # Supervisor 图（懒初始化，使用默认 LLM）
         self._agents: dict = {}     # 子 Agent 图缓存（默认 LLM）
+        # 会话粘性路由：记住每个会话上次自动路由到的子 Agent。
+        # 用户回「可以/继续/好的」这类无关键词短语时跟随上次，而不是掉回 supervisor——
+        # 否则对话记忆会被切到另一条线程，表现为"agent 失忆"。
+        self._session_agents: dict[str, str] = {}
 
         self._rag_pipeline = init_pipeline(embedder)
         connected = self._rag_pipeline.connect()
@@ -204,6 +208,10 @@ class AIService:
                     events.append({"type": "video_param_form", **payload})
                 except Exception:
                     kept_lines.append(line)
+            elif s.startswith("PRODUCTION::"):
+                pid = s[len("PRODUCTION::"):].strip()
+                if pid:
+                    events.append({"type": "production", "project_id": pid})
             elif s.startswith("VIDFILE::"):
                 parts = s.split("::", 2)
                 if len(parts) == 3:
@@ -273,9 +281,17 @@ class AIService:
 
         if agent == "supervisor":
             detected_agent = self._detect_agent_intent(content)
+            if detected_agent == "supervisor":
+                # 无关键词命中：跟随本会话上次的子 Agent（粘性路由），保证记忆连续
+                sticky = self._session_agents.get(session_id, "supervisor")
+                if sticky != "supervisor":
+                    logger.info("[AIService] 无关键词，粘性跟随上次 agent: %s", sticky)
+                    detected_agent = sticky
             if detected_agent != "supervisor":
                 logger.info(f"[AIService] 意图自适应分发：supervisor ➔ {detected_agent}")
                 agent = detected_agent
+        if agent != "supervisor":
+            self._session_agents[session_id] = agent   # 记住，供下一条短回复跟随
 
         if agent not in _VALID_AGENTS:
             logger.warning("[AIService] 未知 agent '%s'，回退到 supervisor", agent)

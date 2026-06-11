@@ -26,6 +26,21 @@ html, body, #root {
   font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Segoe UI', sans-serif;
 }
 
+/* ── 原生表单控件深色化 ──────────────────────────────
+   修复：暗色卡片里的 <select> 展开后，浏览器默认用白底渲染 <option>，
+   而我们把文字设成了浅色 → 白底浅字看不见。统一声明深色配色 + option 显式底色。 */
+select, option, input, textarea {
+  color-scheme: dark;             /* 让原生下拉/滚动条走深色 */
+}
+select option {
+  background-color: #1c1d22;      /* 下拉弹层底色（深） */
+  color: rgba(255,255,255,0.88);  /* 选项文字（浅） */
+}
+select option:checked,
+select option:hover {
+  background-color: #2a2c33;
+}
+
 /* ── 滚动条 ─────────────────────────────────────────── */
 ::-webkit-scrollbar { width: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }

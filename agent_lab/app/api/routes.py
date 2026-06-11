@@ -15,10 +15,14 @@ SSE 格式（text/event-stream）：
 """
 
 import json
+import os
+import posixpath
 import uuid
 from typing import AsyncGenerator
 
-from fastapi import APIRouter, HTTPException, UploadFile, File, Form
+from agent_lab.app.core.config import settings
+
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -156,6 +160,67 @@ async def chat(request: ChatRequest) -> StreamingResponse:
     )
 
 
+@router.post("/chat/submit")
+async def chat_submit(request: ChatRequest):
+    """对话改后台任务：提交即返回 job_id，回合在服务端独立跑完（切会话/断网不丢）。
+
+    前端用 /pipeline/jobs/{id}/events 跟随；停止生成用 /pipeline/jobs/{id}/cancel。
+    """
+    from agent_lab.app.services.job_manager import job_manager
+    logger.info("[ChatSubmit] session=%s agent=%s msg=%s",
+                request.session_id, request.agent, request.content[:40])
+    job_id = job_manager.submit(
+        "chat",
+        lambda: ai_service.astream_chat(
+            request.session_id, request.content, agent=request.agent,
+            agent_configs=request.agent_configs, workspace=request.workspace),
+        lane="chat",
+        meta={"session_id": request.session_id},
+    )
+    return {"job_id": job_id}
+
+
+@router.post("/chat/resume_submit")
+async def chat_resume_submit(request: ResumeRequest):
+    """HITL 恢复也走后台任务（与 /chat/submit 同语义）。"""
+    from agent_lab.app.services.job_manager import job_manager
+    job_id = job_manager.submit(
+        "chat",
+        lambda: ai_service.aresume_chat(
+            request.session_id, agent=request.agent, approved=request.approved),
+        lane="chat",
+        meta={"session_id": request.session_id},
+    )
+    return {"job_id": job_id}
+
+
+@router.websocket("/ws/jobs")
+async def ws_jobs(websocket: WebSocket):
+    """任务状态推送：连接即收到所有未完任务快照，此后每次状态变化实时推送。
+
+    消息格式 {"type":"job_update","job_id","kind","status","session_id","error"}。
+    前端据此点亮侧边栏绿点、并在所在会话任务完成时自动刷新历史。
+    """
+    from agent_lab.app.services.job_manager import job_manager
+    await websocket.accept()
+    q = job_manager.subscribe()
+    try:
+        while True:
+            msg = await q.get()
+            await websocket.send_json(msg)
+    except (WebSocketDisconnect, Exception):  # noqa: BLE001 - 断开即清理
+        pass
+    finally:
+        job_manager.unsubscribe(q)
+
+
+@router.post("/pipeline/jobs/{job_id}/cancel")
+async def pipeline_job_cancel(job_id: str):
+    """取消任务：chat 回合可真取消；GPU 任务不可中断（返回 cancelled=false）。"""
+    from agent_lab.app.services.job_manager import job_manager
+    return {"cancelled": job_manager.cancel(job_id)}
+
+
 @router.post("/chat/resume")
 async def chat_resume(request: ResumeRequest) -> StreamingResponse:
     """
@@ -285,7 +350,8 @@ async def get_session_history(session_id: str):
         checkpointer = ai_service._agent.checkpointer
 
         # 一个会话可能落在不同 agent 线程（supervisor / video / file …）。
-        # 优先 supervisor；为空则在所有 agent 线程里取消息最多的那个。
+        # 取**消息最多**的那个线程作为该会话的完整记录——不能一看到 supervisor
+        # 有内容就直接用，否则当真实对话在 video 线程、supervisor 只有零星消息时会丢内容。
         from agent_lab.app.services.agent_registry import agent_registry
         candidates = ["supervisor"] + sorted(agent_registry.get_valid_agents())
         messages = []
@@ -297,14 +363,13 @@ async def get_session_history(session_id: str):
             msgs = c.get("channel_values", {}).get("messages", [])
             if len(msgs) > len(messages):
                 messages = msgs
-            if ag == "supervisor" and messages:
-                break  # supervisor 有内容就直接用
 
         import os as _os
         from urllib.parse import quote as _quote
 
         formatted_messages = []
         pending_images = []   # 收集 IMGFILE 标记，挂到下一条 assistant 文本上
+        held_cards = []       # 参数卡暂存：放到本轮 assistant 总结文字之后，避免被夹在中间
         for msg in messages:
             if msg.type == "system":
                 continue
@@ -317,7 +382,7 @@ async def get_session_history(session_id: str):
                     if s.startswith("PARAM_FORM::"):
                         try:
                             p = json.loads(s[len("PARAM_FORM::"):])
-                            formatted_messages.append({
+                            held_cards.append({
                                 "id": str(uuid.uuid4())[:8], "role": "param_form",
                                 "params": p, "submitted": False, "streaming": False,
                             })
@@ -326,12 +391,19 @@ async def get_session_history(session_id: str):
                     elif s.startswith("VIDEO_PARAM_FORM::"):
                         try:
                             p = json.loads(s[len("VIDEO_PARAM_FORM::"):])
-                            formatted_messages.append({
+                            held_cards.append({
                                 "id": str(uuid.uuid4())[:8], "role": "video_param_form",
                                 "params": p, "submitted": False, "streaming": False,
                             })
                         except Exception:
                             pass
+                    elif s.startswith("PRODUCTION::"):
+                        pid = s[len("PRODUCTION::"):].strip()
+                        if pid:
+                            held_cards.append({
+                                "id": str(uuid.uuid4())[:8], "role": "production",
+                                "project_id": pid, "streaming": False,
+                            })
                     elif s.startswith("IMGFILE::"):
                         parts = s.split("::", 3)
                         if len(parts) == 4:
@@ -364,13 +436,19 @@ async def get_session_history(session_id: str):
                 m["images"] = pending_images
                 pending_images = []
             formatted_messages.append(m)
+            # 本轮总结文字落地后，把暂存的参数卡接在其后（卡片在对话最下面）
+            if role == "assistant" and held_cards:
+                formatted_messages.extend(held_cards)
+                held_cards = []
 
         if pending_images:  # 末尾还有未挂载的候选图，单独成一条
             formatted_messages.append({
                 "id": str(uuid.uuid4())[:8], "role": "assistant", "content": "",
                 "images": pending_images, "streaming": False,
             })
-            
+        if held_cards:  # 末尾仍有未挂载的参数卡（本轮没有后续文字），直接收尾
+            formatted_messages.extend(held_cards)
+
         return {"messages": formatted_messages}
     except Exception as e:
         logger.exception(f"Failed to get session history for {session_id}")
@@ -427,6 +505,9 @@ class SelectRequest(BaseModel):
 class RenderRequest(BaseModel):
     scene_id: str
     motion_prompt: str = ""
+    model: str = ""                       # 视频模型名（wan2.2 / ltx ...）；空=默认
+    params: dict = {}                     # 该模型的专属参数（由参数卡 schema 决定）
+    # 旧字段保留向后兼容（老前端/老会话仍可用）；若提供会并入 params
     size: str = ""
     frame_num: int = 0
     sample_steps: int = 0
@@ -469,16 +550,24 @@ async def list_agents():
 
 @router.get("/context/{session_id}")
 async def context_usage(session_id: str):
-    """返回某会话的真实上下文用量（token / 窗口 / 压缩触发线），给前端进度条。"""
+    """返回某会话的真实上下文用量（token / 窗口 / 压缩触发线），给前端进度条。
+
+    会话可能落在不同 agent 线程（supervisor / video / …），取消息最多的那条——
+    只读 supervisor 会在对话实际发生在 video 线程时永远显示 0。
+    """
     from agent_lab.app.services.context_meter import usage
+    from agent_lab.app.services.agent_registry import agent_registry
     try:
         await ai_service._ensure_supervisor()
         checkpointer = ai_service._agent.checkpointer
-        config = {"configurable": {"thread_id": f"supervisor:{session_id}"}}
-        c = await checkpointer.aget(config)
         messages = []
-        if c:
-            messages = c.get("channel_values", {}).get("messages", [])
+        for ag in ["supervisor"] + sorted(agent_registry.get_valid_agents()):
+            c = await checkpointer.aget({"configurable": {"thread_id": f"{ag}:{session_id}"}})
+            if not c:
+                continue
+            msgs = c.get("channel_values", {}).get("messages", [])
+            if len(msgs) > len(messages):
+                messages = msgs
         return usage(messages)
     except Exception as e:
         logger.exception("context usage failed")
@@ -580,104 +669,157 @@ async def fs_list(path: str = ""):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/pipeline/generate")
-async def pipeline_generate(req: GenerateRequest) -> StreamingResponse:
-    """参数卡确认后真正出图：用用户给定的全参数 + 工作目录跑 FLUX，SSE 推 tool_result + image。"""
-    async def gen():
-        import asyncio
-        from agent_lab.app.pipeline.runtime import set_workspace
-        from agent_lab.app.pipeline.pipeline_tools import generate_candidates as _gen_tool
+async def _generate_events(req: GenerateRequest):
+    """出图任务的事件流（被 job_manager 在后台 worker 里消费）。"""
+    import asyncio
+    from agent_lab.app.pipeline.runtime import set_workspace
+    from agent_lab.app.pipeline.pipeline_tools import generate_candidates as _gen_tool
 
-        set_workspace(req.workspace)
-        yield {"type": "tool_call", "name": "generate_candidates",
-               "args": {"scene_id": req.scene_id, "n": req.n, "steps": req.steps}}
+    set_workspace(req.workspace)
+    yield {"type": "tool_call", "name": "generate_candidates",
+           "args": {"scene_id": req.scene_id, "n": req.n, "steps": req.steps}}
+    try:
+        # generate_candidates 是同步阻塞（走 SSH/GPU），放线程池避免卡事件循环
+        out = await asyncio.to_thread(
+            _gen_tool.func,
+            scene_id=req.scene_id, image_prompt=req.image_prompt, n=req.n,
+            steps=req.steps, guidance=req.guidance, width=req.width,
+            height=req.height, seed=req.seed, offload=req.offload,
+        )
+    except Exception as e:  # noqa: BLE001
+        yield {"type": "tool_result", "name": "generate_candidates",
+               "content": f"❌ 出图失败: {type(e).__name__}: {e}"}
+        return
+    clean, events = ai_service._extract_tool_markers(out)
+    yield {"type": "tool_result", "name": "generate_candidates", "content": clean[:600]}
+    for ev in events:
+        yield ev
+
+    # 把出图结果写回会话的 video 线程，刷新后 getSessionHistory 能重建图片墙
+    if req.session_id:
         try:
-            # generate_candidates 是同步阻塞（走 SSH/GPU），放线程池避免卡事件循环
-            out = await asyncio.to_thread(
-                _gen_tool.func,
-                scene_id=req.scene_id, image_prompt=req.image_prompt, n=req.n,
-                steps=req.steps, guidance=req.guidance, width=req.width,
-                height=req.height, seed=req.seed, offload=req.offload,
-            )
-        except Exception as e:  # noqa: BLE001
-            yield {"type": "tool_result", "name": "generate_candidates",
-                   "content": f"❌ 出图失败: {type(e).__name__}: {e}"}
-            return
-        clean, events = ai_service._extract_tool_markers(out)
-        yield {"type": "tool_result", "name": "generate_candidates", "content": clean[:600]}
-        for ev in events:
-            yield ev
+            from langchain_core.messages import AIMessage, ToolMessage
+            from uuid import uuid4
+            graph = await ai_service._get_subagent("video")
+            cfg = {"configurable": {"thread_id": f"video:{req.session_id}"}}
+            tcid = "genimg_" + uuid4().hex[:8]
+            await graph.aupdate_state(cfg, {"messages": [
+                AIMessage(content="", tool_calls=[{
+                    "id": tcid, "name": "generate_candidates",
+                    "args": {"scene_id": req.scene_id},
+                }]),
+                ToolMessage(content=out, tool_call_id=tcid, name="generate_candidates"),
+                AIMessage(content="🎨 已生成候选图，请在图片墙中点选一张。"),
+            ]})
+        except Exception:
+            logger.exception("[generate] 写回会话线程失败（不影响出图）")
 
-        # 把出图结果写回会话的 video 线程，刷新后 getSessionHistory 能重建图片墙
-        if req.session_id:
-            try:
-                from langchain_core.messages import AIMessage, ToolMessage
-                from uuid import uuid4
-                graph = await ai_service._get_subagent("video")
-                cfg = {"configurable": {"thread_id": f"video:{req.session_id}"}}
-                tcid = "genimg_" + uuid4().hex[:8]
-                await graph.aupdate_state(cfg, {"messages": [
-                    AIMessage(content="", tool_calls=[{
-                        "id": tcid, "name": "generate_candidates",
-                        "args": {"scene_id": req.scene_id},
-                    }]),
-                    ToolMessage(content=out, tool_call_id=tcid, name="generate_candidates"),
-                    AIMessage(content="🎨 已生成候选图，请在图片墙中点选一张。"),
-                ]})
-            except Exception:
-                logger.exception("[generate] 写回会话线程失败（不影响出图）")
 
-    return StreamingResponse(_events_to_sse(gen()), media_type="text/event-stream",
-                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+@router.post("/pipeline/generate")
+async def pipeline_generate(req: GenerateRequest):
+    """参数卡确认后出图：提交为后台任务，立即返回 job_id（单飞队列，不再占着连接）。"""
+    from agent_lab.app.services.job_manager import job_manager
+    job_id = job_manager.submit("generate", lambda: _generate_events(req))
+    return {"job_id": job_id}
+
+
+async def _render_events(req: RenderRequest):
+    """出片任务的事件流（被 job_manager 在后台 worker 里消费）。"""
+    import asyncio
+    from agent_lab.app.pipeline.runtime import set_workspace
+    from agent_lab.app.pipeline.pipeline_tools import do_render_scene_video
+
+    set_workspace(req.workspace)
+    # 合并参数：旧扁平字段并入 params（params 优先）
+    params = dict(req.params or {})
+    if req.size and "size" not in params:
+        params["size"] = req.size
+    if req.frame_num and "frame_num" not in params:
+        params["frame_num"] = req.frame_num
+    if req.sample_steps and "sample_steps" not in params:
+        params["sample_steps"] = req.sample_steps
+
+    yield {"type": "tool_call", "name": "render_scene_video",
+           "args": {"scene_id": req.scene_id, "model": req.model or "default", **params}}
+    try:
+        out = await asyncio.to_thread(
+            do_render_scene_video,
+            req.scene_id, req.motion_prompt, req.model, params,
+        )
+    except Exception as e:  # noqa: BLE001
+        yield {"type": "tool_result", "name": "render_scene_video",
+               "content": f"出视频失败: {type(e).__name__}: {e}"}
+        return
+    clean, events = ai_service._extract_tool_markers(out)
+    yield {"type": "tool_result", "name": "render_scene_video", "content": clean[:600]}
+    for ev in events:
+        yield ev
+
+    # 写回会话 video 线程，刷新后可重建视频播放器
+    if req.session_id:
+        try:
+            from langchain_core.messages import AIMessage, ToolMessage
+            from uuid import uuid4
+            graph = await ai_service._get_subagent("video")
+            cfg = {"configurable": {"thread_id": f"video:{req.session_id}"}}
+            tcid = "render_" + uuid4().hex[:8]
+            await graph.aupdate_state(cfg, {"messages": [
+                AIMessage(content="", tool_calls=[{
+                    "id": tcid, "name": "render_scene_video",
+                    "args": {"scene_id": req.scene_id},
+                }]),
+                ToolMessage(content=out, tool_call_id=tcid, name="render_scene_video"),
+                AIMessage(content="出片完成，已在下方内嵌播放。"),
+            ]})
+        except Exception:
+            logger.exception("[render] 写回会话线程失败（不影响出片）")
 
 
 @router.post("/pipeline/render")
-async def pipeline_render(req: RenderRequest) -> StreamingResponse:
-    """出视频参数卡确认后真正出片：用给定参数 + 工作目录跑 Wan2.2，SSE 推 tool_result + video。"""
-    async def gen():
-        import asyncio
-        from agent_lab.app.pipeline.runtime import set_workspace
-        from agent_lab.app.pipeline.pipeline_tools import render_scene_video as _render_tool
+async def pipeline_render(req: RenderRequest):
+    """出视频参数卡确认后出片：提交为后台任务，立即返回 job_id（单飞队列）。"""
+    from agent_lab.app.services.job_manager import job_manager
+    job_id = job_manager.submit("render", lambda: _render_events(req))
+    return {"job_id": job_id}
 
-        set_workspace(req.workspace)
-        yield {"type": "tool_call", "name": "render_scene_video",
-               "args": {"scene_id": req.scene_id, "size": req.size, "frame_num": req.frame_num}}
-        try:
-            out = await asyncio.to_thread(
-                _render_tool.func,
-                scene_id=req.scene_id, motion_prompt=req.motion_prompt,
-                size=req.size, frame_num=req.frame_num, sample_steps=req.sample_steps,
-            )
-        except Exception as e:  # noqa: BLE001
-            yield {"type": "tool_result", "name": "render_scene_video",
-                   "content": f"出视频失败: {type(e).__name__}: {e}"}
-            return
-        clean, events = ai_service._extract_tool_markers(out)
-        yield {"type": "tool_result", "name": "render_scene_video", "content": clean[:600]}
-        for ev in events:
-            yield ev
 
-        # 写回会话 video 线程，刷新后可重建视频播放器
-        if req.session_id:
-            try:
-                from langchain_core.messages import AIMessage, ToolMessage
-                from uuid import uuid4
-                graph = await ai_service._get_subagent("video")
-                cfg = {"configurable": {"thread_id": f"video:{req.session_id}"}}
-                tcid = "render_" + uuid4().hex[:8]
-                await graph.aupdate_state(cfg, {"messages": [
-                    AIMessage(content="", tool_calls=[{
-                        "id": tcid, "name": "render_scene_video",
-                        "args": {"scene_id": req.scene_id},
-                    }]),
-                    ToolMessage(content=out, tool_call_id=tcid, name="render_scene_video"),
-                    AIMessage(content="Wan2.2 出片完成，已在下方内嵌播放。"),
-                ]})
-            except Exception:
-                logger.exception("[render] 写回会话线程失败（不影响出片）")
+@router.get("/pipeline/jobs/{job_id}/events")
+async def pipeline_job_events(job_id: str, since: int = 0) -> StreamingResponse:
+    """SSE：回放并实时跟随某个 GPU 任务的事件，直到完成。
 
-    return StreamingResponse(_events_to_sse(gen()), media_type="text/event-stream",
+    断线重连：客户端记录已收事件数 N，重连传 ?since=N，不重不漏。
+    任务在后台 worker 里独立运行，浏览器断开也不影响其完成与落库。
+    """
+    from agent_lab.app.services.job_manager import job_manager
+    job = job_manager.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="任务不存在或已过期")
+    return StreamingResponse(_events_to_sse(job.stream(since)), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+@router.get("/pipeline/jobs/{job_id}")
+async def pipeline_job_status(job_id: str):
+    """查询任务状态快照（轮询兜底用）。"""
+    from agent_lab.app.services.job_manager import job_manager
+    job = job_manager.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="任务不存在或已过期")
+    return {"job_id": job.id, "kind": job.kind, "status": job.status,
+            "event_count": len(job.events), "error": job.error}
+
+
+@router.get("/video/providers")
+async def list_video_providers():
+    """列出已注册的视频模型及各自参数 schema（前端可据此构建模型选择/参数卡）。
+
+    新增模型（在 pipeline/providers 注册）后自动出现，无需改前端。
+    """
+    from agent_lab.app.pipeline.providers import video_provider_registry
+    return {
+        "default": video_provider_registry.default_name,
+        "providers": video_provider_registry.list_providers(),
+    }
 
 
 @router.post("/pipeline/select")
@@ -687,5 +829,240 @@ async def pipeline_select(req: SelectRequest):
     from agent_lab.app.pipeline.pipeline_tools import select_candidate as _sel_tool
     set_workspace(req.workspace)   # 用与出图相同的工作目录 DB，否则查不到该资产
     msg = _sel_tool.func(scene_id=req.scene_id, asset_id=req.asset_id)
-    ok = msg.startswith("✅")
+    # 成功消息形如「已选定 … → PENDING_VIDEO_GEN」；失败为「分镜不存在/未找到/不属于该分镜」等。
+    # （早先按 ✅ 前缀判断，但 emoji 已统一移除，导致永远判为失败、前端不给「出视频」按钮）
+    ok = ("已选定" in msg) or ("PENDING_VIDEO_GEN" in msg)
     return {"success": ok, "message": msg}
+
+
+# ── 制作面板：确定性、DB 驱动的整片流程（出图/选图/出片/合成全用按钮，不绕 agent）──
+
+def _scene_candidates(store, scene_id: str):
+    """某分镜的候选图（带本地可访问 URL + 是否选中）。"""
+    import os
+    import posixpath
+    from urllib.parse import quote as _quote
+    from agent_lab.app.pipeline.runtime import candidates_dir
+    out = []
+    cdir = candidates_dir(scene_id)
+    for a in store.list_assets(scene_id, "IMAGE"):
+        name = posixpath.basename(a["storage_path"])
+        lp = os.path.join(cdir, name)
+        out.append({
+            "assetId": a["id"], "sceneId": scene_id, "name": name,
+            "selected": bool(a.get("is_selected")),
+            "url": f"/api/file?path={_quote(lp)}" if os.path.exists(lp) else "",
+        })
+    return out
+
+
+@router.get("/pipeline/projects")
+async def pipeline_projects(workspace: str | None = None):
+    """当前工作目录下的项目列表（新→旧）。底部「制作面板」常驻按钮据此找最新项目。"""
+    from agent_lab.app.pipeline.runtime import set_workspace
+    from agent_lab.app.pipeline.store import get_store
+    set_workspace(workspace)
+    store = get_store()
+    out = []
+    for p in store.list_projects():
+        scenes = store.list_scenes(p["id"])
+        out.append({"project_id": p["id"], "title": p.get("title") or "",
+                    "created_at": p.get("created_at") or "", "scenes": len(scenes)})
+    return {"projects": out}
+
+
+@router.get("/pipeline/project/{project_id}")
+async def pipeline_project(project_id: str, workspace: str | None = None):
+    """制作面板的数据源：项目下所有分镜 + 候选图 + 选中态 + 成片（全部从 DB/本地文件读，刷新不丢）。"""
+    import os
+    from urllib.parse import quote as _quote
+    from agent_lab.app.pipeline.runtime import set_workspace, video_dir
+    from agent_lab.app.pipeline.store import get_store
+    set_workspace(workspace)
+    store = get_store()
+    try:
+        st = store.status(project_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    vdir = video_dir()
+    scenes = []
+    for s in sorted(st["scenes"], key=lambda x: x["scene_number"]):
+        cands = _scene_candidates(store, s["id"])
+        vlocal = os.path.join(vdir, f"{s['scene_number']:02d}_{s['id']}.mp4")
+        scenes.append({
+            "scene_id": s["id"], "scene_number": s["scene_number"],
+            "title": s.get("title") or "", "state": s["state"],
+            "narration": s.get("narration") or "",
+            "candidates": cands,
+            "selected": any(c["selected"] for c in cands),
+            "video": ({"url": f"/api/file?path={_quote(vlocal)}",
+                       "name": os.path.basename(vlocal)} if os.path.exists(vlocal) else None),
+        })
+    episode = os.path.join(vdir, f"episode_{project_id}.mp4")
+    return {
+        "project_id": project_id, "title": st["project"].get("title") or "",
+        "scenes": scenes,
+        "counts": {
+            "total": len(scenes),
+            "with_candidates": sum(1 for s in scenes if s["candidates"]),
+            "selected": sum(1 for s in scenes if s["selected"]),
+            "done": sum(1 for s in scenes if s["video"]),
+        },
+        "episode": ({"url": f"/api/file?path={_quote(episode)}",
+                     "name": os.path.basename(episode)} if os.path.exists(episode) else None),
+    }
+
+
+class BatchRequest(BaseModel):
+    project_id: str
+    workspace: str | None = None
+    session_id: str | None = None
+    # 出视频参数（面板可选）
+    model: str = ""
+    segments: int = 1
+    size: str = ""            # 出片分辨率（如 704*1280）；空=默认
+    # 出图参数（面板可选）
+    n: int = 0                # 每镜候选张数；0=默认
+    width: int = 0
+    height: int = 0
+
+
+async def _batch_generate_events(req: BatchRequest):
+    """批量出图：对所有"还没候选图"的分镜逐个跑 FLUX（用分镜自带 image_prompt + 默认参数）。"""
+    import asyncio
+    from agent_lab.app.pipeline.runtime import set_workspace
+    from agent_lab.app.pipeline.store import get_store
+    from agent_lab.app.pipeline.pipeline_tools import generate_candidates as _gen_tool
+
+    set_workspace(req.workspace)
+    store = get_store()
+    st = store.status(req.project_id)
+    todo = [s for s in sorted(st["scenes"], key=lambda x: x["scene_number"])
+            if len(store.list_assets(s["id"], "IMAGE")) == 0]
+    if not todo:
+        yield {"type": "tool_result", "name": "batch_generate", "content": "所有分镜都已出过图。"}
+        return
+    yield {"type": "tool_result", "name": "batch_generate",
+           "content": f"开始批量出图：共 {len(todo)} 个分镜待出图。"}
+    for i, s in enumerate(todo, 1):
+        yield {"type": "batch_progress", "phase": "generate",
+               "scene_id": s["id"], "index": i, "total": len(todo),
+               "label": f"出图 {i}/{len(todo)}：#{s['scene_number']} {s.get('title') or ''}"}
+        try:
+            out = await asyncio.to_thread(
+                _gen_tool.func, scene_id=s["id"],
+                n=req.n, width=req.width, height=req.height)
+        except Exception as e:  # noqa: BLE001
+            yield {"type": "tool_result", "name": "batch_generate",
+                   "content": f"#{s['scene_number']} 出图失败: {type(e).__name__}: {e}"}
+            continue
+        _clean, events = ai_service._extract_tool_markers(out)
+        for ev in events:
+            yield ev   # image 事件带 scene_id，前端按分镜归位
+        yield {"type": "scene_ready", "scene_id": s["id"]}
+    yield {"type": "tool_result", "name": "batch_generate", "content": "批量出图完成，请逐个分镜点选一张候选图。"}
+
+
+async def _batch_finish_events(req: BatchRequest):
+    """批量出片 + 合成：对所有已选图的分镜出片，再合成整集。"""
+    import asyncio
+    from agent_lab.app.pipeline.runtime import set_workspace
+    from agent_lab.app.pipeline.store import get_store, SceneState
+    from agent_lab.app.pipeline.pipeline_tools import do_render_scene_video, assemble_episode as _asm_tool
+
+    set_workspace(req.workspace)
+    store = get_store()
+    st = store.status(req.project_id)
+    scenes = sorted(st["scenes"], key=lambda x: x["scene_number"])
+    # 以「已选定一张图且尚未出片」为准（state 可能漂移，但选中资产是可靠信号）
+    todo = [s for s in scenes
+            if s.get("selected_asset_id") and s["state"] != SceneState.COMPLETED.value]
+    already = [s for s in scenes if s["state"] == SceneState.COMPLETED.value]
+    if not todo and not already:
+        yield {"type": "tool_result", "name": "batch_finish",
+               "content": "还没有任何分镜选好图，请先逐个分镜点选一张候选图。"}
+        return
+    params: dict = {}
+    if req.segments and req.segments > 1:
+        params["segments"] = req.segments
+    if req.size:
+        params["size"] = req.size
+    for i, s in enumerate(todo, 1):
+        yield {"type": "batch_progress", "phase": "render",
+               "scene_id": s["id"], "index": i, "total": len(todo),
+               "label": f"出片 {i}/{len(todo)}：#{s['scene_number']} {s.get('title') or ''}"}
+        try:
+            out = await asyncio.to_thread(
+                do_render_scene_video, s["id"], "", req.model, dict(params))
+        except Exception as e:  # noqa: BLE001
+            yield {"type": "tool_result", "name": "batch_finish",
+                   "content": f"#{s['scene_number']} 出片失败: {type(e).__name__}: {e}"}
+            continue
+        _clean, events = ai_service._extract_tool_markers(out)
+        for ev in events:
+            yield ev
+        yield {"type": "scene_ready", "scene_id": s["id"]}
+    # 合成整集
+    yield {"type": "batch_progress", "phase": "assemble", "label": "合成整集（拼接 + 旁白 + 字幕）…"}
+    try:
+        out = await asyncio.to_thread(_asm_tool.func, project_id=req.project_id)
+    except Exception as e:  # noqa: BLE001
+        yield {"type": "tool_result", "name": "batch_finish", "content": f"合成失败: {type(e).__name__}: {e}"}
+        return
+    clean, events = ai_service._extract_tool_markers(out)
+    yield {"type": "tool_result", "name": "batch_finish", "content": clean[:400]}
+    for ev in events:
+        yield ev
+
+
+@router.post("/pipeline/upload_candidate")
+async def pipeline_upload_candidate(
+    scene_id: str = Form(...),
+    workspace: str = Form(default=""),
+    file: UploadFile = File(...),
+):
+    """已有分镜图直接上传当候选，无需 GPU 生图。
+
+    本地存入工作目录 candidates/<scene>/；登记的 storage_path 用 GPU 侧约定路径——
+    出片时的「参考图就绪保障」发现 GPU 上没有该文件，会自动用本地副本回传，链路无缝。
+    """
+    import os as _os
+    import pathlib
+    from uuid import uuid4
+    from agent_lab.app.pipeline.runtime import set_workspace, candidates_dir
+    from agent_lab.app.pipeline.store import get_store, SceneState
+
+    suffix = pathlib.Path(file.filename or "").suffix.lower()
+    if suffix not in {".png", ".jpg", ".jpeg", ".webp"}:
+        raise HTTPException(status_code=400, detail=f"不支持的图片类型 {suffix}（支持 png/jpg/webp）")
+    set_workspace(workspace or None)
+    store = get_store()
+    scene = store.get_scene(scene_id)
+    if not scene:
+        raise HTTPException(status_code=404, detail=f"分镜不存在: {scene_id}")
+
+    name = f"upload_{uuid4().hex[:8]}{suffix}"
+    local = _os.path.join(candidates_dir(scene_id), name)
+    with open(local, "wb") as f:
+        f.write(await file.read())
+    remote = posixpath.join(settings.GPU_FLUX_OUT_ROOT, scene_id, name)  # 出片时自动回传
+    asset = store.add_asset(scene_id=scene_id, storage_path=remote, asset_type="IMAGE")
+    if scene["state"] in ("DRAFT", "PENDING_FLUX_GEN", "FAILED"):
+        store.set_scene_state(scene_id, SceneState.PENDING_HUMAN_SELECTION, force=True)
+    from urllib.parse import quote as _quote
+    return {"asset_id": asset["id"], "name": name,
+            "url": f"/api/file?path={_quote(local)}"}
+
+
+@router.post("/pipeline/batch_generate")
+async def pipeline_batch_generate(req: BatchRequest):
+    """一键全部出图：后台单飞任务，返回 job_id。"""
+    from agent_lab.app.services.job_manager import job_manager
+    return {"job_id": job_manager.submit("batch_generate", lambda: _batch_generate_events(req), meta={"session_id": req.session_id})}
+
+
+@router.post("/pipeline/batch_finish")
+async def pipeline_batch_finish(req: BatchRequest):
+    """一键全部出片并合成整集：后台单飞任务，返回 job_id。"""
+    from agent_lab.app.services.job_manager import job_manager
+    return {"job_id": job_manager.submit("batch_finish", lambda: _batch_finish_events(req), meta={"session_id": req.session_id})}

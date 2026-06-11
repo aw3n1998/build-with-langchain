@@ -54,7 +54,7 @@ function writeSupCfg(patch) {
  */
 export default function InputBar({ onSend, disabled, agent, onAgentChange,
                                    onNewChat, onClearChat, onOpenWorkspace, onCompact,
-                                   agents }) {
+                                   agents, onStop }) {
   const [value, setValue] = useState('')
   const [slashIdx, setSlashIdx] = useState(0)
   const textareaRef = useRef(null)
@@ -311,35 +311,37 @@ export default function InputBar({ onSend, disabled, agent, onAgentChange,
             </span>
 
             <button
-              onClick={handleSend}
-              disabled={!canSend}
+              onClick={disabled ? onStop : handleSend}
+              disabled={!disabled && !canSend}
+              title={disabled ? '停止生成' : ''}
               style={{
                 height: 30, padding: '0 14px',
                 borderRadius: 8, border: 'none',
                 fontSize: 12, fontWeight: 600,
-                cursor: canSend ? 'pointer' : 'not-allowed',
+                cursor: (disabled || canSend) ? 'pointer' : 'not-allowed',
                 display: 'flex', alignItems: 'center', gap: 6,
                 transition: 'all 0.15s',
-                background: canSend ? 'var(--accent)' : 'rgba(255,255,255,0.06)',
-                color: canSend ? '#fff' : 'var(--text-dim)',
+                background: disabled ? 'rgba(239,68,68,0.18)'
+                  : canSend ? 'var(--accent)' : 'rgba(255,255,255,0.06)',
+                color: disabled ? 'rgba(252,165,165,1)'
+                  : canSend ? '#fff' : 'var(--text-dim)',
               }}
               onMouseEnter={e => {
-                if (canSend) e.currentTarget.style.background = 'var(--accent-hover)'
+                if (disabled) e.currentTarget.style.background = 'rgba(239,68,68,0.3)'
+                else if (canSend) e.currentTarget.style.background = 'var(--accent-hover)'
               }}
               onMouseLeave={e => {
-                if (canSend) e.currentTarget.style.background = 'var(--accent)'
+                if (disabled) e.currentTarget.style.background = 'rgba(239,68,68,0.18)'
+                else if (canSend) e.currentTarget.style.background = 'var(--accent)'
               }}
             >
               {disabled ? (
                 <>
                   <span style={{
-                    width: 10, height: 10, borderRadius: '50%',
-                    border: '2px solid rgba(255,255,255,0.3)',
-                    borderTopColor: 'rgba(255,255,255,0.8)',
-                    display: 'inline-block',
-                    animation: 'spin 0.7s linear infinite',
+                    width: 9, height: 9, borderRadius: 2,
+                    background: 'currentColor', display: 'inline-block',
                   }} />
-                  Thinking
+                  停止
                 </>
               ) : (
                 <>

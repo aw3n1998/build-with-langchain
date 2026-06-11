@@ -18,6 +18,7 @@ from langchain_core.messages import ToolMessage, SystemMessage
 from langgraph.graph import StateGraph, END
 from langgraph.graph.message import add_messages
 
+from agent_lab.app.services.msg_utils import sanitize_messages
 from agent_lab.app.services.skill_registry import SkillRegistry
 from agent_lab.app.services.stream_events import emit_tool_call, emit_tool_result
 from agent_lab.app.core.logger import get_logger
@@ -31,13 +32,18 @@ _PROMPT = SystemMessage(content=(
     "  0) 用户说『参考这个小说/这个文件夹里的小说』时，先用 list_workspace_files 找到小说文件，"
     "再用 read_text_file 读正文（长篇可分段读），据此构思分镜与提示词；\n"
     "  1) create_video_project 建项目；\n"
-    "  2) add_scene 逐个加分镜（写好 image_prompt 与 motion_prompt，角色镜头记得带触发词 ch4r_cael）；\n"
-    "  3) 用户要出图时，先调 request_image_params 弹出参数卡让用户确认参数"
-    "（不要直接 generate_candidates）；用户确认后由前端触发真正出图；\n"
-    "  4) 候选图会以图片墙显示，用户点图即选图（select_candidate）；\n"
-    "  5) 用户要出视频时，先调 request_video_params 弹出参数卡让用户确认参数"
-    "（不要直接 render_scene_video）；用户确认后由前端触发真正出片；\n"
-    "  6) 随时用 list_project_scenes / project_status 查进度。\n"
+    "  2) add_scene 逐个加分镜（写好 image_prompt 与 motion_prompt）。角色触发词不要写死在提示词里——"
+    "它由工作目录配置（.agent/config.json 的 trigger_word）决定，出图时会自动注入；"
+    "用户提到某角色触发词/LoRA/风格时，调 configure_character 写入配置即可；\n"
+    "  3) 【拆完所有分镜后，立刻调 open_production_panel(project_id)，不要询问用户『要不要打开面板』"
+    "或『逐个出还是一起出』——直接开】。开完用一两句话告诉用户：在面板上"
+    "「一键全部出图 → 每个分镜点选一张 → 一键出片并合成」即可，底部也有常驻的「制作面板」按钮可随时再打开。"
+    "**你不要自己逐个出图/出片，也没有任何「参数卡」可弹**——机械步骤全部归面板；\n"
+    "  4) 用户若想微调某个分镜（换提示词重新出图），你可以直接调 generate_candidates(scene_id, image_prompt=新提示词)；"
+    "选图只能由用户在面板上点击完成，你不要用文字替用户选图，"
+    "也不要凭记忆断言某分镜有没有图（要查先调 list_project_scenes）；\n"
+    "  5) 随时用 list_project_scenes / project_status 查进度；用户找不到面板时，"
+    "重新调一次 open_production_panel(project_id) 即可再弹一个。\n"
     "每步调用工具后，用简洁中文向用户汇报状态与下一步。遇到 GPU 未配置时，提示用户在 .env 填 GPU_SSH_* 配置。"
 ))
 
@@ -50,19 +56,33 @@ class VideoState(TypedDict):
 def build_video_subgraph(llm, registry: SkillRegistry, checkpointer=None):
     """工厂：返回小说转视频 ReAct 子图（结构同 general_agent，工具偏向流水线工具）。"""
 
+    # 流水线核心工具永远可用：语义检索只做补充。否则用户回一句「可以/好的」，
+    # 检索拿这两个字去搜会返回不相干工具，agent 就会宣称"我没有出图工具"。
+    _ESSENTIALS = [
+        "create_video_project", "add_scene", "list_project_scenes", "project_status",
+        "open_production_panel", "generate_candidates", "assemble_episode",
+        "list_workspace_files", "read_text_file", "configure_character",
+    ]
+
     async def skill_retrieval_node(state: VideoState) -> dict:
         query = next(
             m.content for m in reversed(state["messages"]) if m.type == "human"
         )
         retrieved = await registry.search(query, top_k=6)
-        names = [t.name for t in retrieved]
+        names = []
+        for n in dict.fromkeys(_ESSENTIALS + [t.name for t in retrieved]):
+            try:
+                registry.get(n)
+                names.append(n)
+            except Exception:
+                pass   # 未注册的名字直接跳过，避免 agent_node 取工具时崩
         logger.info("[VideoAgent] skill_retrieval → %s", names)
         return {"active_tools": names}
 
     async def agent_node(state: VideoState) -> dict:
         tools = [registry.get(n) for n in state["active_tools"]]
         llm_dynamic = llm.bind_tools(tools) if tools else llm
-        response = await llm_dynamic.ainvoke([_PROMPT] + state["messages"])
+        response = await llm_dynamic.ainvoke([_PROMPT] + sanitize_messages(state["messages"]))
         return {"messages": [response]}
 
     async def tools_node(state: VideoState) -> dict:
@@ -121,7 +141,8 @@ def register_agent(registry) -> None:
         node_labels={"agent": "视频流水线 Agent", "tools": "流水线工具执行"},
         routing_keywords=[
             "视频", "短剧", "分镜", "出图", "图生视频", "成片", "mp4",
-            "flux", "wan", "wan2.2", "小说转视频", "选图", "运镜", "video",
+            "flux", "wan", "wan2.2", "ltx", "小说转视频", "选图", "运镜", "video",
+            "合成", "拼接", "旁白", "字幕", "配音",
         ],
         user_facing_nodes={"agent"},
     )

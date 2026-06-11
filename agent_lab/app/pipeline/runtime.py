@@ -101,8 +101,57 @@ def agent_dir() -> str:
                     "candidates/": "FLUX 出的候选图（按分镜分子目录）",
                     "video_out/": "Wan2.2 出的成片 mp4",
                 },
+                # 角色/模型配置：出图时自动注入，换角色/风格只改这里，不用动代码或提示词
+                "model": {
+                    "trigger_word": "",       # 角色触发词（LoRA 触发词），自动加在出图提示词最前
+                    "flux_lora": "",          # FLUX LoRA 路径覆盖（留空=用 .env 的默认）
+                    "negative_prompt": "",    # 可选负向提示词
+                },
             }, f, ensure_ascii=False, indent=2)
     return d
+
+
+def _config_path() -> str:
+    return os.path.join(agent_dir(), "config.json")
+
+
+def workspace_config() -> dict:
+    """读取当前工作目录的 .agent/config.json（损坏/不存在则返回空 dict）。"""
+    import json
+    try:
+        with open(_config_path(), "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def model_config() -> dict:
+    """角色/模型相关的工作目录级配置（触发词 / LoRA / 负向词），带兜底默认。"""
+    m = workspace_config().get("model") or {}
+    return {
+        "trigger_word": (m.get("trigger_word") or "").strip(),
+        "flux_lora": (m.get("flux_lora") or "").strip(),
+        "negative_prompt": (m.get("negative_prompt") or "").strip(),
+    }
+
+
+def set_model_config(trigger_word: str | None = None,
+                     flux_lora: str | None = None,
+                     negative_prompt: str | None = None) -> dict:
+    """更新工作目录级模型配置（只改传入的非 None 字段），写回 config.json 并返回最新值。"""
+    import json
+    cfg = workspace_config()
+    m = dict(cfg.get("model") or {})
+    if trigger_word is not None:
+        m["trigger_word"] = trigger_word
+    if flux_lora is not None:
+        m["flux_lora"] = flux_lora
+    if negative_prompt is not None:
+        m["negative_prompt"] = negative_prompt
+    cfg["model"] = m
+    with open(_config_path(), "w", encoding="utf-8") as f:
+        json.dump(cfg, f, ensure_ascii=False, indent=2)
+    return model_config()
 
 
 def state_db() -> str:

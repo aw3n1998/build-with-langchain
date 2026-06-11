@@ -85,6 +85,59 @@ async function* parseSSE(response) {
   }
 }
 
+// ── 对话改后台任务：提交即返回 job_id（回合在服务端独立完成，切会话/断网不丢）──
+export async function chatSubmit(sessionId, content, { agent = 'supervisor', workspace = null } = {}) {
+  const agentConfigs = getAgentConfigs()
+  const body = { session_id: sessionId, content, agent }
+  if (agentConfigs) body.agent_configs = agentConfigs
+  if (workspace) body.workspace = workspace
+  const r = await fetch(`${getBase()}/chat/submit`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  })
+  if (!r.ok) throw new Error(`HTTP ${r.status}`)
+  return (await r.json()).job_id
+}
+
+export async function resumeSubmit(sessionId, agent, approved) {
+  const r = await fetch(`${getBase()}/chat/resume_submit`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ session_id: sessionId, agent, approved }),
+  })
+  if (!r.ok) throw new Error(`HTTP ${r.status}`)
+  return (await r.json()).job_id
+}
+
+/**
+ * 任务状态 WebSocket：连接即收到所有未完任务快照，状态一变后端实时推送。
+ * 断线自动重连。返回 close 函数。
+ */
+export function connectJobsWS(onMsg) {
+  let ws = null
+  let closed = false
+  const url = (() => {
+    const base = getBase()                       // '/api' 或 'http://host:8000/api'
+    if (base.startsWith('http')) return base.replace(/^http/, 'ws') + '/ws/jobs'
+    const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    return `${proto}//${window.location.host}${base}/ws/jobs`
+  })()
+  const connect = () => {
+    if (closed) return
+    try { ws = new WebSocket(url) } catch { setTimeout(connect, 3000); return }
+    ws.onmessage = e => { try { onMsg(JSON.parse(e.data)) } catch {} }
+    ws.onclose = () => { if (!closed) setTimeout(connect, 3000) }
+    ws.onerror = () => { try { ws.close() } catch {} }
+  }
+  connect()
+  return () => { closed = true; try { ws?.close() } catch {} }
+}
+
+// 停止生成：chat 回合可真取消；GPU 任务会返回 cancelled=false（不可中断）
+export async function cancelJob(jobId) {
+  const r = await fetch(`${getBase()}/pipeline/jobs/${jobId}/cancel`, { method: 'POST' })
+  if (!r.ok) throw new Error(`HTTP ${r.status}`)
+  return r.json()
+}
+
 export async function* streamChat(sessionId, content, { agent = 'supervisor', workspace = null } = {}) {
   const agentConfigs = getAgentConfigs()
   const body = { session_id: sessionId, content, agent }
@@ -111,17 +164,52 @@ export async function fsList(path = '') {
   return r.json()
 }
 
-// ── 参数卡确认后出图（SSE：tool_call / tool_result / image）─────
-// params 需带 workspace（由调用方按当前会话传入）
-export async function* pipelineGenerate(params) {
-  const body = { ...params }
-  const response = await fetch(`${getBase()}/pipeline/generate`, {
+// ── GPU 长任务：提交即返回 job_id，再用 streamJobEvents 跟随 ─────
+// 出图/出片改为后台单飞任务（不再占着连接，断线可重连续看）。
+async function submitJob(path, params) {
+  const r = await fetch(`${getBase()}${path}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
+    body: JSON.stringify(params),
   })
-  if (!response.ok) throw new Error(`HTTP ${response.status}`)
-  yield* parseSSE(response)
+  if (!r.ok) throw new Error(`HTTP ${r.status}`)
+  return (await r.json()).job_id
+}
+
+// params 需带 workspace（由调用方按当前会话传入）；返回 job_id
+export async function pipelineGenerate(params) {
+  return submitJob('/pipeline/generate', params)
+}
+
+/**
+ * 跟随某个 GPU 任务的事件流（回放 + 实时），断线自动带 since 重连续看，
+ * 直到收到 done/error。任务在后台独立运行，浏览器断开也不影响其完成。
+ */
+export async function* streamJobEvents(jobId) {
+  let since = 0
+  while (true) {
+    let terminal = false
+    let resp
+    try {
+      resp = await fetch(`${getBase()}/pipeline/jobs/${jobId}/events?since=${since}`)
+    } catch {
+      await new Promise(r => setTimeout(r, 1500))   // 连接失败，稍后重连
+      continue
+    }
+    if (resp.status === 404) throw new Error('任务不存在或已过期')
+    if (!resp.ok) { await new Promise(r => setTimeout(r, 1500)); continue }
+    try {
+      for await (const ev of parseSSE(resp)) {
+        since += 1
+        if (ev.type === 'done' || ev.type === 'error') { terminal = true; yield ev; return }
+        yield ev
+      }
+    } catch {
+      // 流中途断开：带 since 重连续看
+    }
+    if (terminal) return
+    await new Promise(r => setTimeout(r, 1500))
+  }
 }
 
 // ── 选定工作目录时立即初始化 .agent 结构 ─────────────────────
@@ -138,15 +226,43 @@ export async function getAgents() {
   return r.json()
 }
 
-// ── 出视频参数卡确认后出片（SSE：tool_result / video）────────
-export async function* pipelineRender(params) {
-  const response = await fetch(`${getBase()}/pipeline/render`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(params),
-  })
-  if (!response.ok) throw new Error(`HTTP ${response.status}`)
-  yield* parseSSE(response)
+// ── 出视频参数卡确认后出片：提交为后台任务，返回 job_id ────────
+export async function pipelineRender(params) {
+  return submitJob('/pipeline/render', params)
+}
+
+// ── 制作面板：项目状态 + 一键批量出图 / 出片合成 ─────────────────
+export async function getProject(projectId, workspace = null) {
+  const q = workspace ? `?workspace=${encodeURIComponent(workspace)}` : ''
+  const r = await fetch(`${getBase()}/pipeline/project/${projectId}${q}`)
+  if (!r.ok) throw new Error(`status ${r.status}`)
+  return r.json()
+}
+export async function batchGenerate(params) { return submitJob('/pipeline/batch_generate', params) }
+export async function batchFinish(params) { return submitJob('/pipeline/batch_finish', params) }
+// 已有分镜图直接上传当候选（跳过 GPU 生图）
+export async function uploadCandidate(sceneId, file, workspace = null) {
+  const form = new FormData()
+  form.append('scene_id', sceneId)
+  form.append('workspace', workspace || '')
+  form.append('file', file)
+  const r = await fetch(`${getBase()}/pipeline/upload_candidate`, { method: 'POST', body: form })
+  if (!r.ok) throw new Error(`status ${r.status}`)
+  return r.json()
+}
+
+export async function listProjects(workspace = null) {
+  const q = workspace ? `?workspace=${encodeURIComponent(workspace)}` : ''
+  const r = await fetch(`${getBase()}/pipeline/projects${q}`)
+  if (!r.ok) throw new Error(`status ${r.status}`)
+  return r.json()
+}
+
+// ── 可用视频模型 + 各自参数 schema（注册即出现）──────────────
+export async function getVideoProviders() {
+  const r = await fetch(`${getBase()}/video/providers`)
+  if (!r.ok) throw new Error(`status ${r.status}`)
+  return r.json()
 }
 
 // ── 上下文窗口用量（真实 token / 触发压缩阈值）────────────────

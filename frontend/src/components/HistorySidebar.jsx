@@ -7,6 +7,7 @@ import { useState } from 'react'
  * 鼠标悬停在历史项上时，会淡入垃圾桶图标，允许删除会话。
  */
 export default function HistorySidebar({
+  runningSessions,
   currentSessionId,
   sessions = [],
   onSelectSession,
@@ -142,6 +143,7 @@ export default function HistorySidebar({
                 key={s.session_id}
                 session={s}
                 isActive={isActive}
+                running={runningSessions?.has?.(s.session_id)}
                 timeStr={timeStr}
                 onClick={() => onSelectSession(s.session_id)}
                 onDelete={() => onDeleteSession(s.session_id)}
@@ -154,7 +156,7 @@ export default function HistorySidebar({
   );
 }
 
-function SessionItem({ session, isActive, timeStr, onClick, onDelete }) {
+function SessionItem({ session, isActive, running, timeStr, onClick, onDelete }) {
   const [hovered, setHovered] = useState(false);
   const [deleteHovered, setDeleteHovered] = useState(false);
 
@@ -211,6 +213,7 @@ function SessionItem({ session, isActive, timeStr, onClick, onDelete }) {
       }}>
         {/* Title */}
         <div style={{
+          display: 'flex', alignItems: 'center', gap: 6,
           fontSize: 13,
           fontWeight: isActive ? 500 : 400,
           color: isActive ? 'rgba(255, 255, 255, 0.95)' : 'var(--text-sec)',
@@ -219,7 +222,17 @@ function SessionItem({ session, isActive, timeStr, onClick, onDelete }) {
           textOverflow: 'ellipsis',
           lineHeight: '1.2',
         }}>
-          {session.title || 'New Chat'}
+          {running && (
+            <span title="该会话有任务进行中" style={{
+              width: 7, height: 7, borderRadius: '50%', flexShrink: 0,
+              background: 'rgba(34,197,94,1)',
+              boxShadow: '0 0 6px rgba(34,197,94,0.8)',
+              animation: 'blink 1.6s ease-in-out infinite',
+            }} />
+          )}
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {session.title || 'New Chat'}
+          </span>
         </div>
 
         {/* Subtitle/Meta info */}

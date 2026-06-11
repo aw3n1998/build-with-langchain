@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import TopBar         from './components/TopBar'
 import ChatWindow     from './components/ChatWindow'
 import InputBar       from './components/InputBar'
@@ -6,9 +6,11 @@ import KnowledgePanel from './components/KnowledgePanel'
 import SettingsPanel  from './components/SettingsPanel'
 import HistorySidebar from './components/HistorySidebar'
 import FolderPicker   from './components/FolderPicker'
-import { getStatus, streamChat, resumeChat, getHistory, getSessionHistory, deleteSession,
-         pipelineGenerate, pipelineSelect, pipelineRender, getContextUsage, compactContext, getAgents,
+import { getStatus, chatSubmit, resumeSubmit, cancelJob, getHistory, getSessionHistory, deleteSession,
+         pipelineGenerate, pipelineSelect, pipelineRender, streamJobEvents, listProjects,
+         getContextUsage, compactContext, getAgents, connectJobsWS,
          initWorkspace } from './api'
+import { ProductionPanel } from './components/MessageBubble'
 
 // 每个会话独立的工作目录（互不影响）
 function loadWorkspaceMap() {
@@ -63,6 +65,31 @@ export default function App() {
   const [showFolderPicker, setShowFolderPicker] = useState(false)
   const [ctxUsage, setCtxUsage]           = useState(null)  // 真实上下文窗口用量
   const [agentList, setAgentList]         = useState([])    // 动态 Agent 列表（注册即出现）
+  // 制作面板抽屉：常驻入口（小白不需要"知道要说打开面板"），自动指向当前工作目录最新项目
+  const [showPanel, setShowPanel]         = useState(false)
+  const [panelProjectId, setPanelProjectId] = useState(null)
+  const [hasProject, setHasProject]       = useState(false)
+  // 有任务（对话/出图/出片）在跑的会话集合：侧边栏据此显示绿点
+  const [runningSessions, setRunningSessions] = useState(() => new Set())
+
+  // 流取消令牌：切换/新建会话时 +1，旧流的所有写入立即失效并退出循环。
+  // 对话回合本身在后台任务里跑（job_manager chat 通道），切走只是不再"看"，
+  // 回合照常完成并落库，切回来从历史里看到完整结果。
+  const streamToken = useRef(0)
+  const activeJobRef = useRef(null)   // 当前回合的 job_id（停止按钮用）
+  const cancelActiveStream = useCallback(() => {
+    streamToken.current += 1
+    setIsStreaming(false)
+  }, [])
+
+  /** 「停止生成」：真取消后台 chat 任务 + 停止本地跟随 */
+  const stopGenerating = useCallback(async () => {
+    const jid = activeJobRef.current
+    cancelActiveStream()
+    setMessages(prev => prev.map(m => m.streaming
+      ? { ...m, streaming: false, content: (m.content || '') + '\n\n（已停止生成）' } : m))
+    if (jid) { try { await cancelJob(jid) } catch {} }
+  }, [cancelActiveStream])
 
   const fetchSessions = useCallback(async () => {
     try {
@@ -73,10 +100,18 @@ export default function App() {
     }
   }, [])
 
+  // 当前会话的实时引用：异步回调里用它校验"结果是否还属于当前会话"，防止切会话后旧数据串台
+  const sessionIdRef = useRef(sessionId)
+  useEffect(() => { sessionIdRef.current = sessionId }, [sessionId])
+
   // 真实上下文窗口用量（定义在使用它的回调之前，避免 TDZ）
   const refreshContext = useCallback(async (sid) => {
-    try { setCtxUsage(await getContextUsage(sid || sessionId)) } catch {}
-  }, [sessionId])
+    const target = sid || sessionIdRef.current
+    try {
+      const u = await getContextUsage(target)
+      if (sessionIdRef.current === target) setCtxUsage(u)  // 已切走则丢弃，避免进度条串台
+    } catch {}
+  }, [])
 
   // 启动 + 定期刷新 RAG 状态
   useEffect(() => {
@@ -98,6 +133,59 @@ export default function App() {
     getAgents().then(setAgentList).catch(() => {})
   }, [])
 
+  // 任务状态 WebSocket：后端推送，不轮询。
+  // - 维护"哪些会话有任务在跑"（侧边栏绿点）；
+  // - 当前会话的后台任务完成、而本地没在跟流（比如切走又切回）→ 自动刷新历史，结果直接出现。
+  useEffect(() => {
+    const close = connectJobsWS((msg) => {
+      if (msg.type !== 'job_update' || !msg.session_id) return
+      const sid = msg.session_id
+      const active = msg.status === 'queued' || msg.status === 'running'
+      setRunningSessions(prev => {
+        const next = new Set(prev)
+        if (active) next.add(sid); else next.delete(sid)
+        return next
+      })
+      // 终态推送：属于当前会话且本地没有流在跟（切走过/刷新过）→ 拉最新历史
+      if (!active && sid === sessionIdRef.current) {
+        setIsStreaming(cur => {
+          if (!cur) {
+            getSessionHistory(sid).then(d => {
+              if (sessionIdRef.current === sid && d?.messages?.length) setMessages(d.messages)
+            }).catch(() => {})
+            refreshContext(sid)
+          }
+          return cur
+        })
+      }
+    })
+    return close
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // 工作目录变化时探测最新项目：有项目就点亮底部「制作面板」按钮
+  useEffect(() => {
+    let alive = true
+    setHasProject(false); setPanelProjectId(null)
+    if (!workspace) return
+    listProjects(workspace).then(d => {
+      if (!alive) return
+      const latest = d?.projects?.[0]
+      if (latest) { setPanelProjectId(latest.project_id); setHasProject(true) }
+    }).catch(() => {})
+    return () => { alive = false }
+  }, [workspace])
+
+  // 打开抽屉时再探一次（agent 刚建的新项目也能被按钮找到）
+  const openPanelDrawer = useCallback(async () => {
+    try {
+      const d = await listProjects(workspace)
+      const latest = d?.projects?.[0]
+      if (latest) { setPanelProjectId(latest.project_id); setHasProject(true) }
+    } catch {}
+    setShowPanel(true)
+  }, [workspace])
+
   // 刷新后恢复当前会话的历史消息（sessionId 已持久化，消息也要回来）
   useEffect(() => {
     (async () => {
@@ -112,7 +200,14 @@ export default function App() {
 
   /** 统一消费 SSE 事件流（sendMessage / handleResume 共用） */
   const consumeStream = useCallback(async (gen, aiMsgId, currentSessionId, currentAgent) => {
+    // 取消契约：捕获当前令牌；用户切走会话后令牌变化，本流停止一切写入并退出
+    //（for-await 的 break 会关闭底层 reader，连接随之中断；后台任务不受影响）。
+    const myToken = streamToken.current
+    // 参数卡先暂存，等本轮文字全部流完后再统一追加到对话最下面，
+    // 否则卡片会被夹在"弹出参数卡"与后续总结文字之间。
+    const pendingCards = []
     for await (const data of gen) {
+      if (streamToken.current !== myToken) return 'cancelled'
       if (data.type === 'chunk') {
         setMessages(prev =>
           prev.map(m => m.id === aiMsgId ? { ...m, content: m.content + data.content } : m)
@@ -139,9 +234,27 @@ export default function App() {
             return { ...m, steps }
           })
         )
+      } else if (data.type === 'queued') {
+        // 后台任务排队中（前面有 GPU 任务在跑，单飞队列）
+        setMessages(prev => prev.map(m => m.id === aiMsgId
+          ? { ...m, content: '前面有 GPU 任务在跑，排队中…（轮到就自动开始）' } : m))
+      } else if (data.type === 'status') {
+        if (data.status === 'running') {
+          setMessages(prev => prev.map(m => m.id === aiMsgId
+            ? (/排队中/.test(m.content) ? { ...m, content: '处理中…' } : m) : m))
+        }
+      } else if (data.type === 'production') {
+        // 制作面板：拆完分镜后的确定性控制台，暂存到 turn 末尾追加；
+        // 同时点亮底部常驻入口并指向该项目（小白即使没注意聊天卡片，也能从底部按钮进）
+        setPanelProjectId(data.project_id)
+        setHasProject(true)
+        pendingCards.push({
+          id: genId(), role: 'production', streaming: false,
+          project_id: data.project_id,
+        })
       } else if (data.type === 'param_form') {
-        // 出图参数卡：插入一张可编辑参数表单卡片
-        setMessages(prev => [...prev, {
+        // 出图参数卡：暂存，turn 结束时追加到最下面
+        pendingCards.push({
           id: genId(), role: 'param_form', streaming: false,
           params: {
             scene_id: data.scene_id, image_prompt: data.image_prompt || '',
@@ -150,7 +263,7 @@ export default function App() {
             offload: data.offload,
           },
           submitted: false,
-        }])
+        })
       } else if (data.type === 'image') {
         // 候选图：追加到当前消息的图片墙
         setMessages(prev =>
@@ -159,14 +272,19 @@ export default function App() {
             : m)
         )
       } else if (data.type === 'video_param_form') {
-        // 出视频参数卡
-        setMessages(prev => [...prev, {
+        // 出视频参数卡（多模型 + schema 驱动）。暂存到 turn 末尾再追加，兼容老事件（无 fields）。
+        pendingCards.push({
           id: genId(), role: 'video_param_form', streaming: false, submitted: false,
           params: {
-            scene_id: data.scene_id, motion_prompt: data.motion_prompt || '',
+            scene_id: data.scene_id,
+            motion_prompt: data.motion_prompt || '',
+            model: data.model || '',
+            models: data.models || [],
+            fields: data.fields || null,
+            // 老事件的扁平字段（向后兼容，card 在无 fields 时据此回退）
             size: data.size, frame_num: data.frame_num, sample_steps: data.sample_steps,
           },
-        }])
+        })
       } else if (data.type === 'video') {
         // 成片：内嵌播放器
         setMessages(prev =>
@@ -202,6 +320,11 @@ export default function App() {
         break
       }
     }
+    if (streamToken.current !== myToken) return 'cancelled'
+    // 本轮文字流完，参数卡统一追加到最下面
+    if (pendingCards.length) {
+      setMessages(prev => [...prev, ...pendingCards])
+    }
     return 'done'
   }, [])
 
@@ -217,8 +340,11 @@ export default function App() {
     setIsStreaming(true)
 
     try {
+      // 回合提交为后台任务：切会话/断网不影响其完成，落库后可从历史恢复
+      const jobId = await chatSubmit(sessionId, content.trim(), { agent, workspace })
+      activeJobRef.current = jobId
       const result = await consumeStream(
-        streamChat(sessionId, content.trim(), { agent, workspace }),
+        streamJobEvents(jobId),
         aiMsgId, sessionId, agent,
       )
       if (result !== 'interrupted') {
@@ -257,8 +383,10 @@ export default function App() {
     setIsStreaming(true)
 
     try {
+      const jobId = await resumeSubmit(sid, ag, approved)
+      activeJobRef.current = jobId
       const result = await consumeStream(
-        resumeChat(sid, ag, approved),
+        streamJobEvents(jobId),
         aiMsgId, sid, ag,
       )
       if (result !== 'interrupted') {
@@ -290,7 +418,9 @@ export default function App() {
     }])
     setIsStreaming(true)
     try {
-      await consumeStream(pipelineGenerate({ ...params, workspace, session_id: sessionId }), aiMsgId, sessionId, 'video')
+      // 提交为后台任务（单飞队列），再跟随其事件流；断线会自动重连续看
+      const jobId = await pipelineGenerate({ ...params, workspace, session_id: sessionId })
+      await consumeStream(streamJobEvents(jobId), aiMsgId, sessionId, 'video')
       setMessages(prev => prev.map(m => m.id === aiMsgId
         ? { ...m, content: m.content.replace(/^出图中.*?…/, '').trim(), streaming: false } : m))
     } catch {
@@ -308,14 +438,13 @@ export default function App() {
     setMessages(prev => prev.map(m => m.id === paramMsgId ? { ...m, submitted: true } : m))
     const aiMsgId = genId()
     setMessages(prev => [...prev, {
-      id: aiMsgId, role: 'assistant', content: '出视频中（Wan2.2 加载 + 采样，约 2-5 分钟）…',
+      id: aiMsgId, role: 'assistant', content: '出视频中（模型加载 + 采样，约 2-5 分钟）…',
       streaming: true, agentLabel: 'video',
     }])
     setIsStreaming(true)
     try {
-      await consumeStream(
-        pipelineRender({ ...params, workspace, session_id: sessionId }),
-        aiMsgId, sessionId, 'video')
+      const jobId = await pipelineRender({ ...params, workspace, session_id: sessionId })
+      await consumeStream(streamJobEvents(jobId), aiMsgId, sessionId, 'video')
       setMessages(prev => prev.map(m => m.id === aiMsgId
         ? { ...m, content: m.content.replace(/^出视频中.*?…/, '').trim(), streaming: false } : m))
     } catch {
@@ -337,11 +466,12 @@ export default function App() {
           img.assetId === assetId ? { ...img, selected: true }
             : (m.images.some(x => x.assetId === assetId) ? { ...img, selected: false } : img)) }
       }))
-      // 追加一条系统提示
-      setMessages(prev => [...prev, {
-        id: genId(), role: 'assistant', streaming: false,
+      // 选图确认消息：每个分镜只保留一条（重复点选/换选 = 原地替换，不再叠加刷屏）
+      const selMsgId = `sel-${sceneId}`
+      setMessages(prev => [...prev.filter(m => m.id !== selMsgId), {
+        id: selMsgId, role: 'assistant', streaming: false,
         content: res.success
-          ? `已选定候选图 \`${assetId}\`，分镜进入待出视频。下一步可让我「出视频」。`
+          ? `已选定候选图 \`${assetId}\`，分镜进入待出视频。\n<MSG_SPLIT><pcAction>{"label":"出视频","userInput":"出视频"}</pcAction>`
           : res.message,
       }])
     } catch (e) {
@@ -382,27 +512,32 @@ export default function App() {
 
   const persistSession = (sid) => {
     localStorage.setItem('agentlab_session_id', sid)
+    sessionIdRef.current = sid               // 同步更新引用（useEffect 要等下一帧，来不及）
     setSessionId(sid)
     setWorkspace(getSessionWorkspace(sid))   // 切到该会话自己的工作目录
   }
 
+  // 对话进行中也允许新建/切换会话：取消当前流的 UI 写入（后台 GPU 任务照常跑，切回可见）
   const startNewChat = () => {
-    if (isStreaming) return
+    cancelActiveStream()
     persistSession(`sid-${genId()}`)
     setMessages([])
+    setPendingInterrupt(null)
   }
 
   const handleSelectSession = useCallback(async (sid) => {
-    if (isStreaming) return
+    cancelActiveStream()
     try {
       persistSession(sid)
       const data = await getSessionHistory(sid)
-      setMessages(data.messages || [])
-      setPendingInterrupt(null)
+      if (sessionIdRef.current === sid) {     // 异步期间又切走了就丢弃
+        setMessages(data.messages || [])
+        setPendingInterrupt(null)
+      }
     } catch (err) {
       console.error("Failed to load session history:", err)
     }
-  }, [isStreaming])
+  }, [cancelActiveStream])
 
   const handleDeleteSession = useCallback(async (sid) => {
     try {
@@ -442,6 +577,7 @@ export default function App() {
         onSelectSession={handleSelectSession}
         onNewChat={startNewChat}
         onDeleteSession={handleDeleteSession}
+        runningSessions={runningSessions}
       />
 
       {/* 主对话区 */}
@@ -465,7 +601,8 @@ export default function App() {
 
         <ChatWindow messages={messages} onResume={handleResume} onSend={sendMessage}
                     onGenerate={handleGenerate} onSelectImage={handleSelectImage}
-                    onRenderVideo={handleRenderVideo} />
+                    onRenderVideo={handleRenderVideo}
+                    workspace={workspace} sessionId={sessionId} />
 
         {/* 工作目录条：出图/出视频的落地根 */}
         <div style={{
@@ -485,6 +622,16 @@ export default function App() {
             border: '1px solid var(--border)', background: 'rgba(255,255,255,0.05)',
             color: 'rgba(255,255,255,0.7)', fontSize: 12, cursor: 'pointer',
           }}>更改</button>
+          {/* 常驻制作面板入口：有项目即点亮，小白不需要知道"要说打开面板" */}
+          <button onClick={openPanelDrawer} disabled={!hasProject}
+            title={hasProject ? '打开短剧制作面板' : '先让 Agent 拆好分镜（建项目后此按钮点亮）'}
+            style={{
+              height: 24, padding: '0 12px', borderRadius: 6, marginLeft: 8,
+              border: `1px solid ${hasProject ? 'rgba(99,102,241,0.5)' : 'var(--border)'}`,
+              background: hasProject ? 'rgba(99,102,241,0.18)' : 'rgba(255,255,255,0.04)',
+              color: hasProject ? 'rgba(190,192,255,1)' : 'var(--text-dim)',
+              fontSize: 12, fontWeight: 600, cursor: hasProject ? 'pointer' : 'not-allowed',
+            }}>制作面板</button>
           {/* 上下文窗口真实用量进度条 */}
           <ContextBar usage={ctxUsage} onCompact={handleCompact} />
         </div>
@@ -493,6 +640,7 @@ export default function App() {
           key={sessionId}
           onSend={sendMessage}
           disabled={isStreaming}
+          onStop={stopGenerating}
           agent={agent}
           onAgentChange={setAgent}
           onNewChat={startNewChat}
@@ -520,6 +668,38 @@ export default function App() {
           onClose={() => setShowFolderPicker(false)}
           onPick={saveWorkspace}
         />
+
+        {/* 制作面板抽屉：常驻入口打开的独立工作区，与对话互不干扰 */}
+        {showPanel && (
+          <div onClick={() => setShowPanel(false)} style={{
+            position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', zIndex: 1500,
+            display: 'flex', justifyContent: 'flex-end',
+          }}>
+            <div onClick={e => e.stopPropagation()} style={{
+              width: 'min(720px, 92vw)', height: '100%', overflowY: 'auto',
+              background: 'var(--bg)', borderLeft: '1px solid var(--border)',
+              padding: '18px 20px', boxShadow: '-12px 0 40px rgba(0,0,0,0.5)',
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', marginBottom: 14 }}>
+                <span style={{ fontSize: 14, fontWeight: 700, color: 'rgba(255,255,255,0.85)' }}>短剧制作面板</span>
+                <button onClick={() => setShowPanel(false)} style={{
+                  marginLeft: 'auto', height: 26, padding: '0 12px', borderRadius: 6,
+                  border: '1px solid var(--border)', background: 'rgba(255,255,255,0.06)',
+                  color: 'rgba(255,255,255,0.75)', fontSize: 12, cursor: 'pointer',
+                }}>关闭</button>
+              </div>
+              {panelProjectId ? (
+                <ProductionPanel message={{ project_id: panelProjectId }}
+                                 workspace={workspace} sessionId={sessionId} />
+              ) : (
+                <p style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.8 }}>
+                  当前工作目录还没有短剧项目。<br />
+                  在对话里告诉 Agent：「参考工作目录里的小说，建项目拆分镜」，拆完分镜这里就会出现整个制作流程。
+                </p>
+              )}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )

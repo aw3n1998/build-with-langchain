@@ -53,6 +53,19 @@ class Settings(BaseSettings):
     WAN_SIZE: str = "704*1280"
     WAN_FRAME_NUM: int = 25
     WAN_SAMPLE_STEPS: int = 25
+    # ── 视频模型解耦：默认 Provider + LTX-Video 配置 ──────────────
+    # 默认用哪个视频模型（对应 providers 注册名：wan2.2 / ltx）
+    VIDEO_PROVIDER_DEFAULT: str = "wan2.2"
+    # LTX-Video（部署后填 GPU_LTX_MODEL 即可启用；脚本自动上传）
+    GPU_LTX_MODEL: str = ""                          # LTX diffusers 目录（如 /root/autodl-tmp/models/LTX-Video）或 HF id
+    GPU_LTX_SCRIPT: str = "/root/autodl-tmp/ltx_i2v.py"
+    # 复用 FLUX 的 T5-XXL text_encoder，省 ~19G 盘（留空则用 LTX 自带 text_encoder）
+    GPU_LTX_T5_DIR: str = "/root/autodl-tmp/models/flux-dev/text_encoder_2"
+    LTX_SIZE: str = "704*1280"
+    LTX_NUM_FRAMES: int = 121
+    LTX_FPS: int = 24
+    LTX_STEPS: int = 40
+    LTX_GUIDANCE: float = 3.0
     # 本机产物落地目录
     NP2V_DB_PATH: Optional[str] = None
     NP2V_LOCAL_OUT: Optional[str] = None
