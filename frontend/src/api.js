@@ -240,6 +240,32 @@ export async function getProject(projectId, workspace = null) {
 }
 export async function batchGenerate(params) { return submitJob('/pipeline/batch_generate', params) }
 export async function batchFinish(params) { return submitJob('/pipeline/batch_finish', params) }
+// 删除产物（候选图 / 分镜成片 / 整集成片）
+export async function deleteCandidate(assetId, workspace = null) {
+  const r = await fetch(`${getBase()}/pipeline/delete_candidate`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ asset_id: assetId, workspace }),
+  })
+  if (!r.ok) throw new Error(`status ${r.status}`)
+  return r.json()
+}
+export async function deleteSceneVideo(sceneId, workspace = null) {
+  const r = await fetch(`${getBase()}/pipeline/delete_scene_video`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ scene_id: sceneId, workspace }),
+  })
+  if (!r.ok) throw new Error(`status ${r.status}`)
+  return r.json()
+}
+export async function deleteEpisode(projectId, workspace = null) {
+  const r = await fetch(`${getBase()}/pipeline/delete_episode`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ project_id: projectId, workspace }),
+  })
+  if (!r.ok) throw new Error(`status ${r.status}`)
+  return r.json()
+}
+
 // 更新分镜提示词/旁白（AI 写的提示词可见可改）
 export async function updateScenePrompts(sceneId, fields, workspace = null) {
   const r = await fetch(`${getBase()}/pipeline/scene_prompts`, {

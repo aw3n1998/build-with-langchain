@@ -215,6 +215,41 @@ class PipelineStore:
                 conn.execute(f"UPDATE scenes SET {', '.join(sets)} WHERE id=?", params)
         return self.get_scene(scene_id)
 
+    def delete_asset(self, asset_id: str) -> Optional[str]:
+        """删除一张候选图（DB 记录），返回它的 storage_path（供调用方删本地文件）。
+
+        若删的是已选中的图，自动清掉分镜的 selected_asset_id 并回退到「待选图」。
+        """
+        asset = self.get_asset(asset_id)
+        if not asset:
+            return None
+        scene_id = asset["scene_id"]
+        with self._lock, self._conn() as conn:
+            conn.execute("DELETE FROM assets WHERE id=?", (asset_id,))
+            scene = conn.execute("SELECT selected_asset_id FROM scenes WHERE id=?", (scene_id,)).fetchone()
+            if scene and scene["selected_asset_id"] == asset_id:
+                conn.execute("UPDATE scenes SET selected_asset_id=NULL WHERE id=?", (scene_id,))
+        # 若分镜还有别的候选 → 回到待选图；否则回到草稿
+        remaining = self.list_assets(scene_id, "IMAGE")
+        self.set_scene_state(
+            scene_id,
+            SceneState.PENDING_HUMAN_SELECTION if remaining else SceneState.DRAFT,
+            force=True,
+        )
+        return asset["storage_path"]
+
+    def clear_scene_video(self, scene_id: str) -> dict:
+        """删除分镜成片：清空 video_path，状态回到「已选·待出片」（图还在，可重出）。"""
+        scene = self.get_scene(scene_id)
+        if not scene:
+            return {}
+        with self._lock, self._conn() as conn:
+            conn.execute("UPDATE scenes SET video_path=NULL WHERE id=?", (scene_id,))
+        target = SceneState.PENDING_VIDEO_GEN if scene.get("selected_asset_id") \
+            else SceneState.PENDING_HUMAN_SELECTION
+        self.set_scene_state(scene_id, target, force=True)
+        return self.get_scene(scene_id)
+
     def set_scene_video(self, scene_id: str, video_path: str) -> dict:
         with self._lock, self._conn() as conn:
             conn.execute(

@@ -1089,6 +1089,74 @@ async def pipeline_upload_candidate(
             "url": f"/api/file?path={_quote(local)}"}
 
 
+def _rm_local(path: str) -> None:
+    """删本地文件，吞掉不存在/被占用等错误（产物清理不应让接口失败）。"""
+    try:
+        if path and os.path.isfile(path):
+            os.remove(path)
+    except OSError:
+        pass
+
+
+class DeleteCandidateRequest(BaseModel):
+    asset_id: str
+    workspace: str | None = None
+
+
+@router.post("/pipeline/delete_candidate")
+async def pipeline_delete_candidate(req: DeleteCandidateRequest):
+    """删除一张候选图（DB + 本地文件）。删的是选中图则分镜回退到待选图。"""
+    from agent_lab.app.pipeline.runtime import set_workspace, candidates_dir
+    from agent_lab.app.pipeline.store import get_store
+    set_workspace(req.workspace)
+    store = get_store()
+    asset = store.get_asset(req.asset_id)
+    if not asset:
+        raise HTTPException(status_code=404, detail="候选图不存在")
+    scene_id = asset["scene_id"]
+    storage = store.delete_asset(req.asset_id)
+    if storage:
+        _rm_local(os.path.join(candidates_dir(scene_id), posixpath.basename(storage)))
+    return {"ok": True}
+
+
+class SceneRequest(BaseModel):
+    scene_id: str
+    workspace: str | None = None
+
+
+@router.post("/pipeline/delete_scene_video")
+async def pipeline_delete_scene_video(req: SceneRequest):
+    """删除某分镜的成片（本地 mp4 + DB），回到「待出片」，可重新出片。"""
+    from agent_lab.app.pipeline.runtime import set_workspace, video_dir
+    from agent_lab.app.pipeline.store import get_store
+    set_workspace(req.workspace)
+    store = get_store()
+    scene = store.get_scene(req.scene_id)
+    if not scene:
+        raise HTTPException(status_code=404, detail="分镜不存在")
+    _rm_local(os.path.join(video_dir(), f"{scene['scene_number']:02d}_{req.scene_id}.mp4"))
+    store.clear_scene_video(req.scene_id)
+    return {"ok": True}
+
+
+class EpisodeRequest(BaseModel):
+    project_id: str
+    workspace: str | None = None
+
+
+@router.post("/pipeline/delete_episode")
+async def pipeline_delete_episode(req: EpisodeRequest):
+    """删除整集成片文件（不动各分镜，可重新合成）。删除是尽力而为，路径异常也不报错。"""
+    from agent_lab.app.pipeline.runtime import set_workspace, video_dir
+    try:
+        set_workspace(req.workspace)
+        _rm_local(os.path.join(video_dir(), f"episode_{req.project_id}.mp4"))
+    except OSError:
+        pass
+    return {"ok": True}
+
+
 @router.post("/pipeline/batch_generate")
 async def pipeline_batch_generate(req: BatchRequest):
     """一键全部出图：后台单飞任务，返回 job_id。"""

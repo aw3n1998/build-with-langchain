@@ -1,7 +1,8 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
 import ReactMarkdown from 'react-markdown'
 import { fileUrl, getVideoProviders, getProject, batchGenerate, batchFinish,
-         pipelineSelect, streamJobEvents, uploadCandidate, updateScenePrompts } from '../api'
+         pipelineSelect, streamJobEvents, uploadCandidate, updateScenePrompts,
+         deleteCandidate, deleteSceneVideo, deleteEpisode } from '../api'
 
 /**
  * MessageBubble — 消息渲染
@@ -702,6 +703,19 @@ export function ProductionPanel({ message, workspace, sessionId }) {
     } catch (e) { /* ignore */ }
   }
 
+  const delCandidate = async (assetId) => {
+    if (!window.confirm('删除这张候选图？')) return
+    try { await deleteCandidate(assetId, workspace); load() } catch { /* ignore */ }
+  }
+  const delSceneVideo = async (sceneId) => {
+    if (!window.confirm('删除这个分镜的成片？删除后可重新出片（图还在）。')) return
+    try { await deleteSceneVideo(sceneId, workspace); load() } catch { /* ignore */ }
+  }
+  const delEpisode = async () => {
+    if (!window.confirm('删除整集成片？各分镜不受影响，可重新合成。')) return
+    try { await deleteEpisode(pid, workspace); load() } catch { /* ignore */ }
+  }
+
   const c = proj?.counts || { total: 0, with_candidates: 0, selected: 0, done: 0 }
   const allSelected = c.total > 0 && c.selected === c.total
   const someSelected = c.selected > 0
@@ -840,7 +854,14 @@ export function ProductionPanel({ message, workspace, sessionId }) {
       {proj?.episode && (
         <div style={{ marginBottom: 12, padding: 10, borderRadius: 10,
                       background: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.25)' }}>
-          <div style={{ fontSize: 11, color: 'rgba(134,239,172,1)', marginBottom: 6 }}>整集成片</div>
+          <div style={{ display: 'flex', alignItems: 'center', marginBottom: 6 }}>
+            <span style={{ fontSize: 11, color: 'rgba(134,239,172,1)' }}>整集成片</span>
+            <button onClick={delEpisode} title="删除整集成片（可重新合成）" style={{
+              marginLeft: 'auto', height: 22, padding: '0 10px', borderRadius: 6,
+              border: '1px solid rgba(239,68,68,0.35)', background: 'rgba(239,68,68,0.12)',
+              color: 'rgba(252,165,165,1)', fontSize: 11, cursor: 'pointer',
+            }}>删除</button>
+          </div>
           <video src={fileUrl(proj.episode.url)} controls
                  style={{ width: '100%', maxHeight: 420, borderRadius: 8, display: 'block' }} />
         </div>
@@ -881,8 +902,16 @@ export function ProductionPanel({ message, workspace, sessionId }) {
               </div>
 
               {s.video ? (
-                <video src={fileUrl(s.video.url)} controls
-                       style={{ width: '100%', maxHeight: 300, borderRadius: 8, display: 'block' }} />
+                <div>
+                  <video src={fileUrl(s.video.url)} controls
+                         style={{ width: '100%', maxHeight: 300, borderRadius: 8, display: 'block' }} />
+                  <button onClick={() => delSceneVideo(s.scene_id)}
+                    title="删除这个分镜的成片（图还在，可重新出片）" style={{
+                      marginTop: 6, height: 24, padding: '0 12px', borderRadius: 6,
+                      border: '1px solid rgba(239,68,68,0.35)', background: 'rgba(239,68,68,0.12)',
+                      color: 'rgba(252,165,165,1)', fontSize: 11.5, cursor: 'pointer',
+                    }}>删除成片 · 重出</button>
+                </div>
               ) : s.candidates.length > 0 ? (
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(96px,1fr))', gap: 8 }}>
                   {s.candidates.map(img => (
@@ -899,6 +928,12 @@ export function ProductionPanel({ message, workspace, sessionId }) {
                           border: 'none', cursor: 'pointer', fontSize: 12, color: '#fff',
                           background: img.selected ? 'rgba(34,197,94,0.9)' : 'rgba(0,0,0,0.55)',
                         }}>{img.selected ? '✓' : '○'}</button>
+                      <button onClick={() => delCandidate(img.assetId)} title="删除这张候选图"
+                        style={{
+                          position: 'absolute', top: 4, left: 4, width: 22, height: 22, borderRadius: 6,
+                          border: 'none', cursor: 'pointer', fontSize: 13, lineHeight: 1, color: '#fff',
+                          background: 'rgba(239,68,68,0.7)',
+                        }}>×</button>
                     </div>
                   ))}
                 </div>
