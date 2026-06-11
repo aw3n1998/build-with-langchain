@@ -3,7 +3,7 @@ import ReactMarkdown from 'react-markdown'
 import { fileUrl, getVideoProviders, getProject, batchGenerate, batchFinish,
          pipelineSelect, streamJobEvents, uploadCandidate, updateScenePrompts,
          deleteCandidate, deleteSceneVideo, deleteEpisode,
-         sceneGenerate, sceneRender } from '../api'
+         sceneGenerate, sceneRender, cancelJob } from '../api'
 
 /**
  * MessageBubble — 消息渲染
@@ -640,6 +640,8 @@ export function ProductionPanel({ message, workspace, sessionId }) {
   const [vidParams, setVidParams] = useState({})
   const [sceneBusy, setSceneBusy] = useState({})   // {sceneId: 'generate'|'render'}
   const cancelled = useRef(false)
+  const batchJob = useRef(null)                    // 当前批量任务 job_id（供停止）
+  const sceneJob = useRef({})                      // {sceneId: job_id}（供单镜停止）
 
   // 出视频预估时长（秒）= 帧数 ÷ 帧率 × 接续段数。无 fps 字段（Wan）按 24fps。
   const estSec = (() => {
@@ -666,6 +668,7 @@ export function ProductionPanel({ message, workspace, sessionId }) {
     try {
       const submit = kind === 'generate' ? sceneGenerate : sceneRender
       const jobId = await submit(kind === 'generate' ? genPayload(sceneId) : renderPayload(sceneId))
+      sceneJob.current[sceneId] = jobId
       for await (const ev of streamJobEvents(jobId)) {
         if (cancelled.current) break
         if (ev.type === 'image' || ev.type === 'video' || ev.type === 'scene_ready') load()
@@ -673,7 +676,12 @@ export function ProductionPanel({ message, workspace, sessionId }) {
       }
       await load()
     } catch { /* ignore */ }
-    finally { setSceneBusy(p => { const n = { ...p }; delete n[sceneId]; return n }) }
+    finally { delete sceneJob.current[sceneId]; setSceneBusy(p => { const n = { ...p }; delete n[sceneId]; return n }) }
+  }
+
+  const stopScene = async (sceneId) => {
+    const jid = sceneJob.current[sceneId]
+    if (jid) { try { await cancelJob(jid) } catch { /* ignore */ } }
   }
 
   // 切换视频模型时，按该模型 schema 重置专业参数（排除主行已有的 size）
@@ -718,19 +726,27 @@ export function ProductionPanel({ message, workspace, sessionId }) {
         img_seed: kind === 'generate' && imgAdv.seed !== '' ? Number(imgAdv.seed) : -1,
         img_offload: kind === 'generate' ? (imgAdv.offload || '') : '',
       })
+      batchJob.current = jobId
       for await (const ev of streamJobEvents(jobId)) {
         if (cancelled.current) break
         if (ev.type === 'batch_progress') setProgress(ev.label || '处理中…')
         else if (ev.type === 'scene_ready') load()      // 某分镜出完→刷新缩略图
         else if (ev.type === 'image' || ev.type === 'video') load()
         else if (ev.type === 'tool_result' && ev.content) setProgress(ev.content)
+        else if (ev.type === 'error') setProgress(ev.content || '已停止')
       }
       await load()
     } catch (e) {
       setProgress('任务失败：' + String(e.message || e))
     } finally {
+      batchJob.current = null
       setBusy('')
     }
+  }
+
+  const stopBatch = async () => {
+    setProgress('正在停止…（已下发的当前分镜会跑完，后续分镜不再下发）')
+    if (batchJob.current) { try { await cancelJob(batchJob.current) } catch { /* ignore */ } }
   }
 
   const select = async (sceneId, assetId) => {
@@ -824,6 +840,15 @@ export function ProductionPanel({ message, workspace, sessionId }) {
                          alignItems: 'center', gap: 4 }}>
             预估 ≈ {estSec.toFixed(1)}s/镜
           </span>
+        )}
+        {busy && (
+          <button onClick={stopBatch} title="停止：当前分镜跑完即止，后续分镜不再下发，省 GPU"
+            style={{ height: 32, padding: '0 14px', borderRadius: 8, alignSelf: 'center',
+                     border: '1px solid rgba(239,68,68,0.4)', background: 'rgba(239,68,68,0.16)',
+                     color: 'rgba(252,165,165,1)', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                     display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+            <span style={{ width: 8, height: 8, borderRadius: 2, background: 'currentColor' }} />停止
+          </button>
         )}
         {busy && <span style={{ fontSize: 11, color: 'var(--text-muted)', alignSelf: 'center' }}>{progress}</span>}
       </div>
@@ -931,17 +956,24 @@ export function ProductionPanel({ message, workspace, sessionId }) {
                 {/* 单镜独立操作：出图（随时可重出）/ 出视频（已选图后）*/}
                 {(() => {
                   const sb = sceneBusy[s.scene_id]
-                  const disabled = !!busy || !!sb
+                  if (sb) {   // 该镜正在跑 → 显示可点的「停止」
+                    return (
+                      <button onClick={() => stopScene(s.scene_id)} title="停止这个分镜的任务"
+                        style={{ ...miniAct(false), border: '1px solid rgba(239,68,68,0.4)',
+                                 background: 'rgba(239,68,68,0.16)', color: 'rgba(252,165,165,1)' }}>
+                        {sb === 'generate' ? '出图中·停止' : '出片中·停止'}
+                      </button>
+                    )
+                  }
+                  const disabled = !!busy
                   return (<>
                     <button onClick={() => runScene('generate', s.scene_id)} disabled={disabled}
-                      title="只对这个分镜出图" style={miniAct(sb === 'generate')}>
-                      {sb === 'generate' ? '出图中…' : (s.candidates.length ? '重出图' : '出图')}
+                      title="只对这个分镜出图" style={miniAct(false)}>
+                      {s.candidates.length ? '重出图' : '出图'}
                     </button>
                     {s.selected && !s.video && (
                       <button onClick={() => runScene('render', s.scene_id)} disabled={disabled}
-                        title="只对这个分镜出视频" style={miniAct(sb === 'render', true)}>
-                        {sb === 'render' ? '出片中…' : '出视频'}
-                      </button>
+                        title="只对这个分镜出视频" style={miniAct(false, true)}>出视频</button>
                     )}
                   </>)
                 })()}

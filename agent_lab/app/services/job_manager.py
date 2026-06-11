@@ -51,7 +51,8 @@ class Job:
         self.error: Optional[str] = None
         self.meta = meta or {}           # 业务元数据（如 session_id），用于推送归属
         self.created_at = time.time()
-        self.task: Optional[asyncio.Task] = None   # chat 通道的独立任务句柄（可取消）
+        self.task: Optional[asyncio.Task] = None   # 执行任务句柄（chat 与 gpu 都有，可取消）
+        self.cancel_requested = False    # 还在排队（无 task）时收到的取消，由 worker 跳过
         self._cond = asyncio.Condition()
 
     @property
@@ -177,7 +178,18 @@ class JobManager:
             job, factory = await self._queue.get()
             self._current = job
             try:
-                await self._execute(job, factory)
+                if job.cancel_requested:
+                    # 排队期间已被取消 → 不下发到 GPU，直接收尾（这正是省算力的关键）
+                    await job._emit({"type": "error", "content": "已停止"})
+                    await job._set_status("error", error="已停止")
+                    self._notify(job)
+                else:
+                    # 包成 task 以支持运行中取消（取消会在下一个 await 点抛 CancelledError，
+                    # 批量任务因此停在当前分镜、不再下发后续分镜）
+                    job.task = asyncio.create_task(self._execute(job, factory))
+                    await job.task
+            except asyncio.CancelledError:
+                pass   # _execute 已自行处理并落终态
             finally:
                 self._current = None
                 self._queue.task_done()
@@ -218,14 +230,20 @@ class JobManager:
         return job.id
 
     def cancel(self, job_id: str) -> bool:
-        """取消任务。chat 通道可真取消；GPU 队列任务不可中断（返回 False）。"""
+        """取消任务。
+
+        - 运行中：取消其 task → 在下一个 await 点抛 CancelledError，落「已停止」终态。
+          对批量任务（多分镜）尤其有效：停在当前分镜，不再下发后续分镜，省下其余 GPU 算力。
+        - 仍在排队（未轮到）：标记 cancel_requested，worker 取到时直接跳过、不下发 GPU。
+        注：已下发到 GPU 的那一段远程进程无法即时杀死，但后续步骤全部止损。
+        """
         job = self._jobs.get(job_id)
         if not job or job.terminal:
             return False
+        job.cancel_requested = True
         if job.task is not None:
             job.task.cancel()
-            return True
-        return False
+        return True
 
     def get(self, job_id: str) -> Optional[Job]:
         return self._jobs.get(job_id)
