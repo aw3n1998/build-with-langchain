@@ -1157,6 +1157,95 @@ async def pipeline_delete_episode(req: EpisodeRequest):
     return {"ok": True}
 
 
+async def _scene_generate_events(req: "SceneGenRequest"):
+    """单个分镜出图（面板上点某镜的「出图」）。"""
+    import asyncio
+    from agent_lab.app.pipeline.runtime import set_workspace
+    from agent_lab.app.pipeline.pipeline_tools import generate_candidates as _gen_tool
+    set_workspace(req.workspace)
+    yield {"type": "batch_progress", "phase": "generate", "scene_id": req.scene_id,
+           "label": "出图中…"}
+    try:
+        out = await asyncio.to_thread(
+            _gen_tool.func, scene_id=req.scene_id,
+            n=req.n, width=req.width, height=req.height,
+            steps=req.img_steps, guidance=req.img_guidance,
+            seed=req.img_seed, offload=req.img_offload)
+    except Exception as e:  # noqa: BLE001
+        yield {"type": "tool_result", "name": "generate_candidates",
+               "content": f"出图失败: {type(e).__name__}: {e}"}
+        return
+    _clean, events = ai_service._extract_tool_markers(out)
+    for ev in events:
+        yield ev
+    yield {"type": "scene_ready", "scene_id": req.scene_id}
+
+
+async def _scene_render_events(req: "SceneRenderRequest"):
+    """单个分镜出片（面板上点某镜的「出视频」）。"""
+    import asyncio
+    from agent_lab.app.pipeline.runtime import set_workspace
+    from agent_lab.app.pipeline.pipeline_tools import do_render_scene_video
+    set_workspace(req.workspace)
+    params: dict = dict(req.video_params or {})
+    if req.segments and req.segments > 1:
+        params["segments"] = req.segments
+    if req.size:
+        params["size"] = req.size
+    yield {"type": "batch_progress", "phase": "render", "scene_id": req.scene_id,
+           "label": "出片中…"}
+    try:
+        out = await asyncio.to_thread(
+            do_render_scene_video, req.scene_id, "", req.model, params)
+    except Exception as e:  # noqa: BLE001
+        yield {"type": "tool_result", "name": "render_scene_video",
+               "content": f"出片失败: {type(e).__name__}: {e}"}
+        return
+    _clean, events = ai_service._extract_tool_markers(out)
+    for ev in events:
+        yield ev
+    yield {"type": "scene_ready", "scene_id": req.scene_id}
+
+
+class SceneGenRequest(BaseModel):
+    scene_id: str
+    workspace: str | None = None
+    session_id: str | None = None
+    n: int = 0
+    width: int = 0
+    height: int = 0
+    img_steps: int = 0
+    img_guidance: float = -1.0
+    img_seed: int = -1
+    img_offload: str = ""
+
+
+class SceneRenderRequest(BaseModel):
+    scene_id: str
+    workspace: str | None = None
+    session_id: str | None = None
+    model: str = ""
+    segments: int = 1
+    size: str = ""
+    video_params: dict = {}
+
+
+@router.post("/pipeline/scene_generate")
+async def pipeline_scene_generate(req: SceneGenRequest):
+    """单镜出图：后台任务，返回 job_id。"""
+    from agent_lab.app.services.job_manager import job_manager
+    return {"job_id": job_manager.submit(
+        "generate", lambda: _scene_generate_events(req), meta={"session_id": req.session_id})}
+
+
+@router.post("/pipeline/scene_render")
+async def pipeline_scene_render(req: SceneRenderRequest):
+    """单镜出片：后台任务，返回 job_id。"""
+    from agent_lab.app.services.job_manager import job_manager
+    return {"job_id": job_manager.submit(
+        "render", lambda: _scene_render_events(req), meta={"session_id": req.session_id})}
+
+
 @router.post("/pipeline/batch_generate")
 async def pipeline_batch_generate(req: BatchRequest):
     """一键全部出图：后台单飞任务，返回 job_id。"""

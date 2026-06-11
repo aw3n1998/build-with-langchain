@@ -2,7 +2,8 @@ import { useState, useEffect, useMemo, useRef } from 'react'
 import ReactMarkdown from 'react-markdown'
 import { fileUrl, getVideoProviders, getProject, batchGenerate, batchFinish,
          pipelineSelect, streamJobEvents, uploadCandidate, updateScenePrompts,
-         deleteCandidate, deleteSceneVideo, deleteEpisode } from '../api'
+         deleteCandidate, deleteSceneVideo, deleteEpisode,
+         sceneGenerate, sceneRender } from '../api'
 
 /**
  * MessageBubble — 消息渲染
@@ -637,7 +638,43 @@ export function ProductionPanel({ message, workspace, sessionId }) {
   const [showAdv, setShowAdv] = useState(false)
   const [imgAdv, setImgAdv] = useState({ steps: '', guidance: '', seed: '', offload: '' })
   const [vidParams, setVidParams] = useState({})
+  const [sceneBusy, setSceneBusy] = useState({})   // {sceneId: 'generate'|'render'}
   const cancelled = useRef(false)
+
+  // 出视频预估时长（秒）= 帧数 ÷ 帧率 × 接续段数。无 fps 字段（Wan）按 24fps。
+  const estSec = (() => {
+    const frames = Number(vidParams.frame_num ?? vidParams.num_frames)
+    const fps = Number(vidParams.fps) || 24
+    if (!frames || !fps) return null
+    return (frames / fps) * Math.max(1, segments)
+  })()
+  const genPayload = (sceneId) => {
+    const [iw, ih] = (imgSize || '0x0').split('x').map(Number)
+    return { scene_id: sceneId, workspace, session_id: sessionId, n: imgN,
+      width: iw || 0, height: ih || 0,
+      img_steps: Number(imgAdv.steps) || 0,
+      img_guidance: imgAdv.guidance !== '' ? Number(imgAdv.guidance) : -1,
+      img_seed: imgAdv.seed !== '' ? Number(imgAdv.seed) : -1, img_offload: imgAdv.offload || '' }
+  }
+  const renderPayload = (sceneId) => ({
+    scene_id: sceneId, workspace, session_id: sessionId,
+    model, segments, size: vidSize, video_params: vidParams })
+
+  const runScene = async (kind, sceneId) => {
+    if (busy || sceneBusy[sceneId]) return
+    setSceneBusy(p => ({ ...p, [sceneId]: kind }))
+    try {
+      const submit = kind === 'generate' ? sceneGenerate : sceneRender
+      const jobId = await submit(kind === 'generate' ? genPayload(sceneId) : renderPayload(sceneId))
+      for await (const ev of streamJobEvents(jobId)) {
+        if (cancelled.current) break
+        if (ev.type === 'image' || ev.type === 'video' || ev.type === 'scene_ready') load()
+        else if (ev.type === 'tool_result' && ev.content) setProgress(ev.content)
+      }
+      await load()
+    } catch { /* ignore */ }
+    finally { setSceneBusy(p => { const n = { ...p }; delete n[sceneId]; return n }) }
+  }
 
   // 切换视频模型时，按该模型 schema 重置专业参数（排除主行已有的 size）
   const curFields = (models.find(m => m.name === model)?.fields || []).filter(f => f.key !== 'size')
@@ -780,6 +817,14 @@ export function ProductionPanel({ message, workspace, sessionId }) {
           <option value="704*1280">704×1280 竖屏</option>
           <option value="1280*704">1280×704 横屏</option>
         </select>
+        {estSec != null && (
+          <span style={{ fontSize: 11, color: 'rgba(94,234,212,0.95)', alignSelf: 'center',
+                         padding: '0 8px', borderRadius: 6, background: 'rgba(0,189,176,0.1)',
+                         border: '1px solid rgba(0,189,176,0.2)', height: 32, display: 'inline-flex',
+                         alignItems: 'center', gap: 4 }}>
+            预估 ≈ {estSec.toFixed(1)}s/镜
+          </span>
+        )}
         {busy && <span style={{ fontSize: 11, color: 'var(--text-muted)', alignSelf: 'center' }}>{progress}</span>}
       </div>
 
@@ -882,6 +927,25 @@ export function ProductionPanel({ message, workspace, sessionId }) {
                 </span>
                 <span style={{ fontSize: 12, color: 'var(--text-sec)', flex: 1, overflow: 'hidden',
                                textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.title || '(无题)'}</span>
+
+                {/* 单镜独立操作：出图（随时可重出）/ 出视频（已选图后）*/}
+                {(() => {
+                  const sb = sceneBusy[s.scene_id]
+                  const disabled = !!busy || !!sb
+                  return (<>
+                    <button onClick={() => runScene('generate', s.scene_id)} disabled={disabled}
+                      title="只对这个分镜出图" style={miniAct(sb === 'generate')}>
+                      {sb === 'generate' ? '出图中…' : (s.candidates.length ? '重出图' : '出图')}
+                    </button>
+                    {s.selected && !s.video && (
+                      <button onClick={() => runScene('render', s.scene_id)} disabled={disabled}
+                        title="只对这个分镜出视频" style={miniAct(sb === 'render', true)}>
+                        {sb === 'render' ? '出片中…' : '出视频'}
+                      </button>
+                    )}
+                  </>)
+                })()}
+
                 {!s.video && (
                   <label title="已有这镜的图？直接上传当候选，跳过生图"
                     style={{ fontSize: 11, color: 'rgba(165,168,255,0.9)', cursor: 'pointer',
@@ -1029,6 +1093,14 @@ const panelBtn = (active, disabled) => ({
   background: disabled ? 'rgba(255,255,255,0.05)' : active ? 'rgba(99,102,241,0.35)' : 'rgba(99,102,241,0.2)',
   color: disabled ? 'var(--text-muted)' : 'rgba(190,192,255,1)',
   fontSize: 12.5, fontWeight: 600, cursor: disabled ? 'default' : 'pointer',
+})
+// 单镜操作小按钮（出图=紫、出视频=青）
+const miniAct = (active, teal) => ({
+  height: 22, padding: '0 9px', borderRadius: 6, fontSize: 11, fontWeight: 600, cursor: 'pointer',
+  border: `1px solid ${teal ? 'rgba(0,189,176,0.4)' : 'rgba(99,102,241,0.4)'}`,
+  background: active ? (teal ? 'rgba(0,189,176,0.3)' : 'rgba(99,102,241,0.3)')
+    : (teal ? 'rgba(0,189,176,0.14)' : 'rgba(99,102,241,0.14)'),
+  color: teal ? 'rgba(94,234,212,1)' : 'rgba(190,192,255,1)',
 })
 const miniBtn = {
   width: 24, height: 24, borderRadius: 6, border: '1px solid var(--border)',

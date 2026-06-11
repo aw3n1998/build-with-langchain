@@ -240,6 +240,9 @@ export async function getProject(projectId, workspace = null) {
 }
 export async function batchGenerate(params) { return submitJob('/pipeline/batch_generate', params) }
 export async function batchFinish(params) { return submitJob('/pipeline/batch_finish', params) }
+// 单个分镜独立出图 / 出片
+export async function sceneGenerate(params) { return submitJob('/pipeline/scene_generate', params) }
+export async function sceneRender(params) { return submitJob('/pipeline/scene_render', params) }
 // 删除产物（候选图 / 分镜成片 / 整集成片）
 export async function deleteCandidate(assetId, workspace = null) {
   const r = await fetch(`${getBase()}/pipeline/delete_candidate`, {
