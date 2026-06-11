@@ -956,17 +956,21 @@ async def _batch_generate_events(req: BatchRequest):
         yield {"type": "batch_progress", "phase": "generate",
                "scene_id": s["id"], "index": i, "total": len(todo),
                "label": f"出图 {i}/{len(todo)}：#{s['scene_number']} {s.get('title') or ''}"}
+        out = None
         try:
-            out = await asyncio.to_thread(
-                _gen_tool.func, scene_id=s["id"],
-                n=req.n, width=req.width, height=req.height,
-                steps=req.img_steps, guidance=req.img_guidance,
-                seed=req.img_seed, offload=req.img_offload)
+            async for it in _run_with_logs(lambda sid=s["id"]: _gen_tool.func(
+                    scene_id=sid, n=req.n, width=req.width, height=req.height,
+                    steps=req.img_steps, guidance=req.img_guidance,
+                    seed=req.img_seed, offload=req.img_offload)):
+                if "_log" in it:
+                    yield {"type": "log", "line": it["_log"]}
+                else:
+                    out = it["_result"]
         except Exception as e:  # noqa: BLE001
             yield {"type": "tool_result", "name": "batch_generate",
                    "content": f"#{s['scene_number']} 出图失败: {type(e).__name__}: {e}"}
             continue
-        _clean, events = ai_service._extract_tool_markers(out)
+        _clean, events = ai_service._extract_tool_markers(out or "")
         for ev in events:
             yield ev   # image 事件带 scene_id，前端按分镜归位
         yield {"type": "scene_ready", "scene_id": s["id"]}
@@ -1002,14 +1006,19 @@ async def _batch_finish_events(req: BatchRequest):
         yield {"type": "batch_progress", "phase": "render",
                "scene_id": s["id"], "index": i, "total": len(todo),
                "label": f"出片 {i}/{len(todo)}：#{s['scene_number']} {s.get('title') or ''}"}
+        out = None
         try:
-            out = await asyncio.to_thread(
-                do_render_scene_video, s["id"], "", req.model, dict(params))
+            async for it in _run_with_logs(lambda sid=s["id"]: do_render_scene_video(
+                    sid, "", req.model, dict(params))):
+                if "_log" in it:
+                    yield {"type": "log", "line": it["_log"]}
+                else:
+                    out = it["_result"]
         except Exception as e:  # noqa: BLE001
             yield {"type": "tool_result", "name": "batch_finish",
                    "content": f"#{s['scene_number']} 出片失败: {type(e).__name__}: {e}"}
             continue
-        _clean, events = ai_service._extract_tool_markers(out)
+        _clean, events = ai_service._extract_tool_markers(out or "")
         for ev in events:
             yield ev
         yield {"type": "scene_ready", "scene_id": s["id"]}
@@ -1157,6 +1166,41 @@ async def pipeline_delete_episode(req: EpisodeRequest):
     return {"ok": True}
 
 
+async def _run_with_logs(thread_fn):
+    """在线程跑阻塞的 GPU 工作，同时把远程命令日志实时 yield 成 {type:'log'} 事件。
+
+    用法：
+        async for it in _run_with_logs(lambda: blocking()):
+            if '_log' in it: yield {'type':'log','line': it['_log']}
+            else: out = it['_result']     # 线程抛异常则在此处 raise
+    """
+    import asyncio
+    import queue as _q
+    from agent_lab.app.pipeline.log_bus import set_sink, reset_sink
+
+    q: _q.Queue = _q.Queue(maxsize=4000)
+    token = set_sink(q)
+    try:
+        task = asyncio.create_task(asyncio.to_thread(thread_fn))
+        while True:
+            try:
+                while True:
+                    yield {"_log": q.get_nowait()}
+            except _q.Empty:
+                pass
+            if task.done():
+                break
+            await asyncio.sleep(0.25)
+        try:
+            while True:
+                yield {"_log": q.get_nowait()}
+        except _q.Empty:
+            pass
+        yield {"_result": task.result()}   # 线程内异常在此 raise → 由 job 落 error 终态
+    finally:
+        reset_sink(token)
+
+
 async def _scene_generate_events(req: "SceneGenRequest"):
     """单个分镜出图（面板上点某镜的「出图」）。"""
     import asyncio
@@ -1165,17 +1209,21 @@ async def _scene_generate_events(req: "SceneGenRequest"):
     set_workspace(req.workspace)
     yield {"type": "batch_progress", "phase": "generate", "scene_id": req.scene_id,
            "label": "出图中…"}
+    out = None
     try:
-        out = await asyncio.to_thread(
-            _gen_tool.func, scene_id=req.scene_id,
-            n=req.n, width=req.width, height=req.height,
-            steps=req.img_steps, guidance=req.img_guidance,
-            seed=req.img_seed, offload=req.img_offload)
+        async for it in _run_with_logs(lambda: _gen_tool.func(
+                scene_id=req.scene_id, n=req.n, width=req.width, height=req.height,
+                steps=req.img_steps, guidance=req.img_guidance,
+                seed=req.img_seed, offload=req.img_offload)):
+            if "_log" in it:
+                yield {"type": "log", "line": it["_log"]}
+            else:
+                out = it["_result"]
     except Exception as e:  # noqa: BLE001
         yield {"type": "tool_result", "name": "generate_candidates",
                "content": f"出图失败: {type(e).__name__}: {e}"}
         return
-    _clean, events = ai_service._extract_tool_markers(out)
+    _clean, events = ai_service._extract_tool_markers(out or "")
     for ev in events:
         yield ev
     yield {"type": "scene_ready", "scene_id": req.scene_id}
@@ -1194,14 +1242,19 @@ async def _scene_render_events(req: "SceneRenderRequest"):
         params["size"] = req.size
     yield {"type": "batch_progress", "phase": "render", "scene_id": req.scene_id,
            "label": "出片中…"}
+    out = None
     try:
-        out = await asyncio.to_thread(
-            do_render_scene_video, req.scene_id, "", req.model, params)
+        async for it in _run_with_logs(lambda: do_render_scene_video(
+                req.scene_id, "", req.model, params)):
+            if "_log" in it:
+                yield {"type": "log", "line": it["_log"]}
+            else:
+                out = it["_result"]
     except Exception as e:  # noqa: BLE001
         yield {"type": "tool_result", "name": "render_scene_video",
                "content": f"出片失败: {type(e).__name__}: {e}"}
         return
-    _clean, events = ai_service._extract_tool_markers(out)
+    _clean, events = ai_service._extract_tool_markers(out or "")
     for ev in events:
         yield ev
     yield {"type": "scene_ready", "scene_id": req.scene_id}

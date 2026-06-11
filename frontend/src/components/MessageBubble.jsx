@@ -639,6 +639,9 @@ export function ProductionPanel({ message, workspace, sessionId }) {
   const [imgAdv, setImgAdv] = useState({ steps: '', guidance: '', seed: '', offload: '' })
   const [vidParams, setVidParams] = useState({})
   const [sceneBusy, setSceneBusy] = useState({})   // {sceneId: 'generate'|'render'}
+  const [logs, setLogs] = useState([])             // GPU 实时日志行（尾部 N 条）
+  const [showLogs, setShowLogs] = useState(true)
+  const logEndRef = useRef(null)
   const cancelled = useRef(false)
   const batchJob = useRef(null)                    // 当前批量任务 job_id（供停止）
   const sceneJob = useRef({})                      // {sceneId: job_id}（供单镜停止）
@@ -657,6 +660,10 @@ export function ProductionPanel({ message, workspace, sessionId }) {
     const s = Math.floor((Date.now() - t0) / 1000)
     return s < 60 ? `${s}s` : `${Math.floor(s / 60)}分${s % 60}秒`
   }
+  // 新日志到达时自动滚到底
+  useEffect(() => {
+    if (showLogs) logEndRef.current?.scrollIntoView({ block: 'nearest' })
+  }, [logs, showLogs])
 
   // 出视频预估时长（秒）= 帧数 ÷ 帧率 × 接续段数。无 fps 字段（Wan）按 24fps。
   const estSec = (() => {
@@ -680,6 +687,7 @@ export function ProductionPanel({ message, workspace, sessionId }) {
   const runScene = async (kind, sceneId) => {
     if (busy || sceneBusy[sceneId]) return
     startAt.current[sceneId] = Date.now()
+    setLogs([]); setShowLogs(true)
     setSceneBusy(p => ({ ...p, [sceneId]: kind }))
     try {
       const submit = kind === 'generate' ? sceneGenerate : sceneRender
@@ -720,10 +728,11 @@ export function ProductionPanel({ message, workspace, sessionId }) {
   const consume = async (jobId) => {
     for await (const ev of streamJobEvents(jobId)) {
       if (cancelled.current) break
-      if (ev.type === 'batch_progress') setProgress(ev.label || '处理中…')
+      if (ev.type === 'log') setLogs(prev => [...prev, ev.line].slice(-300))
+      else if (ev.type === 'batch_progress') setProgress(ev.label || '处理中…')
       else if (ev.type === 'scene_ready' || ev.type === 'image' || ev.type === 'video') load()
-      else if (ev.type === 'tool_result' && ev.content) setProgress(ev.content)
-      else if (ev.type === 'error') setProgress(ev.content || '已停止')
+      else if (ev.type === 'tool_result' && ev.content) { setProgress(ev.content); setLogs(prev => [...prev, '» ' + ev.content].slice(-300)) }
+      else if (ev.type === 'error') { setProgress(ev.content || '已停止'); setLogs(prev => [...prev, '✗ ' + (ev.content || '已停止')].slice(-300)) }
     }
     await load()
   }
@@ -760,6 +769,7 @@ export function ProductionPanel({ message, workspace, sessionId }) {
   const runJob = async (kind) => {
     if (busy) return
     startAt.current.batch = Date.now()
+    setLogs([]); setShowLogs(true)
     setBusy(kind); setProgress('提交任务…')
     try {
       const submit = kind === 'generate' ? batchGenerate : batchFinish
@@ -964,6 +974,38 @@ export function ProductionPanel({ message, workspace, sessionId }) {
         <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 10 }}>{progress}</div>
       )}
       {err && <div style={{ fontSize: 11, color: 'rgba(239,68,68,0.9)', marginBottom: 10 }}>读取失败：{err}（确认工作目录正确）</div>}
+
+      {/* GPU 实时日志：把"黑盒出片"变成可见的进度（FLUX/Wan/LTX 的加载与采样步数都会滚出来）*/}
+      {logs.length > 0 && (
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+            <button onClick={() => setShowLogs(v => !v)} style={{
+              background: 'none', border: 'none', cursor: 'pointer', padding: 0,
+              color: 'var(--text-muted)', fontSize: 11, display: 'inline-flex', alignItems: 'center', gap: 4,
+            }}>
+              <span style={{ display: 'inline-block', transform: showLogs ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }}>▸</span>
+              实时日志（{logs.length}）
+            </button>
+            <button onClick={() => setLogs([])} title="清空日志" style={{
+              background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-dim)', fontSize: 11,
+            }}>清空</button>
+          </div>
+          {showLogs && (
+            <div style={{
+              maxHeight: 200, overflowY: 'auto', borderRadius: 8, padding: '8px 10px',
+              background: '#0a0a0a', border: '1px solid var(--border)',
+              fontFamily: '"SF Mono","Fira Code",ui-monospace,monospace', fontSize: 11, lineHeight: 1.5,
+              color: 'rgba(180,230,200,0.92)', whiteSpace: 'pre-wrap', wordBreak: 'break-all',
+            }}>
+              {logs.map((l, i) => (
+                <div key={i} style={{ color: l.startsWith('✗') ? 'rgba(252,165,165,1)'
+                  : l.startsWith('»') ? 'rgba(147,197,253,0.95)' : 'inherit' }}>{l}</div>
+              ))}
+              <div ref={logEndRef} />
+            </div>
+          )}
+        </div>
+      )}
 
       {/* 成片 */}
       {proj?.episode && (

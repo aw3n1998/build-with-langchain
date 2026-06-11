@@ -133,15 +133,63 @@ class GpuClient:
 
     # ── 基础操作 ──────────────────────────────────────────────────
     def run(self, command: str, timeout: Optional[int] = None) -> RemoteResult:
-        """执行远程命令（自动注入环境前缀），返回退出码与输出。"""
+        """执行远程命令（自动注入环境前缀），**逐行流式读取** stdout/stderr。
+
+        每读到一行就转发到 log_bus（供面板实时显示进度，如 tqdm 的采样步数），
+        同时累积完整输出按原契约返回 RemoteResult。tqdm 用 \\r 刷新，这里按 \\r/\\n 切行。
+        """
+        import time as _t
+        from agent_lab.app.pipeline import log_bus
+
         client = self._connect()
         full = _ENV_PREFIX + command
         logger.debug("[GpuClient] $ %s", command)
-        stdin, stdout, stderr = client.exec_command(full, timeout=timeout)
-        out = stdout.read().decode("utf-8", "replace")
-        err = stderr.read().decode("utf-8", "replace")
-        code = stdout.channel.recv_exit_status()
-        return RemoteResult(code, out, err)
+
+        chan = client.get_transport().open_session()
+        chan.exec_command(full)
+
+        out_parts: list[str] = []
+        err_parts: list[str] = []
+        out_tail = ""   # 未成行的残段
+        err_tail = ""
+        deadline = (_t.time() + timeout) if timeout else None
+
+        def _split_emit(tail: str, data: str) -> str:
+            buf = tail + data
+            # tqdm 进度用 \r 覆盖，归一成 \n 切行
+            *lines, rest = buf.replace("\r", "\n").split("\n")
+            for ln in lines:
+                if ln.strip():
+                    log_bus.emit(ln.rstrip())
+            return rest
+
+        while True:
+            got = False
+            if chan.recv_ready():
+                data = chan.recv(8192).decode("utf-8", "replace")
+                out_parts.append(data)
+                out_tail = _split_emit(out_tail, data)
+                got = True
+            if chan.recv_stderr_ready():
+                data = chan.recv_stderr(8192).decode("utf-8", "replace")
+                err_parts.append(data)
+                err_tail = _split_emit(err_tail, data)
+                got = True
+            if chan.exit_status_ready() and not chan.recv_ready() and not chan.recv_stderr_ready():
+                break
+            if deadline and _t.time() > deadline:
+                chan.close()
+                raise GpuRunError(f"远程命令超时（{timeout}s）已中止")
+            if not got:
+                _t.sleep(0.05)
+
+        # 收尾残段
+        for ln in (out_tail, err_tail):
+            if ln.strip():
+                log_bus.emit(ln.rstrip())
+        code = chan.recv_exit_status()
+        chan.close()
+        return RemoteResult(code, "".join(out_parts), "".join(err_parts))
 
     def upload(self, local_path: str, remote_path: str, *,
                stall_timeout: int = 90, retries: int = 3) -> None:
