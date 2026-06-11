@@ -191,6 +191,21 @@ class GpuClient:
         chan.close()
         return RemoteResult(code, "".join(out_parts), "".join(err_parts))
 
+    def kill_inference(self) -> None:
+        """杀掉 GPU 上正在跑的推理进程（取消任务时清远程残留，避免僵尸进程占卡堆积）。
+
+        单飞队列保证同一时刻只有一个 GPU 任务在跑，故按命令名全杀是安全的。
+        exec_command 立即返回，pkill 在服务器侧执行，不阻塞调用方。
+        """
+        try:
+            c = self._connect()
+            c.exec_command(
+                'pkill -9 -f generate.py; pkill -9 -f ltx_i2v.py; pkill -9 -f flux_candidates.py'
+            )
+            logger.info("[GpuClient] 已下发远程推理进程清理")
+        except Exception as e:  # noqa: BLE001 - 清理是尽力而为
+            logger.warning("[GpuClient] kill_inference 失败: %s", e)
+
     def upload(self, local_path: str, remote_path: str, *,
                stall_timeout: int = 90, retries: int = 3) -> None:
         """上传文件。云 GPU 网络不稳时传输可能中途卡死，故加「停顿超时 + 断线重连重试」。"""

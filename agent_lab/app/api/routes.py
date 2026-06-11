@@ -216,9 +216,19 @@ async def ws_jobs(websocket: WebSocket):
 
 @router.post("/pipeline/jobs/{job_id}/cancel")
 async def pipeline_job_cancel(job_id: str):
-    """取消任务：chat 回合可真取消；GPU 任务不可中断（返回 cancelled=false）。"""
+    """取消任务：停止本地跟随 + 跳过后续步骤；GPU 任务额外杀掉远程推理进程释放显卡。"""
+    import asyncio
     from agent_lab.app.services.job_manager import job_manager
-    return {"cancelled": job_manager.cancel(job_id)}
+    job = job_manager.get(job_id)
+    cancelled = job_manager.cancel(job_id)
+    # GPU 任务：取消只停本地，远程进程不会自己死 → 顺手杀掉，避免僵尸进程占卡堆积
+    if cancelled and job and job.kind in ("generate", "render", "batch_generate", "batch_finish"):
+        try:
+            from agent_lab.app.pipeline.gpu_client import get_gpu_client
+            await asyncio.to_thread(get_gpu_client().kill_inference)
+        except Exception:  # noqa: BLE001
+            logger.warning("[cancel] 远程推理进程清理失败（不影响取消）")
+    return {"cancelled": cancelled}
 
 
 @router.post("/chat/resume")
