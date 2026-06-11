@@ -630,7 +630,8 @@ export function ProductionPanel({ message, workspace, sessionId }) {
   const [zoom, setZoom] = useState(null)
   const [models, setModels] = useState([])
   const [model, setModel] = useState('')
-  const [segments, setSegments] = useState(1)
+  const [segments, setSegments] = useState(1)        // 顶部全局默认段数（批量出片用）
+  const [sceneSegments, setSceneSegments] = useState({})  // {sceneId: 段数} 单镜覆盖
   const [imgN, setImgN] = useState(4)              // 出图：每镜候选张数
   const [imgSize, setImgSize] = useState('768x1024')  // 出图：尺寸
   const [vidSize, setVidSize] = useState('')       // 出片：分辨率（空=默认）
@@ -682,7 +683,8 @@ export function ProductionPanel({ message, workspace, sessionId }) {
   }
   const renderPayload = (sceneId) => ({
     scene_id: sceneId, workspace, session_id: sessionId,
-    model, segments, size: vidSize, video_params: vidParams })
+    model, segments: sceneSegments[sceneId] ?? segments,   // 单镜段数优先，没设则用全局默认
+    size: vidSize, video_params: vidParams })
 
   const runScene = async (kind, sceneId) => {
     if (busy || sceneBusy[sceneId]) return
@@ -877,7 +879,7 @@ export function ProductionPanel({ message, workspace, sessionId }) {
           </select>
         )}
         <select value={segments} disabled={!!busy} onChange={e => setSegments(Number(e.target.value))}
-          title="尾帧接续段数：越多镜头越长越连贯" style={{ ...inputStyle, width: 'auto', height: 32 }}>
+          title="接续段数的全局默认（批量出片用；每个分镜也可在自己那行单独设）" style={{ ...inputStyle, width: 'auto', height: 32 }}>
           <option value={1}>单段</option>
           <option value={2}>接续×2</option>
           <option value={3}>接续×3</option>
@@ -1058,10 +1060,25 @@ export function ProductionPanel({ message, workspace, sessionId }) {
                       title="只对这个分镜出图" style={miniAct(false)}>
                       {s.candidates.length ? '重出图' : '出图'}
                     </button>
-                    {s.selected && !s.video && (
-                      <button onClick={() => runScene('render', s.scene_id)} disabled={disabled}
-                        title="只对这个分镜出视频" style={miniAct(false, true)}>出视频</button>
-                    )}
+                    {s.selected && !s.video && (() => {
+                      const segs = sceneSegments[s.scene_id] ?? segments
+                      const sec = estSec != null ? estSec / Math.max(1, segments) * segs : null
+                      return (<>
+                        <select value={segs} disabled={disabled}
+                          onChange={e => setSceneSegments(p => ({ ...p, [s.scene_id]: Number(e.target.value) }))}
+                          title="这个分镜的接续段数（越多越长越连贯）"
+                          style={{ ...inputStyle, width: 'auto', height: 22, fontSize: 11 }}>
+                          <option value={1}>单段</option>
+                          <option value={2}>接续×2</option>
+                          <option value={3}>接续×3</option>
+                          <option value={4}>接续×4</option>
+                        </select>
+                        <button onClick={() => runScene('render', s.scene_id)} disabled={disabled}
+                          title="只对这个分镜出视频" style={miniAct(false, true)}>
+                          出视频{sec != null ? ` ≈${sec.toFixed(0)}s` : ''}
+                        </button>
+                      </>)
+                    })()}
                   </>)
                 })()}
 
