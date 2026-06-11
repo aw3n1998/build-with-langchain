@@ -88,8 +88,18 @@ class GpuClient:
 
     # ── 连接 ──────────────────────────────────────────────────────
     def _connect(self):
+        # 复用缓存连接前先体检：共享主机/网关常把空闲连接掐断，缓存的死连接会让后续
+        # 操作报 "SSH session not active"。transport 不活就丢弃重连，做到自愈。
         if self._client is not None:
-            return self._client
+            t = self._client.get_transport()
+            if t is not None and t.is_active():
+                return self._client
+            logger.info("[GpuClient] 检测到 SSH 连接已失效，重连")
+            try:
+                self._client.close()
+            except Exception:  # noqa: BLE001
+                pass
+            self._client = None
         try:
             import paramiko
         except ImportError as e:
@@ -197,12 +207,13 @@ class GpuClient:
         单飞队列保证同一时刻只有一个 GPU 任务在跑，故按命令名全杀是安全的。
         exec_command 立即返回，pkill 在服务器侧执行，不阻塞调用方。
         """
+        # 立即杀一次 + 延迟 5 秒再杀一次（后台）：取消往往发生在远程进程"刚下发还没起来"
+        # 的瞬间，单次 pkill 会扑空、进程随后才启动而存活。延迟二次清理堵住这个竞态。
+        kill = ("pkill -9 -f ltx_i2v.py; pkill -9 -f generate.py; pkill -9 -f flux_candidates.py")
         try:
             c = self._connect()
-            c.exec_command(
-                'pkill -9 -f generate.py; pkill -9 -f ltx_i2v.py; pkill -9 -f flux_candidates.py'
-            )
-            logger.info("[GpuClient] 已下发远程推理进程清理")
+            c.exec_command(f"{kill}; (sleep 5; {kill}) >/dev/null 2>&1 &")
+            logger.info("[GpuClient] 已下发远程推理进程清理（含延迟二次）")
         except Exception as e:  # noqa: BLE001 - 清理是尽力而为
             logger.warning("[GpuClient] kill_inference 失败: %s", e)
 
