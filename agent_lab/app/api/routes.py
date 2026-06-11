@@ -923,10 +923,16 @@ class BatchRequest(BaseModel):
     model: str = ""
     segments: int = 1
     size: str = ""            # 出片分辨率（如 704*1280）；空=默认
+    video_params: dict = {}   # 「更多参数」：所选模型的专业参数（schema 驱动，如 fps/steps/guidance/seed）
     # 出图参数（面板可选）
     n: int = 0                # 每镜候选张数；0=默认
     width: int = 0
     height: int = 0
+    # 出图「更多参数」（专业档；默认值=不覆盖）
+    img_steps: int = 0
+    img_guidance: float = -1.0
+    img_seed: int = -1
+    img_offload: str = ""
 
 
 async def _batch_generate_events(req: BatchRequest):
@@ -953,7 +959,9 @@ async def _batch_generate_events(req: BatchRequest):
         try:
             out = await asyncio.to_thread(
                 _gen_tool.func, scene_id=s["id"],
-                n=req.n, width=req.width, height=req.height)
+                n=req.n, width=req.width, height=req.height,
+                steps=req.img_steps, guidance=req.img_guidance,
+                seed=req.img_seed, offload=req.img_offload)
         except Exception as e:  # noqa: BLE001
             yield {"type": "tool_result", "name": "batch_generate",
                    "content": f"#{s['scene_number']} 出图失败: {type(e).__name__}: {e}"}
@@ -984,7 +992,8 @@ async def _batch_finish_events(req: BatchRequest):
         yield {"type": "tool_result", "name": "batch_finish",
                "content": "还没有任何分镜选好图，请先逐个分镜点选一张候选图。"}
         return
-    params: dict = {}
+    # 「更多参数」打底，常用项（段数/分辨率）覆盖在上
+    params: dict = dict(req.video_params or {})
     if req.segments and req.segments > 1:
         params["segments"] = req.segments
     if req.size:

@@ -632,7 +632,20 @@ export function ProductionPanel({ message, workspace, sessionId }) {
   const [imgN, setImgN] = useState(4)              // 出图：每镜候选张数
   const [imgSize, setImgSize] = useState('768x1024')  // 出图：尺寸
   const [vidSize, setVidSize] = useState('')       // 出片：分辨率（空=默认）
+  // 「更多参数」专业档：出图（空=用默认）；出片（按所选模型 schema 动态生成）
+  const [showAdv, setShowAdv] = useState(false)
+  const [imgAdv, setImgAdv] = useState({ steps: '', guidance: '', seed: '', offload: '' })
+  const [vidParams, setVidParams] = useState({})
   const cancelled = useRef(false)
+
+  // 切换视频模型时，按该模型 schema 重置专业参数（排除主行已有的 size）
+  const curFields = (models.find(m => m.name === model)?.fields || []).filter(f => f.key !== 'size')
+  useEffect(() => {
+    const init = {}
+    for (const f of curFields) init[f.key] = f.default
+    setVidParams(init)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [model, models.length])
 
   const load = async () => {
     try { setProj(await getProject(pid, workspace)); setErr('') }
@@ -657,9 +670,15 @@ export function ProductionPanel({ message, workspace, sessionId }) {
         model: kind === 'finish' ? model : '',
         segments: kind === 'finish' ? segments : 1,
         size: kind === 'finish' ? vidSize : '',
+        video_params: kind === 'finish' ? vidParams : {},
         n: kind === 'generate' ? imgN : 0,
         width: kind === 'generate' ? (iw || 0) : 0,
         height: kind === 'generate' ? (ih || 0) : 0,
+        // 出图专业档：留空=用默认
+        img_steps: kind === 'generate' ? (Number(imgAdv.steps) || 0) : 0,
+        img_guidance: kind === 'generate' && imgAdv.guidance !== '' ? Number(imgAdv.guidance) : -1,
+        img_seed: kind === 'generate' && imgAdv.seed !== '' ? Number(imgAdv.seed) : -1,
+        img_offload: kind === 'generate' ? (imgAdv.offload || '') : '',
       })
       for await (const ev of streamJobEvents(jobId)) {
         if (cancelled.current) break
@@ -748,6 +767,69 @@ export function ProductionPanel({ message, workspace, sessionId }) {
           <option value="1280*704">1280×704 横屏</option>
         </select>
         {busy && <span style={{ fontSize: 11, color: 'var(--text-muted)', alignSelf: 'center' }}>{progress}</span>}
+      </div>
+
+      {/* 更多参数：专业档（默认收起，小白无感；进阶用户全量可调）*/}
+      <div style={{ marginBottom: 12 }}>
+        <button onClick={() => setShowAdv(v => !v)} style={{
+          background: 'none', border: 'none', cursor: 'pointer', padding: 0,
+          color: 'var(--text-muted)', fontSize: 11, display: 'inline-flex', alignItems: 'center', gap: 4,
+        }}>
+          <span style={{ display: 'inline-block', transform: showAdv ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }}>▸</span>
+          更多参数（专业）
+        </button>
+        {showAdv && (
+          <div style={{ marginTop: 8, padding: '10px 12px', borderRadius: 8,
+                        border: '1px solid var(--border)', background: 'rgba(255,255,255,0.02)' }}>
+            <div style={{ fontSize: 10.5, fontWeight: 700, color: 'rgba(165,168,255,0.8)', marginBottom: 6 }}>出图（FLUX）· 留空=默认</div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
+              {[['steps', '采样步数(默认28)'], ['guidance', 'guidance(默认3.5)'], ['seed', 'seed(-1随机)']].map(([k, label]) => (
+                <label key={k} style={{ display: 'flex', flexDirection: 'column', gap: 3, width: 130 }}>
+                  <span style={{ fontSize: 10.5, color: 'var(--text-muted)' }}>{label}</span>
+                  <input type="number" value={imgAdv[k]} disabled={!!busy} placeholder="默认"
+                    onChange={e => setImgAdv(p => ({ ...p, [k]: e.target.value }))}
+                    style={{ ...inputStyle, height: 28 }} />
+                </label>
+              ))}
+              <label style={{ display: 'flex', flexDirection: 'column', gap: 3, width: 150 }}>
+                <span style={{ fontSize: 10.5, color: 'var(--text-muted)' }}>显存策略</span>
+                <select value={imgAdv.offload} disabled={!!busy}
+                  onChange={e => setImgAdv(p => ({ ...p, offload: e.target.value }))}
+                  style={{ ...inputStyle, height: 28 }}>
+                  <option value="">默认</option>
+                  <option value="model">model（快）</option>
+                  <option value="sequential">sequential（省显存）</option>
+                </select>
+              </label>
+            </div>
+            <div style={{ fontSize: 10.5, fontWeight: 700, color: 'rgba(94,234,212,0.8)', marginBottom: 6 }}>
+              出片（{models.find(m => m.name === model)?.display_name || model}）· 按模型动态
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+              {curFields.map(f => (
+                <label key={f.key} style={{ display: 'flex', flexDirection: 'column', gap: 3, width: 150 }}>
+                  <span style={{ fontSize: 10.5, color: 'var(--text-muted)', display: 'inline-flex', alignItems: 'center' }}>
+                    {f.label}<HelpTip text={f.help} />
+                  </span>
+                  {f.type === 'select' ? (
+                    <select value={vidParams[f.key] ?? f.default} disabled={!!busy}
+                      onChange={e => {
+                        const opt = f.options?.find(o => String(o.value) === e.target.value)
+                        setVidParams(p => ({ ...p, [f.key]: opt ? opt.value : e.target.value }))
+                      }} style={{ ...inputStyle, height: 28 }}>
+                      {(f.options || []).map(o => <option key={String(o.value)} value={String(o.value)}>{o.label}</option>)}
+                    </select>
+                  ) : (
+                    <input type={f.type === 'number' ? 'number' : 'text'}
+                      value={vidParams[f.key] ?? f.default ?? ''} disabled={!!busy}
+                      onChange={e => setVidParams(p => ({ ...p, [f.key]: f.type === 'number' ? Number(e.target.value) : e.target.value }))}
+                      style={{ ...inputStyle, height: 28 }} />
+                  )}
+                </label>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
       {!busy && progress && (
         <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 10 }}>{progress}</div>
