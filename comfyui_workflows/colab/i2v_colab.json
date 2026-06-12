@@ -1,0 +1,83 @@
+{
+  "_comment": "Colab 专用 i2v workflow：Wan2.2-I2V-14B GGUF 单专家版，去掉 SageAttention(PathchSageAttentionKJ)依赖，只需 ComfyUI-GGUF + VideoHelperSuite 两个自定义节点，少一个出错点。要更高保真可换两专家(high/low noise)工作流，见 colab/README.md。占位符同仓库其它模板。",
+  "37": {
+    "class_type": "UnetLoaderGGUF",
+    "_meta": { "title": "模型(UNet·GGUF) — Colab 下载为 wan2.2-i2v-14B-Q4_K_M.gguf 放 models/unet/" },
+    "inputs": { "unet_name": "wan2.2-i2v-14B-Q4_K_M.gguf" }
+  },
+  "38": {
+    "class_type": "CLIPLoader",
+    "_meta": { "title": "文本编码器(UMT5·fp8) — models/clip/" },
+    "inputs": { "clip_name": "umt5_xxl_fp8_e4m3fn_scaled.safetensors", "type": "wan", "device": "default" }
+  },
+  "39": {
+    "class_type": "VAELoader",
+    "_meta": { "title": "VAE — models/vae/wan2.2_vae.safetensors" },
+    "inputs": { "vae_name": "wan2.2_vae.safetensors" }
+  },
+  "6": {
+    "class_type": "CLIPTextEncode",
+    "_meta": { "title": "正向提示词 %PROMPT%" },
+    "inputs": { "text": "%PROMPT%", "clip": ["38", 0] }
+  },
+  "7": {
+    "class_type": "CLIPTextEncode",
+    "_meta": { "title": "负向提示词 %NEG_PROMPT%" },
+    "inputs": { "text": "%NEG_PROMPT%", "clip": ["38", 0] }
+  },
+  "52": {
+    "class_type": "LoadImage",
+    "_meta": { "title": "参考图(首帧) %IMAGE%" },
+    "inputs": { "image": "%IMAGE%", "upload": "image" }
+  },
+  "55": {
+    "class_type": "WanImageToVideo",
+    "_meta": { "title": "图生视频 i2v" },
+    "inputs": {
+      "positive": ["6", 0],
+      "negative": ["7", 0],
+      "vae": ["39", 0],
+      "width": "%WIDTH%",
+      "height": "%HEIGHT%",
+      "length": "%FRAMES%",
+      "batch_size": 1,
+      "start_image": ["52", 0]
+    }
+  },
+  "3": {
+    "class_type": "KSampler",
+    "_meta": { "title": "采样 KSampler（model 直接接 GGUF UNet）" },
+    "inputs": {
+      "model": ["37", 0],
+      "positive": ["55", 0],
+      "negative": ["55", 1],
+      "latent_image": ["55", 2],
+      "seed": "%SEED%",
+      "steps": "%STEPS%",
+      "cfg": 5.0,
+      "sampler_name": "uni_pc",
+      "scheduler": "simple",
+      "denoise": 1.0
+    }
+  },
+  "8": {
+    "class_type": "VAEDecode",
+    "_meta": { "title": "解码 VAEDecode" },
+    "inputs": { "samples": ["3", 0], "vae": ["39", 0] }
+  },
+  "57": {
+    "class_type": "VHS_VideoCombine",
+    "_meta": { "title": "合成 mp4 (Video Helper Suite)" },
+    "inputs": {
+      "images": ["8", 0],
+      "frame_rate": "%FPS%",
+      "loop_count": 0,
+      "filename_prefix": "agentlab_i2v",
+      "format": "video/h264-mp4",
+      "pix_fmt": "yuv420p",
+      "crf": 19,
+      "save_metadata": true,
+      "save_output": true
+    }
+  }
+}
