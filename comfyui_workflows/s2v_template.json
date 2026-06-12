@@ -1,0 +1,99 @@
+{
+  "37": {
+    "class_type": "UNETLoader",
+    "_meta": { "title": "S2V 模型 — 换成你的 Wan2.2-S2V 权重(FP8/GGUF 可塞 24G)" },
+    "inputs": { "unet_name": "wan2.2_s2v_14B_fp8_scaled.safetensors", "weight_dtype": "default" }
+  },
+  "38": {
+    "class_type": "CLIPLoader",
+    "_meta": { "title": "文本编码器(UMT5)" },
+    "inputs": { "clip_name": "umt5_xxl_fp8_e4m3fn_scaled.safetensors", "type": "wan", "device": "default" }
+  },
+  "39": {
+    "class_type": "VAELoader",
+    "_meta": { "title": "VAE (S2V 用 wan2.1 VAE)" },
+    "inputs": { "vae_name": "wan_2.1_vae.safetensors" }
+  },
+  "52": {
+    "class_type": "LoadImage",
+    "_meta": { "title": "人物图(首帧) %IMAGE%" },
+    "inputs": { "image": "%IMAGE%", "upload": "image" }
+  },
+  "50": {
+    "class_type": "LoadAudio",
+    "_meta": { "title": "语音音频 %AUDIO% — 驱动口型" },
+    "inputs": { "audio": "%AUDIO%" }
+  },
+  "51": {
+    "class_type": "AudioEncoderLoader",
+    "_meta": { "title": "音频编码器(wav2vec2) — 放 models/audio_encoders/" },
+    "inputs": { "audio_encoder_name": "wav2vec2_large_english_fp16.safetensors" }
+  },
+  "53": {
+    "class_type": "AudioEncoderEncode",
+    "_meta": { "title": "音频→特征(AUDIO_ENCODER_OUTPUT)" },
+    "inputs": { "audio_encoder": ["51", 0], "audio": ["50", 0] }
+  },
+  "6": {
+    "class_type": "CLIPTextEncode",
+    "_meta": { "title": "正向提示词(全局运动/表情) %PROMPT%" },
+    "inputs": { "text": "%PROMPT%", "clip": ["38", 0] }
+  },
+  "7": {
+    "class_type": "CLIPTextEncode",
+    "_meta": { "title": "负向提示词 %NEG_PROMPT%" },
+    "inputs": { "text": "%NEG_PROMPT%", "clip": ["38", 0] }
+  },
+  "55": {
+    "class_type": "WanSoundImageToVideo",
+    "_meta": { "title": "语音驱动 i2v(S2V) — Kijai WanVideoWrapper 用户节点名不同，按你的为准" },
+    "inputs": {
+      "positive": ["6", 0],
+      "negative": ["7", 0],
+      "vae": ["39", 0],
+      "audio_encoder_output": ["53", 0],
+      "ref_image": ["52", 0],
+      "width": "%WIDTH%",
+      "height": "%HEIGHT%",
+      "length": "%FRAMES%",
+      "batch_size": 1
+    }
+  },
+  "3": {
+    "class_type": "KSampler",
+    "_meta": { "title": "采样" },
+    "inputs": {
+      "model": ["37", 0],
+      "positive": ["55", 0],
+      "negative": ["55", 1],
+      "latent_image": ["55", 2],
+      "seed": "%SEED%",
+      "steps": "%STEPS%",
+      "cfg": 5.0,
+      "sampler_name": "uni_pc",
+      "scheduler": "simple",
+      "denoise": 1.0
+    }
+  },
+  "8": {
+    "class_type": "VAEDecode",
+    "_meta": { "title": "解码" },
+    "inputs": { "samples": ["3", 0], "vae": ["39", 0] }
+  },
+  "57": {
+    "class_type": "VHS_VideoCombine",
+    "_meta": { "title": "合成 mp4 + 把语音混进音轨(成片自带人声)" },
+    "inputs": {
+      "images": ["8", 0],
+      "audio": ["50", 0],
+      "frame_rate": "%FPS%",
+      "loop_count": 0,
+      "filename_prefix": "agentlab_s2v",
+      "format": "video/h264-mp4",
+      "pix_fmt": "yuv420p",
+      "crf": 19,
+      "pingpong": false,
+      "save_output": true
+    }
+  }
+}

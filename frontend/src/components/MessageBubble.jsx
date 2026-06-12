@@ -1,9 +1,24 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
+
+// 面板参数持久化：存到浏览器 localStorage，刷新后不丢，省得每次重设。
+// 只用于「设置类」状态（模型/尺寸/段数/高级参数等），不用于每镜临时态或拉取的数据。
+function usePersistedState(key, initial) {
+  const K = 'agentlab.panel.' + key
+  const [val, setVal] = useState(() => {
+    try { const raw = localStorage.getItem(K); return raw != null ? JSON.parse(raw) : initial }
+    catch { return initial }
+  })
+  useEffect(() => {
+    try { localStorage.setItem(K, JSON.stringify(val)) } catch { /* 隐私模式/配额满：忽略 */ }
+  }, [K, val])
+  return [val, setVal]
+}
 import ReactMarkdown from 'react-markdown'
-import { fileUrl, getVideoProviders, getProject, batchGenerate, batchFinish,
+import { fileUrl, getVideoProviders, getImageProviders, getProject, batchGenerate, batchFinish,
          pipelineSelect, streamJobEvents, uploadCandidate, updateScenePrompts,
-         deleteCandidate, deleteSceneVideo, deleteEpisode,
-         sceneGenerate, sceneRender, cancelJob, listActiveJobs } from '../api'
+         deleteCandidate, deleteSceneVideo, deleteEpisode, suggestSegmentPrompts,
+         suggestContinuation, sceneGenerate, sceneRender, sceneAppend,
+         cancelJob, listActiveJobs } from '../api'
 
 /**
  * MessageBubble — 消息渲染
@@ -629,17 +644,27 @@ export function ProductionPanel({ message, workspace, sessionId }) {
   const [progress, setProgress] = useState('')
   const [zoom, setZoom] = useState(null)
   const [models, setModels] = useState([])
-  const [model, setModel] = useState('')
-  const [segments, setSegments] = useState(1)        // 顶部全局默认段数（批量出片用）
+  const [model, setModel] = usePersistedState('videoModel', '')   // 持久化：上次选的出片模型
+  const [imgModels, setImgModels] = useState([])     // 出图模型（公开名 flux 等；ComfyUI 透明顶替，不单列）
+  const [imgModel, setImgModel] = usePersistedState('imageModel', '')  // 持久化：上次选的出图模型
+  const [segments, setSegments] = usePersistedState('segments', 1)     // 持久化：全局默认段数
   const [sceneSegments, setSceneSegments] = useState({})  // {sceneId: 段数} 单镜覆盖
-  const [imgN, setImgN] = useState(4)              // 出图：每镜候选张数
-  const [imgSize, setImgSize] = useState('768x1024')  // 出图：尺寸
-  const [vidSize, setVidSize] = useState('')       // 出片：分辨率（空=默认）
-  // 「更多参数」专业档：出图（空=用默认）；出片（按所选模型 schema 动态生成）
-  const [showAdv, setShowAdv] = useState(false)
-  const [imgAdv, setImgAdv] = useState({ steps: '', guidance: '', seed: '', offload: '' })
-  const [vidParams, setVidParams] = useState({})
-  const [sceneBusy, setSceneBusy] = useState({})   // {sceneId: 'generate'|'render'}
+  const [sceneSegPrompts, setSceneSegPrompts] = useState({}) // {sceneId: [每段运镜提示词]}（AI生成/手改，不入库）
+  const [sceneIntent, setSceneIntent] = useState({})      // {sceneId: 中文意图}（喂给AI拆分段）
+  const [segGenBusy, setSegGenBusy] = useState({})        // {sceneId: 正在生成分段提示词}
+  const [imgN, setImgN] = usePersistedState('imgN', 4)              // 持久化：每镜候选张数
+  const [imgSize, setImgSize] = usePersistedState('imgSize', '768x1024')  // 持久化：出图尺寸
+  const [vidSize, setVidSize] = usePersistedState('vidSize', '')   // 持久化：出片分辨率（空=默认）
+  // 「更多参数」专业档：出图（空=用默认）；出片（按所选模型 schema 动态生成）。均持久化。
+  const [showAdv, setShowAdv] = usePersistedState('showAdv', false)
+  const [imgAdv, setImgAdv] = usePersistedState('imgAdv', { steps: '', guidance: '', seed: '', offload: '' })
+  const [vidParams, setVidParams] = usePersistedState('vidParams', {})
+  const [sceneBusy, setSceneBusy] = useState({})   // {sceneId: 'generate'|'render'|'append'}
+  const [appendPrompt, setAppendPrompt] = useState({})  // {sceneId: 追加段的运镜提示词(可空)}
+  const [appendCount, setAppendCount] = useState({})    // {sceneId: 本次追加几段}
+  const [appendLang, setAppendLang] = useState({})      // {sceneId: 'zh'|'en'} 推荐语言
+  const [appendSugBusy, setAppendSugBusy] = useState({})// {sceneId: AI 推荐请求中}
+  const [sceneLipsync, setSceneLipsync] = useState({})  // {sceneId: 对口型开关(本地态，叠加 scene.lipsync)}
   const [logs, setLogs] = useState([])             // GPU 实时日志行（尾部 N 条）
   const [showLogs, setShowLogs] = useState(true)
   const logEndRef = useRef(null)
@@ -676,28 +701,86 @@ export function ProductionPanel({ message, workspace, sessionId }) {
   const genPayload = (sceneId) => {
     const [iw, ih] = (imgSize || '0x0').split('x').map(Number)
     return { scene_id: sceneId, workspace, session_id: sessionId, n: imgN,
-      width: iw || 0, height: ih || 0,
+      width: iw || 0, height: ih || 0, image_model: imgModel,
       img_steps: Number(imgAdv.steps) || 0,
       img_guidance: imgAdv.guidance !== '' ? Number(imgAdv.guidance) : -1,
       img_seed: imgAdv.seed !== '' ? Number(imgAdv.seed) : -1, img_offload: imgAdv.offload || '' }
   }
-  const renderPayload = (sceneId) => ({
-    scene_id: sceneId, workspace, session_id: sessionId,
-    model, segments: sceneSegments[sceneId] ?? segments,   // 单镜段数优先，没设则用全局默认
-    size: vidSize, video_params: vidParams })
+  const renderPayload = (sceneId) => {
+    const segs = sceneSegments[sceneId] ?? segments   // 单镜段数优先，没设则用全局默认
+    // 多段时带上每段独立运镜提示词（AI 生成/手改）；单段不带（用分镜自身的 motion_prompt）
+    const mp = segs > 1 ? (sceneSegPrompts[sceneId] || []).slice(0, segs) : []
+    const ls = sceneLipsync[sceneId] ?? !!(proj?.scenes?.find(x => x.scene_id === sceneId)?.lipsync)
+    return { scene_id: sceneId, workspace, session_id: sessionId,
+      model, segments: segs, size: vidSize, video_params: vidParams, motion_prompts: mp, lipsync: ls }
+  }
 
+  // 让 AI 据画面 + 一句中文意图，把动作拆成 N 段递进运镜提示词
+  const genSegPrompts = async (sceneId) => {
+    const segs = sceneSegments[sceneId] ?? segments
+    setSegGenBusy(p => ({ ...p, [sceneId]: true }))
+    try {
+      const { prompts } = await suggestSegmentPrompts(sceneId, segs, sceneIntent[sceneId] || '', workspace)
+      setSceneSegPrompts(p => ({ ...p, [sceneId]: prompts }))
+    } catch (e) {
+      setProgress('生成分段提示词失败：' + String(e.message || e))
+    } finally {
+      setSegGenBusy(p => { const n = { ...p }; delete n[sceneId]; return n })
+    }
+  }
+  const editSegPrompt = (sceneId, i, val) => {
+    setSceneSegPrompts(p => {
+      const arr = [...(p[sceneId] || [])]
+      while (arr.length <= i) arr.push('')
+      arr[i] = val
+      return { ...p, [sceneId]: arr }
+    })
+  }
+
+  // 「再续一段」：取现有成片末帧续生成、拼到末尾（同 vidParams 以便无缝拼接）。段数不写死。
+  const appendPayload = (sceneId) => ({
+    scene_id: sceneId, workspace, session_id: sessionId, model,
+    motion_prompt: appendPrompt[sceneId] || '',
+    count: Math.max(1, Number(appendCount[sceneId]) || 1),
+    size: vidSize, video_params: vidParams,
+  })
   const runScene = async (kind, sceneId) => {
     if (busy || sceneBusy[sceneId]) return
     startAt.current[sceneId] = Date.now()
     setLogs([]); setShowLogs(true)
     setSceneBusy(p => ({ ...p, [sceneId]: kind }))
     try {
-      const submit = kind === 'generate' ? sceneGenerate : sceneRender
-      const jobId = await submit(kind === 'generate' ? genPayload(sceneId) : renderPayload(sceneId))
+      const submit = kind === 'generate' ? sceneGenerate : kind === 'append' ? sceneAppend : sceneRender
+      const payload = kind === 'generate' ? genPayload(sceneId)
+        : kind === 'append' ? appendPayload(sceneId) : renderPayload(sceneId)
+      const jobId = await submit(payload)
       sceneJob.current[sceneId] = jobId
       await consume(jobId)
     } catch { /* ignore */ }
     finally { delete sceneJob.current[sceneId]; setSceneBusy(p => { const n = { ...p }; delete n[sceneId]; return n }) }
+  }
+
+  // ✨ AI 推荐续段运镜提示词：据现有成片末帧（配了视觉模型则真看图），一键填好可改。防抽卡。
+  const suggestAppendPrompt = async (sceneId) => {
+    if (appendSugBusy[sceneId]) return
+    setAppendSugBusy(p => ({ ...p, [sceneId]: true }))
+    try {
+      const lang = appendLang[sceneId] || 'zh'
+      const { prompt, saw_frame } = await suggestContinuation(sceneId, lang, workspace)
+      setAppendPrompt(p => ({ ...p, [sceneId]: prompt }))
+      setProgress(saw_frame ? 'AI 已据尾帧画面推荐运镜（可改）'
+        : 'AI 已据上下文推荐运镜（未配视觉模型，没真看图；可改）')
+    } catch (e) {
+      setProgress('推荐失败：' + String(e.message || e))
+    } finally {
+      setAppendSugBusy(p => { const n = { ...p }; delete n[sceneId]; return n })
+    }
+  }
+
+  // 对口型开关：本地立即生效 + 持久化到分镜（survives 刷新）
+  const toggleLipsync = async (sceneId, val) => {
+    setSceneLipsync(p => ({ ...p, [sceneId]: val }))
+    try { await updateScenePrompts(sceneId, { lipsync: val }, workspace) } catch { /* 本地态仍生效 */ }
   }
 
   const stopScene = async (sceneId) => {
@@ -723,6 +806,10 @@ export function ProductionPanel({ message, workspace, sessionId }) {
     getVideoProviders().then(d => {
       setModels(d.providers || [])
       if (!model && d.default) setModel(d.default)
+    }).catch(() => {})
+    getImageProviders().then(d => {
+      setImgModels(d.providers || [])
+      if (!imgModel && d.default) setImgModel(d.default)
     }).catch(() => {})
   }, [])  // eslint-disable-line
 
@@ -922,8 +1009,20 @@ export function ProductionPanel({ message, workspace, sessionId }) {
         {showAdv && (
           <div style={{ marginTop: 8, padding: '10px 12px', borderRadius: 8,
                         border: '1px solid var(--border)', background: 'rgba(255,255,255,0.02)' }}>
-            <div style={{ fontSize: 10.5, fontWeight: 700, color: 'rgba(165,168,255,0.8)', marginBottom: 6 }}>出图（FLUX）· 留空=默认</div>
+            <div style={{ fontSize: 10.5, fontWeight: 700, color: 'rgba(165,168,255,0.8)', marginBottom: 6 }}>
+              出图（{imgModels.find(m => m.name === imgModel)?.display_name || imgModel || 'FLUX'}）· 留空=默认
+            </div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
+              {imgModels.length > 1 && (
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 3, width: 180 }}>
+                  <span style={{ fontSize: 10.5, color: 'var(--text-muted)' }}>出图模型</span>
+                  <select value={imgModel} disabled={!!busy}
+                    onChange={e => setImgModel(e.target.value)}
+                    style={{ ...inputStyle, height: 28 }}>
+                    {imgModels.map(m => (<option key={m.name} value={m.name}>{m.display_name}</option>))}
+                  </select>
+                </label>
+              )}
               {[['steps', '采样步数(默认28)'], ['guidance', 'guidance(默认3.5)'], ['seed', 'seed(-1随机)']].map(([k, label]) => (
                 <label key={k} style={{ display: 'flex', flexDirection: 'column', gap: 3, width: 130 }}>
                   <span style={{ fontSize: 10.5, color: 'var(--text-muted)' }}>{label}</span>
@@ -1063,19 +1162,31 @@ export function ProductionPanel({ message, workspace, sessionId }) {
                     {s.selected && !s.video && (() => {
                       const segs = sceneSegments[s.scene_id] ?? segments
                       const sec = estSec != null ? estSec / Math.max(1, segments) * segs : null
+                      const ls = sceneLipsync[s.scene_id] ?? !!s.lipsync
                       return (<>
-                        <select value={segs} disabled={disabled}
-                          onChange={e => setSceneSegments(p => ({ ...p, [s.scene_id]: Number(e.target.value) }))}
-                          title="这个分镜的接续段数（越多越长越连贯）"
-                          style={{ ...inputStyle, width: 'auto', height: 22, fontSize: 11 }}>
-                          <option value={1}>单段</option>
-                          <option value={2}>接续×2</option>
-                          <option value={3}>接续×3</option>
-                          <option value={4}>接续×4</option>
-                        </select>
+                        <label title="勾上=人物开口说话、嘴型跟「旁白(=台词)」同步(Wan2.2-S2V 语音驱动)；不勾=普通运镜出片。"
+                          style={{ fontSize: 11, display: 'inline-flex', alignItems: 'center', gap: 3,
+                                   cursor: disabled ? 'default' : 'pointer',
+                                   color: ls ? 'rgba(94,234,212,1)' : 'var(--text-muted)' }}>
+                          <input type="checkbox" checked={ls} disabled={disabled}
+                            onChange={e => toggleLipsync(s.scene_id, e.target.checked)} />
+                          🗣 对口型
+                        </label>
+                        {!ls && (
+                          <label style={{ fontSize: 11, color: 'var(--text-muted)', display: 'inline-flex',
+                                          alignItems: 'center', gap: 3 }}
+                            title="这个分镜的接续段数（1=单段；越多越长越连贯，想多长填多少、没有上限）。也可先出 1 段、看效果后用「再续一段」逐段加长。">
+                            接续
+                            <input type="number" min={1} value={segs} disabled={disabled}
+                              onChange={e => setSceneSegments(p => ({ ...p, [s.scene_id]: Math.max(1, Number(e.target.value) || 1) }))}
+                              style={{ ...inputStyle, width: 48, height: 22, fontSize: 11 }} />
+                            段
+                          </label>
+                        )}
                         <button onClick={() => runScene('render', s.scene_id)} disabled={disabled}
-                          title="只对这个分镜出视频" style={miniAct(false, true)}>
-                          出视频{sec != null ? ` ≈${sec.toFixed(0)}s` : ''}
+                          title={ls ? '人物开口说话、对口型出片(Wan2.2-S2V)' : '只对这个分镜出视频'}
+                          style={miniAct(false, true)}>
+                          {ls ? '对口型出片' : `出视频${sec != null ? ` ≈${sec.toFixed(0)}s` : ''}`}
                         </button>
                       </>)
                     })()}
@@ -1103,14 +1214,50 @@ export function ProductionPanel({ message, workspace, sessionId }) {
 
               {s.video ? (
                 <div>
-                  <video src={fileUrl(s.video.url)} controls
+                  {/* key 绑 url（含 &v=mtime）：追加后文件变了，强制 <video> 重建、不吃旧缓存 */}
+                  <video key={s.video.url} src={fileUrl(s.video.url)} controls
                          style={{ width: '100%', maxHeight: 300, borderRadius: 8, display: 'block' }} />
-                  <button onClick={() => delSceneVideo(s.scene_id)}
-                    title="删除这个分镜的成片（图还在，可重新出片）" style={{
-                      marginTop: 6, height: 24, padding: '0 12px', borderRadius: 6,
-                      border: '1px solid rgba(239,68,68,0.35)', background: 'rgba(239,68,68,0.12)',
-                      color: 'rgba(252,165,165,1)', fontSize: 11.5, cursor: 'pointer',
-                    }}>删除成片 · 重出</button>
+                  {/* 看效果再加长：取现有成片末帧续生成、拼到末尾，可反复点。段数不写死。 */}
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 6, alignItems: 'center' }}>
+                    <input value={appendPrompt[s.scene_id] || ''} disabled={busy || !!sceneBusy[s.scene_id]}
+                      onChange={e => setAppendPrompt(p => ({ ...p, [s.scene_id]: e.target.value }))}
+                      placeholder="续段运镜提示词（可空；点✨让AI据尾帧推荐，可改）"
+                      style={{ ...inputStyle, flex: '1 1 160px', height: 26, fontSize: 11.5 }} />
+                    <select value={appendLang[s.scene_id] || 'zh'} disabled={busy || !!sceneBusy[s.scene_id]}
+                      onChange={e => setAppendLang(p => ({ ...p, [s.scene_id]: e.target.value }))}
+                      title="推荐提示词的语言（Wan2.2 原生支持中文；纯英文模型选 EN）"
+                      style={{ ...inputStyle, width: 'auto', height: 26, fontSize: 11 }}>
+                      <option value="zh">中</option>
+                      <option value="en">EN</option>
+                    </select>
+                    <button onClick={() => suggestAppendPrompt(s.scene_id)}
+                      disabled={busy || !!sceneBusy[s.scene_id] || !!appendSugBusy[s.scene_id]}
+                      title="据现有视频的最后一帧，AI 推荐一句续段运镜提示词（配了视觉模型则真看画面）。不用自己憋提示词、少抽卡。"
+                      style={miniAct(false)}>
+                      {appendSugBusy[s.scene_id] ? '推荐中…' : '✨AI推荐'}
+                    </button>
+                    <label style={{ fontSize: 11, color: 'var(--text-muted)', display: 'inline-flex',
+                                    alignItems: 'center', gap: 3 }}
+                      title="本次追加几段（想加多长加多长，没有上限）">
+                      续
+                      <input type="number" min={1} value={appendCount[s.scene_id] ?? 1}
+                        disabled={busy || !!sceneBusy[s.scene_id]}
+                        onChange={e => setAppendCount(p => ({ ...p, [s.scene_id]: Math.max(1, Number(e.target.value) || 1) }))}
+                        style={{ ...inputStyle, width: 44, height: 26 }} />
+                      段
+                    </label>
+                    <button onClick={() => runScene('append', s.scene_id)} disabled={busy || !!sceneBusy[s.scene_id]}
+                      title="取现有视频最后一帧继续生成、拼到末尾，让这镜变长（可反复点，看效果再决定加多少）"
+                      style={miniAct(false, true)}>
+                      ➕ 再续一段{sceneBusy[s.scene_id] === 'append' ? `…${fmtElapsed(s.scene_id)}` : ''}
+                    </button>
+                    <button onClick={() => delSceneVideo(s.scene_id)} disabled={busy || !!sceneBusy[s.scene_id]}
+                      title="删除这个分镜的成片（图还在，可重新出片）" style={{
+                        height: 26, padding: '0 12px', borderRadius: 6,
+                        border: '1px solid rgba(239,68,68,0.35)', background: 'rgba(239,68,68,0.12)',
+                        color: 'rgba(252,165,165,1)', fontSize: 11.5, cursor: 'pointer',
+                      }}>删除成片 · 重出</button>
+                  </div>
                 </div>
               ) : s.candidates.length > 0 ? (
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(96px,1fr))', gap: 8 }}>
@@ -1141,6 +1288,19 @@ export function ProductionPanel({ message, workspace, sessionId }) {
                 <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>尚未出图</div>
               )}
 
+              {/* 多段接续：AI 把动作拆成每段独立运镜提示词（你想不出提示词时用），可改可不改 */}
+              {s.selected && !s.video && (sceneSegments[s.scene_id] ?? segments) > 1 && (
+                <SegmentPromptsEditor
+                  segs={sceneSegments[s.scene_id] ?? segments}
+                  prompts={sceneSegPrompts[s.scene_id] || []}
+                  intent={sceneIntent[s.scene_id] || ''}
+                  busy={!!segGenBusy[s.scene_id]}
+                  onIntent={v => setSceneIntent(p => ({ ...p, [s.scene_id]: v }))}
+                  onGenerate={() => genSegPrompts(s.scene_id)}
+                  onEdit={(i, v) => editSegPrompt(s.scene_id, i, v)}
+                />
+              )}
+
               {/* 提示词全透明：AI 写的也给用户看，且可改（改完再出图/出片更省 GPU） */}
               <ScenePrompts scene={s} workspace={workspace} onSaved={load} />
             </div>
@@ -1167,15 +1327,16 @@ function ScenePrompts({ scene, workspace, onSaved }) {
   const [img, setImg] = useState(scene.image_prompt || '')
   const [mot, setMot] = useState(scene.motion_prompt || '')
   const [nar, setNar] = useState(scene.narration || '')
+  const [sub, setSub] = useState(scene.subtitle || '')
   const [saving, setSaving] = useState(false)
   const dirty = img !== (scene.image_prompt || '') || mot !== (scene.motion_prompt || '')
-    || nar !== (scene.narration || '')
+    || nar !== (scene.narration || '') || sub !== (scene.subtitle || '')
 
   const save = async () => {
     setSaving(true)
     try {
       await updateScenePrompts(scene.scene_id,
-        { image_prompt: img, motion_prompt: mot, narration: nar }, workspace)
+        { image_prompt: img, motion_prompt: mot, narration: nar, subtitle: sub }, workspace)
       onSaved?.()
     } catch { /* 保持编辑态，用户可重试 */ }
     setSaving(false)
@@ -1207,7 +1368,8 @@ function ScenePrompts({ scene, workspace, onSaved }) {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 6 }}>
           {ta('出图提示词（image_prompt，角色触发词自动注入）', img, setImg, 3)}
           {ta('运镜/动态提示词（motion_prompt，出视频用）', mot, setMot)}
-          {ta('旁白（narration，合成时转 TTS + 字幕）', nar, setNar)}
+          {ta('旁白（narration，转 TTS 配音）', nar, setNar)}
+          {ta('字幕（subtitle，屏幕文字；留空=同旁白）', sub, setSub)}
           <div>
             <button onClick={save} disabled={!dirty || saving} style={{
               height: 26, padding: '0 14px', borderRadius: 6,
@@ -1217,6 +1379,47 @@ function ScenePrompts({ scene, workspace, onSaved }) {
               fontSize: 11.5, fontWeight: 600, cursor: dirty ? 'pointer' : 'default',
             }}>{saving ? '保存中…' : dirty ? '保存修改' : '未修改'}</button>
           </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/* 分段运镜提示词编辑器：多段接续时，AI 据画面+中文意图把动作拆成每段独立提示词，可改可不改。
+   提示词存在 ProductionPanel 的 sceneSegPrompts 里（出片时随 renderPayload 下发），此组件只做展示/编辑。 */
+function SegmentPromptsEditor({ segs, prompts, intent, busy, onIntent, onGenerate, onEdit }) {
+  const has = prompts.some(p => (p || '').trim())
+  return (
+    <div style={{ marginTop: 8, padding: '8px 10px', borderRadius: 8,
+      border: '1px dashed rgba(99,102,241,0.4)', background: 'rgba(99,102,241,0.05)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 11.5, fontWeight: 600, color: 'rgba(190,192,255,1)' }}>
+          分段运镜 · 接续×{segs}
+        </span>
+        <input value={intent} disabled={busy} onChange={e => onIntent(e.target.value)}
+          placeholder="想要的动作/运镜（中文，可留空让 AI 看画面自拟）"
+          style={{ ...inputStyle, flex: 1, minWidth: 180, height: 26, fontSize: 11.5 }} />
+        <button onClick={onGenerate} disabled={busy} title="让 AI 把动作拆成每段递进的运镜提示词"
+          style={{ height: 26, padding: '0 12px', borderRadius: 6, whiteSpace: 'nowrap',
+            border: '1px solid rgba(99,102,241,0.45)', cursor: busy ? 'default' : 'pointer',
+            background: busy ? 'rgba(255,255,255,0.05)' : 'rgba(99,102,241,0.22)',
+            color: busy ? 'var(--text-muted)' : 'rgba(190,192,255,1)', fontSize: 11.5, fontWeight: 600 }}>
+          {busy ? '生成中…' : has ? '重新生成' : 'AI 生成分段运镜'}
+        </button>
+      </div>
+      {has && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 8 }}>
+          {Array.from({ length: segs }).map((_, i) => (
+            <label key={i} style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <span style={{ fontSize: 10.5, color: 'var(--text-muted)' }}>段 #{i + 1}</span>
+              <textarea value={prompts[i] || ''} rows={2} onChange={e => onEdit(i, e.target.value)}
+                style={{ ...inputStyle, height: 'auto', padding: '5px 8px', resize: 'vertical',
+                  fontFamily: 'inherit', fontSize: 11.5, lineHeight: 1.5 }} />
+            </label>
+          ))}
+          <span style={{ fontSize: 10.5, color: 'var(--text-dim)' }}>
+            出视频时按每段提示词逐段生成、尾帧接续拼接成连贯长镜头。
+          </span>
         </div>
       )}
     </div>

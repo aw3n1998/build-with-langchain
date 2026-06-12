@@ -171,14 +171,21 @@ def _assemble_in(work: str, clips: list[dict], out_path: str, ff: str,
     tts_used = False
 
     for i, c in enumerate(clips):
-        clip, narration = c["path"], (c.get("narration") or "").strip()
+        clip = c["path"]
+        narration = (c.get("narration") or "").strip()              # 配音用（TTS）
+        subtitle = (c.get("subtitle") or "").strip() or narration   # 字幕用：独立字幕优先，没有则回退旁白
+        keep_audio = bool(c.get("keep_audio"))                       # 对口型片自带人声：保留它，别重配音(否则口型错位)
         vd = _duration(clip)
-        mp3 = os.path.join(work, f"narr_{i}.mp3")
-        has_narr = bool(narration) and _tts(narration, mp3, voice)
-        ad = _duration(mp3) if has_narr else 0.0
-        out_dur = max(vd, ad + 0.3) if has_narr else vd      # 旁白略留尾气口
-        freeze = max(0.0, out_dur - vd)
-        tts_used = tts_used or has_narr
+        if keep_audio:
+            has_narr = False
+            out_dur, freeze = vd, 0.0     # 用片子自带音轨，时长以视频为准，不冻结
+        else:
+            mp3 = os.path.join(work, f"narr_{i}.mp3")
+            has_narr = bool(narration) and _tts(narration, mp3, voice)
+            ad = _duration(mp3) if has_narr else 0.0
+            out_dur = max(vd, ad + 0.3) if has_narr else vd      # 旁白略留尾气口
+            freeze = max(0.0, out_dur - vd)
+            tts_used = tts_used or has_narr
 
         # 统一分辨率 + 末帧冻结补齐 + 统一编码（后续 concat 可直接 -c copy）
         vf = (f"scale={tw}:{th}:force_original_aspect_ratio=decrease,"
@@ -187,11 +194,17 @@ def _assemble_in(work: str, clips: list[dict], out_path: str, ff: str,
             vf += f",tpad=stop_mode=clone:stop_duration={freeze:.3f}"
         part = os.path.join(work, f"part_{i}.mp4")
         args = [ff, "-y", "-hide_banner", "-i", clip]
-        if has_narr:
-            args += ["-i", mp3]
+        if keep_audio:
+            probe = _run([ff, "-hide_banner", "-i", clip])   # 探一下源片到底有没有音轨
+            if "Audio:" in (probe.stderr or ""):
+                amap = "0:a"     # 源片自带音轨（S2V 人声），保留它
+            else:                # 源片其实无音轨 → 补静音，保证每个 part 都有音轨(concat 一致)
+                args += ["-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100"]; amap = "1:a"
+        elif has_narr:
+            args += ["-i", mp3]; amap = "1:a"
         else:
-            args += ["-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100"]
-        args += ["-filter_complex", f"[0:v]{vf}[v]", "-map", "[v]", "-map", "1:a",
+            args += ["-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100"]; amap = "1:a"
+        args += ["-filter_complex", f"[0:v]{vf}[v]", "-map", "[v]", "-map", amap,
                  "-t", f"{out_dur:.3f}",
                  "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
                  "-pix_fmt", "yuv420p", "-c:a", "aac", "-ar", "44100", "-ac", "2", part]
@@ -199,8 +212,8 @@ def _assemble_in(work: str, clips: list[dict], out_path: str, ff: str,
         if res.returncode != 0:
             raise RuntimeError(f"分镜 {i+1} 处理失败:\n{(res.stderr or '')[-800:]}")
         real = _duration(part)
-        if narration:
-            subs.append((t_cursor + 0.05, t_cursor + real - 0.05, narration))
+        if subtitle:
+            subs.append((t_cursor + 0.05, t_cursor + real - 0.05, subtitle))
         t_cursor += real
         parts.append(part)
 
@@ -246,7 +259,13 @@ def _assemble_in(work: str, clips: list[dict], out_path: str, ff: str,
         os.remove(out_path)
     import shutil
     shutil.move(final_src, out_path)   # 临时目录在 C 盘、产物可能在其它盘，os.replace 跨盘会报错
+
+    # 可选 ComfyUI 后处理（放大/补帧）：默认关；失败安全（保留原片，不影响成片交付）
+    from agent_lab.app.pipeline.postprocess import maybe_postprocess
+    post = maybe_postprocess(out_path)
+
     total = _duration(out_path)
-    logger.info("[assembler] 成片完成 %s（%.1fs, %d 段, 字幕=%s）", out_path, total, len(parts), sub_mode)
+    logger.info("[assembler] 成片完成 %s（%.1fs, %d 段, 字幕=%s, 后处理=%s）",
+                out_path, total, len(parts), sub_mode, post["note"])
     return {"out": out_path, "duration": total, "scenes": len(parts),
-            "tts": tts_used, "subtitles": sub_mode}
+            "tts": tts_used, "subtitles": sub_mode, "postprocess": post["note"]}

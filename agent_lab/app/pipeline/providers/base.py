@@ -35,8 +35,10 @@ class VideoProvider(ABC):
     name: str = ""
     # 人类可读名（参数卡下拉显示），如 "Wan2.2-TI2V-5B"
     display_name: str = ""
-    # 能力声明：{"i2v"} 图生视频 / {"t2v"} 文生视频 / 两者皆可
+    # 能力声明：{"i2v"} 图生视频 / {"t2v"} 文生视频 / {"s2v"} 语音驱动(对口型)
     capabilities: set[str] = {"i2v"}
+    # 隐藏：不进用户可见的模型下拉（如 S2V 由「对口型」开关自动路由，不让用户手选）
+    hidden: bool = False
 
     @abstractmethod
     def param_schema(self) -> list[dict]:
@@ -112,8 +114,8 @@ class ProviderRegistry:
         return self._default or ""
 
     def list_providers(self) -> list[dict]:
-        """所有已注册模型的自描述列表（供参数卡的模型下拉 + /api 查询）。"""
-        return [p.info() for p in self._providers.values()]
+        """用户可见模型的自描述列表（供参数卡的模型下拉 + /api 查询）。隐藏 Provider(如 S2V)不列。"""
+        return [p.info() for p in self._providers.values() if not getattr(p, "hidden", False)]
 
     def has(self, name: str) -> bool:
         return name in self._providers

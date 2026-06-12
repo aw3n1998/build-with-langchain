@@ -63,10 +63,13 @@ class FakeGpu:
 
 
 class FakeProvider:
-    """替身视频模型：generate 是 no-op（真正产物由 FakeGpu.download 伪造）。"""
+    """替身视频模型：generate 是 no-op（真正产物由 FakeGpu.download 伪造），但记录每段收到的 prompt。"""
     name = "mock"
     display_name = "MockVideo"
     capabilities = {"i2v"}
+
+    def __init__(self):
+        self.prompts = []   # 每次 generate 收到的 prompt，按段顺序
 
     def param_schema(self):
         return [{"key": "size", "label": "size", "type": "text", "default": "320*576"}]
@@ -75,6 +78,7 @@ class FakeProvider:
         return {f["key"]: f.get("default") for f in self.param_schema()}
 
     def generate(self, gpu, *, image_path, prompt, out_remote, params):
+        self.prompts.append(prompt)
         return None
 
 
@@ -91,8 +95,9 @@ def main() -> int:
 
     runtime.set_workspace(ws)
     fake = FakeGpu()
+    fake_provider = FakeProvider()
     pt.get_gpu_client = lambda: fake                      # 替换 GPU 客户端
-    video_provider_registry.register(FakeProvider())      # 注册替身模型
+    video_provider_registry.register(fake_provider)       # 注册替身模型
     assembler._tts = lambda *a, **k: False                # TTS 离线桩（无旁白音轨）
 
     # 1) 建项目 + 2 个分镜
@@ -133,6 +138,76 @@ def main() -> int:
     assert os.path.exists(final2), "接续成片未落盘"
     assert abs(assembler._duration(final2) - 2.0) < 0.4, "接续成片时长应≈2s（2×1s）"
     print("[e2e] 出片 OK（单段 + 尾帧接续拼接，时长校验通过）")
+
+    # 4b) 每段独立提示词：2 段接续下发 ["AAA","BBB"]，断言两段分别收到（Part A 核心）
+    fake_provider.prompts.clear()
+    out2b = pt.do_render_scene_video(
+        sids[1], "", "mock", {"segments": 2, "motion_prompts": ["AAA-seg1", "BBB-seg2"]})
+    assert "VIDFILE::" in out2b, f"分段提示词出片失败:\n{out2b}"
+    assert fake_provider.prompts == ["AAA-seg1", "BBB-seg2"], \
+        f"每段提示词未逐段下发，实际收到: {fake_provider.prompts}"
+    # 回退路径：不给 motion_prompts 时，两段共用统一 prompt（向后兼容）
+    fake_provider.prompts.clear()
+    pt.do_render_scene_video(sids[1], "运镜统一句", "mock", {"segments": 2})
+    assert fake_provider.prompts == ["运镜统一句", "运镜统一句"], \
+        f"无分段提示词时应全段共用，实际: {fake_provider.prompts}"
+    print("[e2e] 每段独立提示词 OK（逐段下发 + 缺省回退）")
+
+    # 4c) 看效果再「追加一段」：在已生成成片末尾续接，时长应增长（可反复、段数不写死）
+    final1 = os.path.join(runtime.video_dir(), f"01_{sids[0]}.mp4")
+    assert os.path.exists(final1), "镜1 单段成片应已存在"
+    dur0 = assembler._duration(final1)
+    fake_provider.prompts.clear()
+    outa = pt.append_scene_segment(sids[0], "追加段提示词", "mock", {}, count=1)
+    assert "VIDFILE::" in outa and "追加 1 段" in outa, f"追加一段失败:\n{outa}"
+    dur1 = assembler._duration(final1)
+    assert dur1 > dur0 + 0.6, f"追加后成片应变长（{dur0:.1f}→{dur1:.1f}s）"
+    assert fake_provider.prompts == ["追加段提示词"], f"追加段未用指定提示词: {fake_provider.prompts}"
+    pt.append_scene_segment(sids[0], "", "mock", {}, count=2)   # 反复追加 + 一次多段
+    dur2 = assembler._duration(final1)
+    assert dur2 > dur1 + 1.2, f"再追加 2 段应继续变长（{dur1:.1f}→{dur2:.1f}s）"
+    # 守卫：对「还没出过视频」的分镜追加应被拒绝
+    s3 = pt.add_scene.func(project_id=pid, scene_number=3, title="镜3", narration="", image_prompt="p3")
+    sid3 = s3.split("[")[1].split("]")[0]
+    novid = pt.append_scene_segment(sid3, "", "mock", {})
+    assert "还没有已生成的视频" in novid, f"对无成片分镜追加应被拒绝: {novid}"
+    print(f"[e2e] 追加一段 OK（{dur0:.1f}→{dur1:.1f}→{dur2:.1f}s，可反复、段数自由、无片守卫）")
+
+    # 4d) 字幕独立于旁白：给镜1设一个与旁白不同的字幕，合成走带独立字幕的路径（烧字幕不崩）
+    store.update_scene_prompts(sids[0], subtitle="独立标题字幕")
+    assert store.get_scene(sids[0])["subtitle"] == "独立标题字幕"
+    assert store.get_scene(sids[0])["narration"], "旁白应仍在（字幕不覆盖旁白）"
+    print("[e2e] 字幕≠旁白 字段 OK")
+
+    # 4e) 对口型(S2V)路由：lipsync=on → do_render 走 S2V 路径（无端点优雅降级 + 有端点拿到音频）
+    # 先确保「无 S2V 端点」状态——本测试不依赖 .env 是否配了 COMFYUI_BASE_URL
+    video_provider_registry._providers.pop("comfyui-s2v", None)
+    store.set_scene_lipsync(sids[1], True)
+    assert store.get_scene(sids[1])["lipsync"] == 1
+    out_no = pt.do_render_scene_video(sids[1], "", "mock", {"lipsync": True})
+    assert "还没就绪" in out_no or "S2V" in out_no, f"无 S2V 端点应优雅提示: {out_no}"
+
+    class FakeS2V(FakeProvider):           # 假 S2V：记录拿到的音频，产出占位 mp4
+        name = "comfyui-s2v"; capabilities = {"s2v"}; hidden = True
+        def __init__(self):
+            super().__init__(); self.audio = None
+        def generate(self, gpu, *, image_path, prompt, out_remote, params):
+            self.audio = params.get("audio_path"); self.prompts.append(prompt)
+            make_mp4(out_remote, seconds=1.0, color="purple"); return None
+
+    fake_s2v = FakeS2V()
+    video_provider_registry.register(fake_s2v)
+    orig_tts = assembler._tts
+    assembler._tts = lambda text, out, voice=None: (open(out, "wb").write(b"x"), True)[1]
+    try:
+        out_ls = pt.do_render_scene_video(sids[1], "", "mock", {"lipsync": True})
+    finally:
+        assembler._tts = orig_tts          # 还原，后续合成仍用无 TTS 桩
+    assert "VIDFILE::" in out_ls and "对口型" in out_ls, f"S2V 出片失败: {out_ls}"
+    assert fake_s2v.audio and os.path.exists(fake_s2v.audio), "S2V 应收到 TTS 音频路径"
+    # 关掉镜2的 lipsync，免得后面整集合成被这一镜影响
+    store.set_scene_lipsync(sids[1], False)
+    print("[e2e] 对口型(S2V) 路由 OK（无端点降级 + 有端点走 S2V 拿到音频）")
 
     # 5) 合成整集（拼接 + 字幕；TTS 桩=无旁白音）
     out = pt.assemble_episode.func(project_id=pid)

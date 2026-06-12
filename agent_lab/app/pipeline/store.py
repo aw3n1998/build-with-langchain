@@ -62,6 +62,8 @@ CREATE TABLE IF NOT EXISTS scenes (
     scene_number  INTEGER NOT NULL,
     title         TEXT DEFAULT '',
     narration     TEXT NOT NULL DEFAULT '',
+    subtitle      TEXT NOT NULL DEFAULT '',
+    lipsync       INTEGER NOT NULL DEFAULT 0,
     image_prompt  TEXT NOT NULL DEFAULT '',
     motion_prompt TEXT NOT NULL DEFAULT '',
     state         TEXT NOT NULL DEFAULT 'DRAFT',
@@ -119,6 +121,17 @@ class PipelineStore:
     def _init_db(self) -> None:
         with self._lock, self._conn() as conn:
             conn.executescript(_SCHEMA)
+            self._migrate(conn)
+
+    def _migrate(self, conn) -> None:
+        """对老库补列（CREATE TABLE IF NOT EXISTS 不会给旧表加新列）。逐列尝试，已存在则跳过。"""
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(scenes)").fetchall()}
+        if "subtitle" not in cols:   # 字幕独立于旁白：旧库补这一列
+            conn.execute("ALTER TABLE scenes ADD COLUMN subtitle TEXT NOT NULL DEFAULT ''")
+            logger.info("[PipelineStore] 迁移：scenes 补列 subtitle")
+        if "lipsync" not in cols:    # 对口型(S2V)开关：旧库补这一列
+            conn.execute("ALTER TABLE scenes ADD COLUMN lipsync INTEGER NOT NULL DEFAULT 0")
+            logger.info("[PipelineStore] 迁移：scenes 补列 lipsync")
 
     # ── 项目 ──────────────────────────────────────────────────────
     def create_project(self, title: str, novel_text: str = "") -> dict:
@@ -151,6 +164,7 @@ class PipelineStore:
         image_prompt: str = "",
         motion_prompt: str = "",
         title: str = "",
+        subtitle: str = "",
     ) -> dict:
         if not self.get_project(project_id):
             raise ValueError(f"项目不存在: {project_id}")
@@ -158,10 +172,10 @@ class PipelineStore:
         ts = _now()
         with self._lock, self._conn() as conn:
             conn.execute(
-                """INSERT INTO scenes(id,project_id,scene_number,title,narration,
+                """INSERT INTO scenes(id,project_id,scene_number,title,narration,subtitle,
                    image_prompt,motion_prompt,state,created_at,updated_at)
-                   VALUES(?,?,?,?,?,?,?,?,?,?)""",
-                (sid, project_id, scene_number, title, narration,
+                   VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+                (sid, project_id, scene_number, title, narration, subtitle,
                  image_prompt, motion_prompt, SceneState.DRAFT.value, ts, ts),
             )
         return self.get_scene(sid)
@@ -197,12 +211,14 @@ class PipelineStore:
     def update_scene_prompts(self, scene_id: str,
                              image_prompt: str | None = None,
                              motion_prompt: str | None = None,
-                             narration: str | None = None) -> dict:
-        """更新分镜的提示词/旁白（只改传入的非 None 字段）。面板上用户改完 AI 写的提示词再出图/出片。"""
+                             narration: str | None = None,
+                             subtitle: str | None = None) -> dict:
+        """更新分镜的提示词/旁白/字幕（只改传入的非 None 字段）。字幕独立于旁白：旁白配音、字幕上屏。"""
         sets, params = [], []
         for col, val in (("image_prompt", image_prompt),
                          ("motion_prompt", motion_prompt),
-                         ("narration", narration)):
+                         ("narration", narration),
+                         ("subtitle", subtitle)):
             if val is not None:
                 sets.append(f"{col}=?")
                 params.append(val)
@@ -213,6 +229,13 @@ class PipelineStore:
             params.append(scene_id)
             with self._lock, self._conn() as conn:
                 conn.execute(f"UPDATE scenes SET {', '.join(sets)} WHERE id=?", params)
+        return self.get_scene(scene_id)
+
+    def set_scene_lipsync(self, scene_id: str, on: bool) -> dict:
+        """设置某镜是否「对口型」(走 Wan2.2-S2V 语音驱动出片)。"""
+        with self._lock, self._conn() as conn:
+            conn.execute("UPDATE scenes SET lipsync=?, updated_at=? WHERE id=?",
+                         (1 if on else 0, _now(), scene_id))
         return self.get_scene(scene_id)
 
     def delete_asset(self, asset_id: str) -> Optional[str]:

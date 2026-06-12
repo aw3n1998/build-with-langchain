@@ -243,6 +243,7 @@ export async function batchFinish(params) { return submitJob('/pipeline/batch_fi
 // 单个分镜独立出图 / 出片
 export async function sceneGenerate(params) { return submitJob('/pipeline/scene_generate', params) }
 export async function sceneRender(params) { return submitJob('/pipeline/scene_render', params) }
+export async function sceneAppend(params) { return submitJob('/pipeline/scene_append', params) }
 // 列出某项目在跑/排队的任务（刷新后面板重连用）
 export async function listActiveJobs(projectId) {
   const r = await fetch(`${getBase()}/pipeline/jobs?project_id=${encodeURIComponent(projectId)}`)
@@ -285,6 +286,26 @@ export async function updateScenePrompts(sceneId, fields, workspace = null) {
   return r.json()
 }
 
+// AI 据画面 + 一句中文意图（可空），把动作拆成 N 段递进的英文运镜提示词（尾帧接续用）
+export async function suggestSegmentPrompts(sceneId, segments, intent = '', workspace = null) {
+  const r = await fetch(`${getBase()}/pipeline/suggest_segment_prompts`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ scene_id: sceneId, segments, intent, workspace }),
+  })
+  if (!r.ok) throw new Error(`status ${r.status}`)
+  return r.json()  // { scene_id, prompts: [...] }
+}
+
+// 据现有成片末帧推荐「下一段」运镜提示词（配了视觉模型则真看末帧图）。防抽卡。
+export async function suggestContinuation(sceneId, lang = 'zh', workspace = null) {
+  const r = await fetch(`${getBase()}/pipeline/suggest_continuation`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ scene_id: sceneId, lang, workspace }),
+  })
+  if (!r.ok) throw new Error(`status ${r.status}`)
+  return r.json()  // { scene_id, prompt, saw_frame }
+}
+
 // 已有分镜图直接上传当候选（跳过 GPU 生图）
 export async function uploadCandidate(sceneId, file, workspace = null) {
   const form = new FormData()
@@ -306,6 +327,13 @@ export async function listProjects(workspace = null) {
 // ── 可用视频模型 + 各自参数 schema（注册即出现）──────────────
 export async function getVideoProviders() {
   const r = await fetch(`${getBase()}/video/providers`)
+  if (!r.ok) throw new Error(`status ${r.status}`)
+  return r.json()
+}
+
+// ── 可用出图模型 + 各自参数 schema（公开模型名；ComfyUI 透明顶替后端，不作为单独条目出现）──
+export async function getImageProviders() {
+  const r = await fetch(`${getBase()}/image/providers`)
   if (!r.ok) throw new Error(`status ${r.status}`)
   return r.json()
 }

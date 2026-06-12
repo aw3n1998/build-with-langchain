@@ -502,6 +502,7 @@ class GenerateRequest(BaseModel):
     height: int = 0
     seed: int = -1
     offload: str = ""
+    image_model: str = ""
     workspace: str | None = None
     session_id: str | None = None   # 用于把出图结果写回会话线程，刷新后可重建图片墙
 
@@ -695,6 +696,7 @@ async def _generate_events(req: GenerateRequest):
             scene_id=req.scene_id, image_prompt=req.image_prompt, n=req.n,
             steps=req.steps, guidance=req.guidance, width=req.width,
             height=req.height, seed=req.seed, offload=req.offload,
+            model=req.image_model,
         )
     except Exception as e:  # noqa: BLE001
         yield {"type": "tool_result", "name": "generate_candidates",
@@ -832,6 +834,19 @@ async def list_video_providers():
     }
 
 
+@router.get("/image/providers")
+async def list_image_providers():
+    """列出已注册的出图模型及各自参数 schema（前端可据此构建出图模型选择/参数卡）。
+
+    新增出图模型（在 pipeline/image_providers 注册）后自动出现，无需改前端。
+    """
+    from agent_lab.app.pipeline.image_providers import image_provider_registry
+    return {
+        "default": image_provider_registry.default_name,
+        "providers": image_provider_registry.list_providers(),
+    }
+
+
 @router.post("/pipeline/select")
 async def pipeline_select(req: SelectRequest):
     """点击候选图=选图：推进分镜到 PENDING_VIDEO_GEN。"""
@@ -903,11 +918,14 @@ async def pipeline_project(project_id: str, workspace: str | None = None):
             "scene_id": s["id"], "scene_number": s["scene_number"],
             "title": s.get("title") or "", "state": s["state"],
             "narration": s.get("narration") or "",
+            "subtitle": s.get("subtitle") or "",
+            "lipsync": bool(s.get("lipsync")),
             "image_prompt": s.get("image_prompt") or "",
             "motion_prompt": s.get("motion_prompt") or "",
             "candidates": cands,
             "selected": any(c["selected"] for c in cands),
-            "video": ({"url": f"/api/file?path={_quote(vlocal)}",
+            # url 带 mtime 版本号：追加/重出后文件变了但路径不变，靠 &v= 让浏览器不吃旧缓存
+            "video": ({"url": f"/api/file?path={_quote(vlocal)}&v={int(os.path.getmtime(vlocal))}",
                        "name": os.path.basename(vlocal)} if os.path.exists(vlocal) else None),
         })
     episode = os.path.join(vdir, f"episode_{project_id}.mp4")
@@ -943,6 +961,7 @@ class BatchRequest(BaseModel):
     img_guidance: float = -1.0
     img_seed: int = -1
     img_offload: str = ""
+    image_model: str = ""
 
 
 async def _batch_generate_events(req: BatchRequest):
@@ -971,7 +990,7 @@ async def _batch_generate_events(req: BatchRequest):
             async for it in _run_with_logs(lambda sid=s["id"]: _gen_tool.func(
                     scene_id=sid, n=req.n, width=req.width, height=req.height,
                     steps=req.img_steps, guidance=req.img_guidance,
-                    seed=req.img_seed, offload=req.img_offload)):
+                    seed=req.img_seed, offload=req.img_offload, model=req.image_model)):
                 if "_log" in it:
                     yield {"type": "log", "line": it["_log"]}
                 else:
@@ -1051,6 +1070,8 @@ class ScenePromptsRequest(BaseModel):
     image_prompt: str | None = None    # None=不改；空串=清空
     motion_prompt: str | None = None
     narration: str | None = None
+    subtitle: str | None = None        # 屏幕字幕（独立于旁白）
+    lipsync: bool | None = None        # 对口型(S2V)开关；None=不改
 
 
 @router.post("/pipeline/scene_prompts")
@@ -1064,9 +1085,68 @@ async def pipeline_scene_prompts(req: ScenePromptsRequest):
         raise HTTPException(status_code=404, detail=f"分镜不存在: {req.scene_id}")
     s = store.update_scene_prompts(
         req.scene_id, image_prompt=req.image_prompt,
-        motion_prompt=req.motion_prompt, narration=req.narration)
+        motion_prompt=req.motion_prompt, narration=req.narration, subtitle=req.subtitle)
+    if req.lipsync is not None:
+        s = store.set_scene_lipsync(req.scene_id, req.lipsync)
     return {"scene_id": s["id"], "image_prompt": s.get("image_prompt") or "",
-            "motion_prompt": s.get("motion_prompt") or "", "narration": s.get("narration") or ""}
+            "motion_prompt": s.get("motion_prompt") or "", "narration": s.get("narration") or "",
+            "subtitle": s.get("subtitle") or "", "lipsync": bool(s.get("lipsync"))}
+
+
+class SuggestSegmentPromptsRequest(BaseModel):
+    scene_id: str
+    workspace: str | None = None
+    segments: int = 2
+    intent: str = ""  # 用户中文意图（可空），AI 据此 + 画面拆成 N 段递进运镜
+
+
+@router.post("/pipeline/suggest_segment_prompts")
+async def pipeline_suggest_segment_prompts(req: SuggestSegmentPromptsRequest):
+    """AI 据画面 + 一句中文意图（可空），把动作拆成 N 段递进的英文运镜提示词（尾帧接续用）。"""
+    from agent_lab.app.pipeline.runtime import set_workspace
+    from agent_lab.app.pipeline.store import get_store
+    from agent_lab.app.pipeline.prompt_gen import suggest_segment_prompts
+    set_workspace(req.workspace)
+    scene = get_store().get_scene(req.scene_id)
+    if not scene:
+        raise HTTPException(status_code=404, detail=f"分镜不存在: {req.scene_id}")
+    _cap = settings.MAX_CONTINUATION_SEGMENTS      # 段数不写死：0=不限
+    n = max(1, int(req.segments or 1))
+    if _cap and _cap > 0:
+        n = min(n, _cap)
+    prompts = await suggest_segment_prompts(
+        scene.get("image_prompt") or "", req.intent or "", n)
+    return {"scene_id": req.scene_id, "prompts": prompts}
+
+
+class SuggestContinuationRequest(BaseModel):
+    scene_id: str
+    workspace: str | None = None
+    lang: str = "zh"   # 推荐语言：zh=中文（Wan 原生支持）/ en=英文
+
+
+@router.post("/pipeline/suggest_continuation")
+async def pipeline_suggest_continuation(req: SuggestContinuationRequest):
+    """据「现有成片的末帧 + 上下文」推荐下一段运镜提示词（配了视觉模型则真看末帧图）。防抽卡。"""
+    from agent_lab.app.pipeline.runtime import set_workspace, video_dir
+    from agent_lab.app.pipeline.store import get_store
+    from agent_lab.app.pipeline.prompt_gen import suggest_continuation_prompt
+    from agent_lab.app.pipeline.assembler import extract_last_frame
+    set_workspace(req.workspace)
+    scene = get_store().get_scene(req.scene_id)
+    if not scene:
+        raise HTTPException(status_code=404, detail=f"分镜不存在: {req.scene_id}")
+    final_local = os.path.join(video_dir(), f"{scene['scene_number']:02d}_{req.scene_id}.mp4")
+    if not os.path.exists(final_local):
+        raise HTTPException(status_code=400, detail="这个分镜还没有视频，无法据尾帧推荐。请先出一段。")
+    frame = os.path.join(video_dir(), f"{scene['scene_number']:02d}_{req.scene_id}_suggest.png")
+    try:
+        extract_last_frame(final_local, frame)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=f"取末帧失败: {e}")
+    res = await suggest_continuation_prompt(
+        scene, [scene.get("motion_prompt") or ""], frame, req.lang or "zh")
+    return {"scene_id": req.scene_id, **res}
 
 
 @router.post("/pipeline/upload_candidate")
@@ -1224,7 +1304,7 @@ async def _scene_generate_events(req: "SceneGenRequest"):
         async for it in _run_with_logs(lambda: _gen_tool.func(
                 scene_id=req.scene_id, n=req.n, width=req.width, height=req.height,
                 steps=req.img_steps, guidance=req.img_guidance,
-                seed=req.img_seed, offload=req.img_offload)):
+                seed=req.img_seed, offload=req.img_offload, model=req.image_model)):
             if "_log" in it:
                 yield {"type": "log", "line": it["_log"]}
             else:
@@ -1250,8 +1330,13 @@ async def _scene_render_events(req: "SceneRenderRequest"):
         params["segments"] = req.segments
     if req.size:
         params["size"] = req.size
+    seg_prompts = [p for p in (req.motion_prompts or []) if isinstance(p, str)]
+    if seg_prompts:
+        params["motion_prompts"] = seg_prompts
+    if req.lipsync:
+        params["lipsync"] = True
     yield {"type": "batch_progress", "phase": "render", "scene_id": req.scene_id,
-           "label": "出片中…"}
+           "label": "对口型出片中…" if req.lipsync else "出片中…"}
     out = None
     try:
         async for it in _run_with_logs(lambda: do_render_scene_video(
@@ -1281,6 +1366,7 @@ class SceneGenRequest(BaseModel):
     img_guidance: float = -1.0
     img_seed: int = -1
     img_offload: str = ""
+    image_model: str = ""
 
 
 class SceneRenderRequest(BaseModel):
@@ -1291,6 +1377,20 @@ class SceneRenderRequest(BaseModel):
     segments: int = 1
     size: str = ""
     video_params: dict = {}
+    motion_prompts: list[str] = []  # 每段独立运镜提示词（AI 生成/手改），缺则全段用统一 prompt
+    lipsync: bool = False           # 对口型(S2V)：人物开口说话的镜头，旁白→TTS→口型同步
+
+
+class SceneAppendRequest(BaseModel):
+    scene_id: str
+    workspace: str | None = None
+    session_id: str | None = None
+    model: str = ""
+    motion_prompt: str = ""          # 新增段的运镜提示词（留空用分镜自带的）
+    count: int = 1                   # 追加多少段（不写死上限）
+    size: str = ""
+    video_params: dict = {}
+    motion_prompts: list[str] = []   # 可选：逐段不同提示词
 
 
 def _scene_project_id(scene_id: str, workspace: str | None) -> str | None:
@@ -1323,6 +1423,47 @@ async def pipeline_scene_render(req: SceneRenderRequest):
             "project_id": _scene_project_id(req.scene_id, req.workspace)}
     return {"job_id": job_manager.submit(
         "render", lambda: _scene_render_events(req), meta=meta)}
+
+
+async def _scene_append_events(req: "SceneAppendRequest"):
+    """在分镜已生成的成片末尾追加 N 段（看效果再加长）。流式同出片。"""
+    from agent_lab.app.pipeline.runtime import set_workspace
+    from agent_lab.app.pipeline.pipeline_tools import append_scene_segment
+    set_workspace(req.workspace)
+    params: dict = dict(req.video_params or {})
+    if req.size:
+        params["size"] = req.size
+    seg_prompts = [p for p in (req.motion_prompts or []) if isinstance(p, str)]
+    if seg_prompts:
+        params["motion_prompts"] = seg_prompts
+    yield {"type": "batch_progress", "phase": "render", "scene_id": req.scene_id,
+           "label": "追加视频段中…"}
+    out = None
+    try:
+        async for it in _run_with_logs(lambda: append_scene_segment(
+                req.scene_id, req.motion_prompt, req.model, params, req.count)):
+            if "_log" in it:
+                yield {"type": "log", "line": it["_log"]}
+            else:
+                out = it["_result"]
+    except Exception as e:  # noqa: BLE001
+        yield {"type": "tool_result", "name": "append_scene_video",
+               "content": f"追加失败: {type(e).__name__}: {e}"}
+        return
+    _clean, events = ai_service._extract_tool_markers(out or "")
+    for ev in events:
+        yield ev
+    yield {"type": "scene_ready", "scene_id": req.scene_id}
+
+
+@router.post("/pipeline/scene_append")
+async def pipeline_scene_append(req: SceneAppendRequest):
+    """单镜「再续一段」：后台任务，返回 job_id。"""
+    from agent_lab.app.services.job_manager import job_manager
+    meta = {"session_id": req.session_id, "scene_id": req.scene_id,
+            "project_id": _scene_project_id(req.scene_id, req.workspace)}
+    return {"job_id": job_manager.submit(
+        "render", lambda: _scene_append_events(req), meta=meta)}
 
 
 @router.get("/pipeline/jobs")

@@ -33,6 +33,7 @@ from agent_lab.app.pipeline.gpu_client import (
     get_gpu_client,
 )
 from agent_lab.app.pipeline.providers import video_provider_registry
+from agent_lab.app.pipeline.image_providers import image_provider_registry
 
 logger = get_logger("pipeline.tools")
 
@@ -184,16 +185,18 @@ def add_scene(
     image_prompt: str = "",
     motion_prompt: str = "",
     title: str = "",
+    subtitle: str = "",
 ) -> str:
     """给项目添加一个分镜（镜头）。状态初始为 DRAFT。
 
     Args:
         project_id: create_video_project 返回的项目 ID。
         scene_number: 镜头序号（决定成片拼接顺序）。
-        narration: 旁白/台词。
+        narration: 旁白/台词（合成时转 TTS 配音）。
         image_prompt: 出图提示词（FLUX 用；角色触发词由工作目录配置自动注入，无需手写）。
         motion_prompt: 运镜/动态提示词（Wan2.2 图生视频用）。
         title: 镜头简短标题。
+        subtitle: 屏幕字幕文本；留空则字幕沿用 narration。旁白≠字幕时（如标题卡/台词）单独给。
     """
     scene = get_store().add_scene(
         project_id=project_id,
@@ -202,6 +205,7 @@ def add_scene(
         image_prompt=image_prompt,
         motion_prompt=motion_prompt,
         title=title,
+        subtitle=subtitle,
     )
     return (
         f"已添加分镜 [{scene['id']}] #{scene['scene_number']} {scene['title']}"
@@ -318,10 +322,13 @@ def generate_candidates(
     height: int = 0,
     seed: int = -1,
     offload: str = "",
+    model: str = "",
 ) -> str:
-    """调用远程 FLUX 为分镜生成 N 张候选图（多种子），全部登记进状态库并拉回工作目录供选图。
+    """为分镜生成 N 张候选图（多种子），全部登记进状态库并落到工作目录供选图。
 
     通常由参数卡确认后触发（见 request_image_params）。分镜推进到 PENDING_HUMAN_SELECTION。
+    具体用哪个出图模型由 image_provider_registry 决定：默认 FLUX(SSH)；
+    配了 COMFYUI_BASE_URL 后可传 model="comfyui-img" 走 ComfyUI 文生图。
 
     Args:
         scene_id: 目标分镜 ID。
@@ -332,30 +339,60 @@ def generate_candidates(
         width/height: 尺寸；0=默认。
         seed: 起始种子；-1=随机。
         offload: 显存策略 model/sequential；空=默认。
+        model: 出图模型注册名；空=用默认（IMAGE_PROVIDER_DEFAULT，缺省 flux）。
     """
     store = get_store()
     scene = store.get_scene(scene_id)
     if not scene:
         return f"分镜不存在: {scene_id}"
-    prompt = _apply_trigger(image_prompt or scene.get("image_prompt") or "")
+    provider = image_provider_registry.get(model)
+    is_http = getattr(provider, "transport", "ssh") == "http"
+    raw = image_prompt or scene.get("image_prompt") or ""
+    # FLUX 等英文模型读不懂中文(CLIP 截断 + 纯英文训练 → 退化成动漫人像)。
+    # 英文模型(prompt_lang=="en") + 开关开 + 含中文 → 出图前自动翻英文，对用户隐形；翻译失败退回原文不阻断。
+    if getattr(provider, "prompt_lang", "any") == "en" and settings.IMAGE_PROMPT_AUTOTRANSLATE:
+        from agent_lab.app.pipeline.prompt_gen import translate_to_english
+        raw = translate_to_english(raw)
+    prompt = _apply_trigger(raw)
     if not prompt:
         return "没有出图提示词（image_prompt 为空）。"
+    # 出图参数 + flux 专属 LoRA（工作目录级覆盖）一起打包给 provider 自取所需
+    params = {
+        "n": (n or None), "steps": (steps or None), "guidance": guidance,
+        "width": (width or None), "height": (height or None),
+        "seed": seed, "offload": (offload or None),
+        "flux_lora": (model_config().get("flux_lora") or None),
+    }
+    local_dir = candidates_dir(scene_id)  # 落到当前工作目录
+
+    if is_http:
+        # http（ComfyUI）：provider 直接把候选图下到本地 local_dir，返回本地路径，无需 SSH 下载
+        os.makedirs(local_dir, exist_ok=True)
+        try:
+            store.set_scene_state(scene_id, SceneState.PENDING_FLUX_GEN, force=True)
+            local_paths = provider.generate(None, prompt=prompt, out_dir=local_dir, params=params)
+        except GpuConfigError as e:
+            return f"出图后端未配置: {e}"
+        except GpuRunError as e:
+            store.set_scene_state(scene_id, SceneState.FAILED, force=True)
+            return f"出图失败: {e}"
+        store.set_scene_state(scene_id, SceneState.PENDING_HUMAN_SELECTION, force=True)
+        lines = [f"{provider.display_name} 出 {len(local_paths)} 张候选 → 分镜 {scene_id} 进入 PENDING_HUMAN_SELECTION:"]
+        img_markers = []
+        for lp in local_paths:
+            asset = store.add_asset(scene_id=scene_id, storage_path=lp, asset_type="IMAGE")
+            lines.append(f"  [{asset['id']}] {os.path.basename(lp)} {lp}")
+            img_markers.append(f"IMGFILE::{scene_id}::{asset['id']}::{lp}")
+        lines.append("下一步：点选一张候选图即可（select_candidate）。")
+        lines.extend(img_markers)
+        return "\n".join(lines)
+
+    # ssh（默认 FLUX）：provider 返回远程路径，工具层逐张下载到工作目录
     out_remote_dir = posixpath.join(settings.GPU_FLUX_OUT_ROOT, scene_id)
-    lora_override = model_config().get("flux_lora") or None  # 工作目录级 LoRA 覆盖
     try:
         store.set_scene_state(scene_id, SceneState.PENDING_FLUX_GEN, force=True)
         remote_imgs = _gpu_retry(
-            lambda: get_gpu_client().generate_candidates(
-                prompt, out_remote_dir,
-                n=(n or None),
-                steps=(steps or None),
-                guidance=(None if guidance < 0 else guidance),
-                width=(width or None),
-                height=(height or None),
-                seed=seed,
-                offload=(offload or None),
-                lora=lora_override,
-            ),
+            lambda: provider.generate(get_gpu_client(), prompt=prompt, out_dir=out_remote_dir, params=params),
             what=f"出图 {scene_id}",
         )
     except GpuConfigError as e:
@@ -364,9 +401,8 @@ def generate_candidates(
         store.set_scene_state(scene_id, SceneState.FAILED, force=True)
         return f"出图失败: {e}"
 
-    local_dir = candidates_dir(scene_id)  # 落到当前工作目录
     store.set_scene_state(scene_id, SceneState.PENDING_HUMAN_SELECTION, force=True)
-    lines = [f"FLUX 出 {len(remote_imgs)} 张候选 → 分镜 {scene_id} 进入 PENDING_HUMAN_SELECTION:"]
+    lines = [f"{provider.display_name} 出 {len(remote_imgs)} 张候选 → 分镜 {scene_id} 进入 PENDING_HUMAN_SELECTION:"]
     img_markers = []  # 机器可读：流式层解析成 image 事件
     for rp in remote_imgs:
         asset = store.add_asset(scene_id=scene_id, storage_path=rp, asset_type="IMAGE")
@@ -445,19 +481,67 @@ def request_video_params(scene_id: str, motion_prompt: str = "", model: str = ""
         ],
         # 该模型的专属可调字段 + 通用的「接续段数」（尾帧接续：段越多镜头越长且连贯）
         "fields": provider.param_schema() + [{
-            "key": "segments", "label": "接续段数(连贯加长)", "type": "select", "default": 1,
+            "key": "segments", "label": "接续段数(连贯加长)", "type": "number", "default": 1,
             "help": "尾帧接续：每段结束取最后一帧作为下一段的起始画面继续生成，再无缝拼接成"
-                    "一条连续镜头。段数越多镜头越长（总时长≈单段×段数），3-4 段内画质几乎无损。",
-            "options": [
-                {"value": 1, "label": "1 段（默认）"},
-                {"value": 2, "label": "2 段（×2 时长）"},
-                {"value": 3, "label": "3 段（×3 时长）"},
-                {"value": 4, "label": "4 段（×4 时长）"},
-            ],
+                    "一条连续镜头。段数越多镜头越长（总时长≈单段×段数）。想多长填多少，没有写死上限；"
+                    "也可以先出 1 段、看效果后在面板用「再续一段」逐段加长。",
         }],
     }
     return ("已弹出出视频参数卡，请在卡片里确认参数后点「出视频」。\n"
             f"VIDEO_PARAM_FORM::{json.dumps(payload, ensure_ascii=False)}")
+
+
+def _do_render_lipsync_s2v(scene_id, scene, asset, prompt, params) -> str:
+    """对口型出片：取该镜旁白(=台词)→TTS→连同选中人物图喂 Wan2.2-S2V，出口型同步片(成片自带人声)。
+
+    整镜一段，不走尾帧接续（S2V 由音频长度决定时长）。S2V 是隐藏 Provider，端点门控。
+    """
+    store = get_store()
+    line = (scene.get("narration") or "").strip()
+    if not line:
+        store.set_scene_state(scene_id, SceneState.PENDING_VIDEO_GEN, force=True)
+        return "对口型需要一句台词：请先给这镜写「旁白」（即人物要说的话），再点出视频。"
+    if not video_provider_registry.has("comfyui-s2v"):
+        return ("对口型(S2V)还没就绪：需在 .env 配 COMFYUI_BASE_URL 且在 ComfyUI 部署 Wan2.2-S2V。"
+                "暂未配置时，请把这镜的「对口型」关掉、用普通出片。")
+    s2v = video_provider_registry.get("comfyui-s2v")
+    local_dir = video_dir()
+    final_local = os.path.join(local_dir, f"{scene['scene_number']:02d}_{scene_id}.mp4")
+    # 本地人物图（选中候选）
+    cur_image = os.path.join(candidates_dir(scene_id), posixpath.basename(asset["storage_path"]))
+    if not os.path.exists(cur_image):
+        try:
+            get_gpu_client().download(asset["storage_path"], cur_image)
+        except Exception:  # noqa: BLE001
+            return f"对口型需要本地人物图，但本地没有：{cur_image}。请对该镜重新出图后再试。"
+    # 旁白(台词) → TTS 本地音频
+    from agent_lab.app.pipeline.assembler import _tts
+    audio_local = os.path.join(local_dir, f"{scene['scene_number']:02d}_{scene_id}_voice.mp3")
+    voice = settings.COMFYUI_S2V_TTS_VOICE
+    ok_tts = _tts(line, audio_local, voice)
+    if not ok_tts:                       # edge-tts 偶发网络抖动：退避重试一次
+        import time as _t; _t.sleep(1.0)
+        ok_tts = _tts(line, audio_local, voice)
+    if not ok_tts:
+        return "对口型失败：台词转语音(TTS)没成功（edge-tts 需联网，已重试）。"
+    merged = {**s2v.default_params(),
+              **{k: v for k, v in (params or {}).items() if v not in (None, "", 0)}}
+    merged.pop("lipsync", None); merged.pop("segments", None); merged.pop("motion_prompts", None)
+    merged["audio_path"] = audio_local
+    try:
+        store.set_scene_state(scene_id, SceneState.PENDING_VIDEO_GEN, force=True)
+        _gpu_retry(lambda: s2v.generate(None, image_path=cur_image, prompt=prompt,
+                                        out_remote=final_local, params=merged),
+                   what=f"对口型 {scene_id}")
+    except GpuConfigError as e:
+        return f"对口型后端未配置: {e}"
+    except (GpuRunError, RuntimeError, OSError) as e:
+        store.set_scene_state(scene_id, SceneState.FAILED, force=True)
+        return f"对口型出片失败: {e}"
+    store.set_scene_video(scene_id, final_local)
+    store.set_scene_state(scene_id, SceneState.COMPLETED)
+    return (f"对口型(Wan2.2-S2V)出片完成，分镜 {scene_id} 标记 COMPLETED（成片自带人声）。\n"
+            f"已下载到本机: {final_local}\nVIDFILE::{scene_id}::{final_local}")
 
 
 def do_render_scene_video(
@@ -486,61 +570,104 @@ def do_render_scene_video(
     if scene["state"] != SceneState.PENDING_VIDEO_GEN.value:
         store.set_scene_state(scene_id, SceneState.PENDING_VIDEO_GEN, force=True)  # 纠正漂移
 
-    provider = video_provider_registry.get(model)
-    merged = {**provider.default_params(), **{k: v for k, v in params.items() if v not in (None, "", 0)}}
-    # 尾帧接续段数（流水线级参数，不传给模型）：每段取末帧作为下一段输入，拼成连续长镜头
-    try:
-        segments = max(1, min(6, int(merged.pop("segments", 1) or 1)))
-    except (TypeError, ValueError):
-        segments = 1
-    prompt = motion_prompt or scene.get("motion_prompt") or "缓慢推镜，电影质感，自然光影。"
+    # 对口型(S2V)：勾了「对口型」就走语音驱动（图+台词音频→口型同步），整镜一段、不走 i2v/接续。
+    if bool((params or {}).get("lipsync")) or bool(scene.get("lipsync")):
+        ls_prompt = motion_prompt or scene.get("motion_prompt") or ""
+        return _do_render_lipsync_s2v(scene_id, scene, asset, ls_prompt, params or {})
 
-    # 参考图就绪保障：候选图的 storage_path 是「出图时那台 GPU」的服务器路径。
-    # 换 GPU 机器或服务器清理后该文件会缺失，导致出片读图失败。
-    # 缺则用本地工作目录里的候选副本自动回传，做到换机器也能出片。
+    provider = video_provider_registry.get(model)
+    is_http = getattr(provider, "transport", "ssh") == "http"   # http(ComfyUI)：全程本地，不碰 SSH
+    merged = {**provider.default_params(), **{k: v for k, v in params.items() if v not in (None, "", 0)}}
+    # 尾帧接续段数（流水线级参数，不传给模型）：每段取末帧作为下一段输入，拼成连续长镜头。
+    # 段数不写死：上限由 settings.MAX_CONTINUATION_SEGMENTS 决定（0=不限）。
     try:
-        gpu = get_gpu_client()
-        remote_img = asset["storage_path"]
-        if not gpu.exists(remote_img):
-            local_img = os.path.join(candidates_dir(scene_id), posixpath.basename(remote_img))
-            if not os.path.exists(local_img):
-                return (f"参考图在 GPU 服务器和本地都找不到：{remote_img}。"
-                        f"可能是换了 GPU 机器且本地副本已删，请对该分镜重新出图后再出视频。")
-            gpu.upload(local_img, remote_img)
-    except GpuConfigError as e:
-        return f"GPU 未配置: {e}"
+        n_seg = max(1, int(merged.pop("segments", 1) or 1))
+    except (TypeError, ValueError):
+        n_seg = 1
+    _cap = settings.MAX_CONTINUATION_SEGMENTS
+    segments = min(n_seg, _cap) if _cap and _cap > 0 else n_seg
+    prompt = motion_prompt or scene.get("motion_prompt") or "缓慢推镜，电影质感，自然光影。"
+    # 每段独立提示词（AI 生成的分段运镜）：有则逐段用，缺则回退到统一 prompt
+    seg_prompts = merged.pop("motion_prompts", None) or []
+    if not isinstance(seg_prompts, list):
+        seg_prompts = []
 
     local_dir = video_dir()  # 落到当前工作目录
     final_local = os.path.join(local_dir, f"{scene['scene_number']:02d}_{scene_id}.mp4")
     base = f"{scene_id}_{scene['scene_number']}"
     seg_locals: list[str] = []
-    cur_image = remote_img
     out_remote = ""
+
+    if is_http:
+        # ComfyUI 等 HTTP 后端：出片走本地图，不依赖 GPU 服务器。
+        # 取本地候选副本；本地没有时尝试从 GPU 拉一次（若配了），仍拿不到则明确报错。
+        gpu = None
+        cur_image = os.path.join(candidates_dir(scene_id), posixpath.basename(asset["storage_path"]))
+        if not os.path.exists(cur_image):
+            try:
+                get_gpu_client().download(asset["storage_path"], cur_image)
+            except Exception:  # noqa: BLE001
+                return (f"ComfyUI 出片需要本地参考图，但本地没有：{cur_image}。"
+                        f"请对该分镜重新出图，或用「上传图片」补一张后再出视频。")
+    else:
+        # 参考图就绪保障：候选图的 storage_path 是「出图时那台 GPU」的服务器路径。
+        # 换 GPU 机器或服务器清理后该文件会缺失；缺则用本地候选副本自动回传，做到换机器也能出片。
+        try:
+            gpu = get_gpu_client()
+            remote_img = asset["storage_path"]
+            if not gpu.exists(remote_img):
+                local_img = os.path.join(candidates_dir(scene_id), posixpath.basename(remote_img))
+                if not os.path.exists(local_img):
+                    return (f"参考图在 GPU 服务器和本地都找不到：{remote_img}。"
+                            f"可能是换了 GPU 机器且本地副本已删，请对该分镜重新出图后再出视频。")
+                gpu.upload(local_img, remote_img)
+        except GpuConfigError as e:
+            return f"GPU 未配置: {e}"
+        cur_image = remote_img
+
     try:
         for k in range(segments):
-            out_remote = posixpath.join(
-                settings.GPU_OUTPUT_DIR,
-                f"{base}.mp4" if segments == 1 else f"{base}_seg{k + 1}.mp4",
-            )
-            _gpu_retry(
-                lambda: provider.generate(gpu, image_path=cur_image, prompt=prompt,
-                                          out_remote=out_remote, params=merged),
-                what=f"出片 {scene_id} 段{k + 1}",
-            )
-            # 每段都拉回本地（接续抽帧 / 最终拼接都在本地做，复用带重试的传输）
+            prompt_k = seg_prompts[k] if k < len(seg_prompts) and seg_prompts[k] else prompt
             seg_local = final_local if segments == 1 else os.path.join(
                 local_dir, f"{scene['scene_number']:02d}_{scene_id}_seg{k + 1}.mp4")
-            gpu.download(out_remote, seg_local)
-            seg_locals.append(seg_local)
-            if k < segments - 1:
-                # 尾帧接续：抽本段末帧 → 回传 GPU → 作为下一段 i2v 的起始画面
-                from agent_lab.app.pipeline.assembler import extract_last_frame
-                frame_local = os.path.join(local_dir, f"{base}_seg{k + 1}_last.png")
-                extract_last_frame(seg_local, frame_local)
-                cur_image = posixpath.join(settings.GPU_OUTPUT_DIR,
-                                           f"{base}_seg{k + 1}_last.png")
-                gpu.upload(frame_local, cur_image)
-                logger.info("[render] 接续 %d/%d：末帧已回传，继续生成", k + 1, segments)
+            if is_http:
+                # ComfyUI：成片直接写到本地 seg_local（Provider 内部 HTTP 下载），无 SSH 往返
+                out_remote = seg_local
+                _gpu_retry(
+                    lambda p=prompt_k, o=seg_local, ci=cur_image: provider.generate(
+                        None, image_path=ci, prompt=p, out_remote=o, params=merged),
+                    what=f"出片 {scene_id} 段{k + 1}",
+                )
+                seg_locals.append(seg_local)
+                if k < segments - 1:
+                    # 尾帧接续：抽本段末帧 → 作为下一段 i2v 起始画面（全本地）
+                    from agent_lab.app.pipeline.assembler import extract_last_frame
+                    frame_local = os.path.join(local_dir, f"{base}_seg{k + 1}_last.png")
+                    extract_last_frame(seg_local, frame_local)
+                    cur_image = frame_local
+                    logger.info("[render] 接续 %d/%d（http）：末帧已抽取，继续生成", k + 1, segments)
+            else:
+                out_remote = posixpath.join(
+                    settings.GPU_OUTPUT_DIR,
+                    f"{base}.mp4" if segments == 1 else f"{base}_seg{k + 1}.mp4",
+                )
+                _gpu_retry(
+                    lambda p=prompt_k: provider.generate(gpu, image_path=cur_image, prompt=p,
+                                                         out_remote=out_remote, params=merged),
+                    what=f"出片 {scene_id} 段{k + 1}",
+                )
+                # 每段都拉回本地（接续抽帧 / 最终拼接都在本地做，复用带重试的传输）
+                gpu.download(out_remote, seg_local)
+                seg_locals.append(seg_local)
+                if k < segments - 1:
+                    # 尾帧接续：抽本段末帧 → 回传 GPU → 作为下一段 i2v 的起始画面
+                    from agent_lab.app.pipeline.assembler import extract_last_frame
+                    frame_local = os.path.join(local_dir, f"{base}_seg{k + 1}_last.png")
+                    extract_last_frame(seg_local, frame_local)
+                    cur_image = posixpath.join(settings.GPU_OUTPUT_DIR,
+                                               f"{base}_seg{k + 1}_last.png")
+                    gpu.upload(frame_local, cur_image)
+                    logger.info("[render] 接续 %d/%d：末帧已回传，继续生成", k + 1, segments)
     except GpuConfigError as e:
         return f"GPU 未配置: {e}"
     except (GpuRunError, RuntimeError, OSError) as e:
@@ -606,6 +733,132 @@ def render_scene_video(
     return do_render_scene_video(scene_id, motion_prompt, model, params, download)
 
 
+# ── 看效果再加长：在已生成的成片末尾，按尾帧接续逐段追加（段数不写死）─────────────
+def _render_one_continuation(scene_id, scene, provider, is_http, gpu,
+                             start_frame_local, prompt, merged, tag) -> str:
+    """从一张本地起始帧出一段 i2v，返回本地 mp4 路径（http/ssh 都支持）。append 专用。"""
+    local_dir = video_dir()
+    seg_local = os.path.join(local_dir, f"{scene['scene_number']:02d}_{scene_id}_app{tag}.mp4")
+    if is_http:
+        _gpu_retry(
+            lambda: provider.generate(None, image_path=start_frame_local, prompt=prompt,
+                                      out_remote=seg_local, params=merged),
+            what=f"追加段 {tag}")
+    else:
+        base = f"{scene_id}_{scene['scene_number']}_app{tag}"
+        remote_frame = posixpath.join(settings.GPU_OUTPUT_DIR, f"{base}_start.png")
+        remote_out = posixpath.join(settings.GPU_OUTPUT_DIR, f"{base}.mp4")
+        gpu.upload(start_frame_local, remote_frame)
+        _gpu_retry(
+            lambda: provider.generate(gpu, image_path=remote_frame, prompt=prompt,
+                                      out_remote=remote_out, params=merged),
+            what=f"追加段 {tag}")
+        gpu.download(remote_out, seg_local)
+    return seg_local
+
+
+def append_scene_segment(scene_id: str, motion_prompt: str = "", model: str = "",
+                         params: dict | None = None, count: int = 1) -> str:
+    """在分镜**已生成**的成片末尾，按尾帧接续再追加 count 段，就地变长（看效果再决定加多少）。
+
+    与 do_render_scene_video 的区别：不重出整条，而是取「现有成片的末帧」作为起点生成新段，
+    拼到现有成片后面。可反复调用，每次加几段都行——段数不写死。
+    """
+    import time as _time
+    params = params or {}
+    store = get_store()
+    scene = store.get_scene(scene_id)
+    if not scene:
+        return f"分镜不存在: {scene_id}"
+    local_dir = video_dir()
+    final_local = os.path.join(local_dir, f"{scene['scene_number']:02d}_{scene_id}.mp4")
+    if not os.path.exists(final_local):
+        return "这个分镜还没有已生成的视频，无法追加。请先出一段视频，再用「再续一段」加长。"
+
+    provider = video_provider_registry.get(model)
+    is_http = getattr(provider, "transport", "ssh") == "http"
+    merged = {**provider.default_params(),
+              **{k: v for k, v in params.items() if v not in (None, "", 0)}}
+    merged.pop("segments", None)
+    seg_prompts = merged.pop("motion_prompts", None) or []
+    if not isinstance(seg_prompts, list):
+        seg_prompts = []
+    prompt_default = motion_prompt or scene.get("motion_prompt") or "缓慢推镜，电影质感，自然光影。"
+    try:
+        count = max(1, int(count or 1))
+    except (TypeError, ValueError):
+        count = 1
+
+    gpu = None
+    if not is_http:
+        try:
+            gpu = get_gpu_client()
+        except GpuConfigError as e:
+            return f"GPU 未配置: {e}"
+
+    from agent_lab.app.pipeline.assembler import extract_last_frame, concat_videos
+    done = 0
+    try:
+        for i in range(count):
+            tag = f"{int(_time.time())}_{i + 1}"
+            prompt_i = seg_prompts[i] if i < len(seg_prompts) and seg_prompts[i] else prompt_default
+            frame_local = os.path.join(local_dir, f"{scene['scene_number']:02d}_{scene_id}_applast.png")
+            extract_last_frame(final_local, frame_local)   # 取「现有成片」的末帧作起点
+            new_seg = _render_one_continuation(scene_id, scene, provider, is_http, gpu,
+                                               frame_local, prompt_i, merged, tag)
+            tmp_final = final_local + ".tmp.mp4"
+            concat_videos([final_local, new_seg], tmp_final)
+            try:
+                os.replace(tmp_final, final_local)         # 同目录同盘，原子替换，路径不变
+            except PermissionError:
+                # Windows：成片正被播放/读取会锁文件。清掉临时件，给可操作提示，不留 .tmp 残骸
+                for _f in (tmp_final, new_seg):
+                    try:
+                        os.remove(_f)
+                    except OSError:
+                        pass
+                hint = f"（已成功追加 {done} 段）" if done else ""
+                return (f"追加失败：成片文件被占用，多半正在浏览器里播放{hint}。"
+                        f"请暂停/关闭该视频后再点「再续一段」。")
+            done += 1
+            try:
+                os.remove(new_seg)                         # 拼接后单段没用了，清掉省空间
+            except OSError:
+                pass
+            logger.info("[append] 分镜 %s 追加第 %d/%d 段完成", scene_id, i + 1, count)
+    except GpuConfigError as e:
+        return f"GPU 未配置: {e}"
+    except (GpuRunError, RuntimeError, OSError) as e:
+        hint = f"（已成功追加 {done}/{count} 段）" if done else ""
+        return f"追加视频段失败{hint}: {e}"
+
+    store.set_scene_video(scene_id, final_local)
+    store.set_scene_state(scene_id, SceneState.COMPLETED)
+    msg = (f"已在分镜 {scene_id} 的成片末尾追加 {done} 段（尾帧接续），视频已变长。\n成片: {final_local}")
+    return msg + f"\nVIDFILE::{scene_id}::{final_local}"
+
+
+@tool
+def append_scene_video(scene_id: str, motion_prompt: str = "", model: str = "",
+                       size: str = "", segments: int = 1) -> str:
+    """在分镜【已生成视频】的末尾，按尾帧接续再追加 segments 段，让它变长（看效果再加，可反复用）。
+
+    用户说"这镜再长一点/后面再接一段/不够长"且该镜已有成片时用本工具，
+    比重出整条更省（只生成新增的段并拼到末尾）。段数不写死，想加几段填几段。
+
+    Args:
+        scene_id: 分镜 ID（必须已经出过视频）。
+        motion_prompt: 新增段的运镜/动态提示词；留空用分镜自带的。
+        model: 视频模型名；空=默认。
+        size: 分辨率；空=默认（建议与原片一致，否则拼接会重编码）。
+        segments: 追加多少段（默认 1）。
+    """
+    params: dict = {}
+    if size:
+        params["size"] = size
+    return append_scene_segment(scene_id, motion_prompt, model, params, count=segments)
+
+
 @tool
 def project_status(project_id: str) -> str:
     """查看整个项目的进度汇总（JSON），含每个分镜状态与产物。"""
@@ -658,7 +911,9 @@ def assemble_episode(project_id: str, voice: str = "", with_subtitles: bool = Tr
     for s in scenes:
         p = os.path.join(local, f"{s['scene_number']:02d}_{s['id']}.mp4")
         if os.path.isfile(p):
-            clips.append({"path": p, "narration": s.get("narration") or "", "title": s.get("title") or ""})
+            clips.append({"path": p, "narration": s.get("narration") or "",
+                          "subtitle": s.get("subtitle") or "", "title": s.get("title") or "",
+                          "keep_audio": bool(s.get("lipsync"))})  # 对口型片自带人声，合成时别重配音(否则口型错位)
         else:
             missing.append(f"#{s['scene_number']} {s['title'] or s['id']}（状态 {s['state']}）")
     if not clips:
@@ -722,6 +977,7 @@ pipeline_tools = [
     list_candidates,
     select_candidate,
     render_scene_video,
+    append_scene_video,
     project_status,
     open_production_panel,
     assemble_episode,

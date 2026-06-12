@@ -69,6 +69,7 @@ export default function App() {
   const [showPanel, setShowPanel]         = useState(false)
   const [panelProjectId, setPanelProjectId] = useState(null)
   const [hasProject, setHasProject]       = useState(false)
+  const [allProjects, setAllProjects]     = useState([])   // 工作目录下全部项目（供面板里切换）
   // 有任务（对话/出图/出片）在跑的会话集合：侧边栏据此显示绿点
   const [runningSessions, setRunningSessions] = useState(() => new Set())
 
@@ -170,18 +171,24 @@ export default function App() {
     if (!workspace) return
     listProjects(workspace).then(d => {
       if (!alive) return
-      const latest = d?.projects?.[0]
+      const ps = d?.projects || []
+      setAllProjects(ps)
+      const latest = ps[0]
       if (latest) { setPanelProjectId(latest.project_id); setHasProject(true) }
     }).catch(() => {})
     return () => { alive = false }
   }, [workspace])
 
-  // 打开抽屉时再探一次（agent 刚建的新项目也能被按钮找到）
+  // 打开抽屉时再探一次（agent 刚建的新项目也能被按钮找到）。保留用户已选项目，别每次弹回最新。
   const openPanelDrawer = useCallback(async () => {
     try {
       const d = await listProjects(workspace)
-      const latest = d?.projects?.[0]
-      if (latest) { setPanelProjectId(latest.project_id); setHasProject(true) }
+      const ps = d?.projects || []
+      setAllProjects(ps)
+      if (ps.length) {
+        setHasProject(true)
+        setPanelProjectId(prev => (prev && ps.some(p => p.project_id === prev)) ? prev : ps[0].project_id)
+      }
     } catch {}
     setShowPanel(true)
   }, [workspace])
@@ -680,8 +687,21 @@ export default function App() {
               background: 'var(--bg)', borderLeft: '1px solid var(--border)',
               padding: '18px 20px', boxShadow: '-12px 0 40px rgba(0,0,0,0.5)',
             }}>
-              <div style={{ display: 'flex', alignItems: 'center', marginBottom: 14 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
                 <span style={{ fontSize: 14, fontWeight: 700, color: 'rgba(255,255,255,0.85)' }}>短剧制作面板</span>
+                {allProjects.length > 0 && (
+                  <select value={panelProjectId || ''} onChange={e => setPanelProjectId(e.target.value)}
+                    title="切换工作目录里的项目（面板默认显示最新建的，可在这里选别的）"
+                    style={{ maxWidth: 340, height: 28, borderRadius: 6, fontSize: 12, cursor: 'pointer',
+                             border: '1px solid var(--border)', background: 'rgba(255,255,255,0.06)',
+                             color: 'rgba(255,255,255,0.85)', padding: '0 8px' }}>
+                    {allProjects.map(p => (
+                      <option key={p.project_id} value={p.project_id}>
+                        {(p.title || '(无题)')}（{p.scenes}镜）
+                      </option>
+                    ))}
+                  </select>
+                )}
                 <button onClick={() => setShowPanel(false)} style={{
                   marginLeft: 'auto', height: 26, padding: '0 12px', borderRadius: 6,
                   border: '1px solid var(--border)', background: 'rgba(255,255,255,0.06)',
