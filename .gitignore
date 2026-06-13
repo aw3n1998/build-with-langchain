@@ -64,6 +64,8 @@ backend_run.log*
 _backend_run.log*
 frontend_dev.log
 frontend_dev.err
+frontend/_vite_dev.log
+*_vite_dev.log
 # 基准测试产物
 bench_out/
 # demo/编排脚本的运行日志
