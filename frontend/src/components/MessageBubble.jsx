@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
 import { Icon } from './icons'
+import { useDialog } from './Dialog'
 
 // 面板参数持久化：存到浏览器 localStorage，刷新后不丢，省得每次重设。
 // 只用于「设置类」状态（模型/尺寸/段数/高级参数等），不用于每镜临时态或拉取的数据。
@@ -640,6 +641,7 @@ const STATE_LABEL = {
 }
 
 export function ProductionPanel({ message, workspace, sessionId }) {
+  const dialog = useDialog()
   const pid = message.project_id
   const [proj, setProj] = useState(null)
   const [err, setErr] = useState('')
@@ -894,7 +896,7 @@ export function ProductionPanel({ message, workspace, sessionId }) {
     finally { setAddBusy(false) }
   }
   const removeScene = async (sceneId) => {
-    if (!window.confirm('删除这个分镜？（含它的候选图，不可恢复）')) return
+    if (!await dialog.confirm('删除这个分镜？', { message: '含它的候选图，不可恢复。', danger: true, confirmText: '删除' })) return
     try { await sceneDelete(sceneId, workspace); await load() }
     catch (e) { setProgress('删除分镜失败：' + String(e.message || e)) }
   }
@@ -1015,25 +1017,25 @@ export function ProductionPanel({ message, workspace, sessionId }) {
   }
 
   const delCandidate = async (assetId) => {
-    if (!window.confirm('删除这张候选图？')) return
+    if (!await dialog.confirm('删除这张候选图？', { danger: true, confirmText: '删除' })) return
     try { await deleteCandidate(assetId, workspace); load() } catch { /* ignore */ }
   }
   const delSceneVideo = async (sceneId) => {
-    if (!window.confirm('删除这个分镜的成片？删除后可重新出片（图还在）。')) return
+    if (!await dialog.confirm('删除这个分镜的成片？', { message: '删除后可重新出片（图还在）。', danger: true, confirmText: '删除' })) return
     try { await deleteSceneVideo(sceneId, workspace); load() }
-    catch (e) { alert('删除成片失败：' + (e.message || e)) }   // 别再静默吞错
+    catch (e) { dialog.alert('删除成片失败：' + (e.message || e)) }   // 别再静默吞错
   }
   const undoAppend = async (sceneId) => {
     setSceneBusy(b => ({ ...b, [sceneId]: 'undo' }))
     try {
       const r = await sceneUndoAppend(sceneId, workspace)
-      if (r && r.ok === false && r.message) alert(r.message)   // 没得回退/文件被占用 → 提示
+      if (r && r.ok === false && r.message) dialog.alert(r.message)   // 没得回退/文件被占用 → 提示
       load()
-    } catch (e) { alert('撤销失败：' + (e.message || e)) }
+    } catch (e) { dialog.alert('撤销失败：' + (e.message || e)) }
     finally { setSceneBusy(b => { const n = { ...b }; delete n[sceneId]; return n }) }
   }
   const delEpisode = async () => {
-    if (!window.confirm('删除整集成片？各分镜不受影响，可重新合成。')) return
+    if (!await dialog.confirm('删除整集成片？', { message: '各分镜不受影响，可重新合成。', danger: true, confirmText: '删除' })) return
     try { await deleteEpisode(pid, workspace); load() } catch { /* ignore */ }
   }
 

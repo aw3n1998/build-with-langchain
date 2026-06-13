@@ -13,6 +13,7 @@ import { getStatus, chatSubmit, resumeSubmit, cancelJob, getHistory, getSessionH
 import { ProductionPanel } from './components/MessageBubble'
 import { Icon } from './components/icons'
 import ProjectSidebar from './components/ProjectSidebar'
+import { useDialog } from './components/Dialog'
 
 // 每个会话独立的工作目录（互不影响）
 function loadWorkspaceMap() {
@@ -63,6 +64,7 @@ const studioHdrBtn = {
 const studioHdrIcon = { ...studioHdrBtn, width: 32, padding: 0, justifyContent: 'center' }
 
 export default function App() {
+  const dialog = useDialog()
   const [sessionId, setSessionId]         = useState(loadSessionId)
   const [messages, setMessages]           = useState([])
   const [isStreaming, setIsStreaming]      = useState(false)
@@ -221,32 +223,35 @@ export default function App() {
     catch { return [] }
   }, [workspace])
   const newProject = useCallback(async () => {
-    const title = window.prompt('新剧集名称：', '新剧集')
+    const title = await dialog.prompt('新剧集名称', '新剧集', { title: '新建剧集', confirmText: '创建' })
     if (title == null) return
     try {
       const r = await projectCreate(title || '新剧集', workspace)
       await refreshProjects(); setHasProject(true); setPanelProjectId(r.project_id)
-    } catch (e) { window.alert('新建失败：' + String(e.message || e)) }
-  }, [workspace, refreshProjects])
+    } catch (e) { dialog.alert('新建失败：' + String(e.message || e)) }
+  }, [workspace, refreshProjects, dialog])
   const renameProject = useCallback(async () => {
     if (!panelProjectId) return
     const cur = allProjects.find(p => p.project_id === panelProjectId)
-    const title = window.prompt('改名为：', cur?.title || '')
+    const title = await dialog.prompt('改名为', cur?.title || '', { title: '剧集改名' })
     if (title == null) return
     try { await projectRename(panelProjectId, title, workspace); await refreshProjects() }
-    catch (e) { window.alert('改名失败：' + String(e.message || e)) }
-  }, [panelProjectId, allProjects, workspace, refreshProjects])
+    catch (e) { dialog.alert('改名失败：' + String(e.message || e)) }
+  }, [panelProjectId, allProjects, workspace, refreshProjects, dialog])
   const removeProject = useCallback(async () => {
     if (!panelProjectId) return
     const cur = allProjects.find(p => p.project_id === panelProjectId)
-    if (!window.confirm(`删除整个剧集「${cur?.title || panelProjectId}」？\n含全部分镜与候选图，不可恢复。`)) return
+    const ok = await dialog.confirm(`删除整个剧集「${cur?.title || panelProjectId}」？`, {
+      message: '含全部分镜与候选图，不可恢复。', danger: true, confirmText: '删除',
+    })
+    if (!ok) return
     try {
       await projectDelete(panelProjectId, workspace)
       const ps = await refreshProjects()
       setPanelProjectId(ps.length ? ps[0].project_id : null)
       setHasProject(ps.length > 0)
-    } catch (e) { window.alert('删除失败：' + String(e.message || e)) }
-  }, [panelProjectId, allProjects, workspace, refreshProjects])
+    } catch (e) { dialog.alert('删除失败：' + String(e.message || e)) }
+  }, [panelProjectId, allProjects, workspace, refreshProjects, dialog])
 
   // 刷新后恢复当前会话的历史消息（sessionId 已持久化，消息也要回来）
   useEffect(() => {
