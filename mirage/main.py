@@ -25,7 +25,7 @@ def get_or_create_session():
 
 async def chat_loop():
     print("\n" + "="*50)
-    print("   AI Agent 进阶开发实验室 (AgentLab)")
+    print("   AI Agent 进阶开发实验室 (蜃景 Mirage)")
     print("   输入 'exit' 或 'quit' 退出")
     print("="*50 + "\n")
 

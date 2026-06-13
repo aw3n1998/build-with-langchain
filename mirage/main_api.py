@@ -57,7 +57,7 @@ async def lifespan(app: FastAPI):
     yield 后：应用关闭时执行（释放资源）
     """
     logger.info("=" * 50)
-    logger.info("  AgentLab API 服务启动中...")
+    logger.info("  Mirage API 服务启动中...")
     logger.info("  文档地址：http://localhost:8000/docs")
     logger.info("=" * 50)
 
@@ -68,13 +68,13 @@ async def lifespan(app: FastAPI):
 
     yield  # ← 应用运行期间在这里
 
-    logger.info("AgentLab API 服务关闭")
+    logger.info("Mirage API 服务关闭")
 
 
 # ── FastAPI 应用实例 ────────────────────────────────────────────
 
 app = FastAPI(
-    title="AgentLab API",
+    title="Mirage API",
     description=(
         "工程行业 AI Agent 服务接口\n\n"
         "- **chat**：与多 Agent 系统对话（SSE 流式推送）\n"

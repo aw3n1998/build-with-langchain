@@ -745,7 +745,7 @@ export default function App() {
             color: workspace ? 'rgba(134,239,172,0.9)' : 'var(--text-dim)',
             maxWidth: 480, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
           }}>
-            {workspace || '（默认 agent_workspace）'}
+            {workspace || '（默认 mirage_workspace）'}
           </span>
           <button onClick={() => setShowFolderPicker(true)} style={{
             marginLeft: 'auto', height: 24, padding: '0 12px', borderRadius: 6,

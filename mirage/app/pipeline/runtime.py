@@ -7,7 +7,8 @@
 正确传播到执行线程。
 
 工作目录来源优先级：
-  请求显式传入 > 环境变量 AGENT_WORKSPACE > 当前进程工作目录(cwd)/agent_workspace
+  请求显式传入 > 环境变量 AGENT_WORKSPACE > 当前进程工作目录(cwd)/mirage_workspace
+  （旧 agent_workspace 目录存在时回退沿用，老数据不丢）
 """
 
 from __future__ import annotations
@@ -27,11 +28,21 @@ _user_workspaces: dict[str, set[str]] = {}
 
 
 def default_workspace() -> str:
-    """没显式指定时的默认工作目录。"""
+    """没显式指定时的默认工作目录。
+
+    默认目录名由 agent_workspace 改为 mirage_workspace；带回退：若新名目录不存在
+    而旧 agent_workspace 仍在，则沿用旧目录，避免老用户数据找不到。
+    （环境变量名仍保留 AGENT_WORKSPACE，不破坏已有 .env。）
+    """
     env = os.environ.get("AGENT_WORKSPACE")
     if env:
         return os.path.abspath(env)
-    return os.path.abspath(os.path.join(os.getcwd(), "agent_workspace"))
+    cwd = os.getcwd()
+    new = os.path.abspath(os.path.join(cwd, "mirage_workspace"))
+    old = os.path.abspath(os.path.join(cwd, "agent_workspace"))
+    if not os.path.isdir(new) and os.path.isdir(old):
+        return old
+    return new
 
 
 def set_workspace(path: str | None, user_id: str | None = None):
@@ -103,7 +114,7 @@ def agent_dir() -> str:
         import json
         with open(cfg, "w", encoding="utf-8") as f:
             json.dump({
-                "_note": "AgentLab 工作目录数据（小说转短剧流水线）。可随项目一起拷贝/版本管理。",
+                "_note": "蜃景 工作目录数据（小说转短剧流水线）。可随项目一起拷贝/版本管理。",
                 "created_at": __import__("datetime").datetime.now().isoformat(timespec="seconds"),
                 "structure": {
                     "pipeline.db": "项目/分镜/候选图状态库（SQLite）",

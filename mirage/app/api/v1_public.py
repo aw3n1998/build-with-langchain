@@ -30,7 +30,7 @@ def _store(workspace: str | None):
 async def public_metadata(user_id: str = Depends(require_api_key)):
     """对外 API 自描述（也用于第三方自检 key 是否有效）。"""
     return {
-        "name": "AgentLab Public API",
+        "name": "Mirage Public API",
         "version": "v1",
         "user_id": user_id,                 # 占位：未接账号体系时为 'default' 或 key 本身
         "capabilities": ["create_project", "auto_storyboard", "job_status"],

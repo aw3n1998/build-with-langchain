@@ -63,7 +63,7 @@ class ChatRequest(BaseModel):
     )
     workspace: str | None = Field(
         default=None,
-        description="本次对话的工作目录（出图/出视频落地根）；为空则用默认 agent_workspace。",
+        description="本次对话的工作目录（出图/出视频落地根）；为空则用默认 mirage_workspace。",
     )
     # 多租户预留口子：toC 时由鉴权中间件自动填，按用户隔离数据/工作目录/session。现默认 None（单用户无感）。
     user_id: str | None = Field(default=None, description="（预留）用户标识，多租户隔离用；现可不传。")

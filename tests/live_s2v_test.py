@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""真机联调：AgentLab 本机 → 远程 ComfyUI 跑一条真实 S2V 对口型片(造测试图+TTS→上传→出片→下载)。"""
+"""真机联调：蜃景 本机 → 远程 ComfyUI 跑一条真实 S2V 对口型片(造测试图+TTS→上传→出片→下载)。"""
 from __future__ import annotations
 import os, sys, time
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
