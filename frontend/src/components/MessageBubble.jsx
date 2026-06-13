@@ -631,12 +631,12 @@ function AdvancedSection({ children }) {
 
 /* ── 制作面板：确定性整片流程（一键出图 → 点选 → 一键出片合成）──────── */
 const STATE_LABEL = {
-  DRAFT: { t: '待出图', c: 'var(--text-muted)' },
-  PENDING_FLUX_GEN: { t: '出图中', c: 'rgba(234,179,8,0.9)' },
-  PENDING_HUMAN_SELECTION: { t: '待选图', c: 'rgba(99,102,241,0.95)' },
-  PENDING_VIDEO_GEN: { t: '已选·待出片', c: 'rgba(94,234,212,0.95)' },
-  COMPLETED: { t: '已出片', c: 'rgba(34,197,94,0.95)' },
-  FAILED: { t: '失败', c: 'rgba(239,68,68,0.95)' },
+  DRAFT:                   { t: '待出图',     c: 'rgba(255,255,255,0.52)', bg: 'rgba(255,255,255,0.06)', bd: 'rgba(255,255,255,0.13)' },
+  PENDING_FLUX_GEN:        { t: '出图中',     c: '#eab308', bg: 'rgba(234,179,8,0.12)',  bd: 'rgba(234,179,8,0.35)', spin: true },
+  PENDING_HUMAN_SELECTION: { t: '待选图',     c: '#c084fc', bg: 'rgba(168,85,247,0.12)', bd: 'rgba(168,85,247,0.35)' },
+  PENDING_VIDEO_GEN:       { t: '已选·待出片', c: '#5fe8de', bg: 'rgba(0,189,176,0.12)',  bd: 'rgba(0,189,176,0.35)' },
+  COMPLETED:               { t: '已出片',     c: '#34d399', bg: 'rgba(52,211,153,0.12)', bd: 'rgba(52,211,153,0.35)' },
+  FAILED:                  { t: '失败',       c: '#f87171', bg: 'rgba(239,68,68,0.12)',  bd: 'rgba(239,68,68,0.35)' },
 }
 
 export function ProductionPanel({ message, workspace, sessionId }) {
@@ -913,7 +913,7 @@ export function ProductionPanel({ message, workspace, sessionId }) {
         style={{ ...inputStyle, width: '100%', height: 30, boxSizing: 'border-box' }} />
     </div>
   )
-  const subBox = { background: 'rgba(99,102,241,0.06)', border: '1px solid rgba(99,102,241,0.2)', borderRadius: 10, padding: '12px 14px', marginBottom: 10 }
+  const subBox = { background: '#161616', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 12, padding: '16px 18px', marginBottom: 12 }
   useEffect(() => { cancelled.current = false; load(); return () => { cancelled.current = true } }, [pid])  // eslint-disable-line
   useEffect(() => { if (tab === 'script' && !style) loadStyle() }, [tab])  // eslint-disable-line 进剧本 tab 时加载本集风格
   useEffect(() => {
@@ -1042,28 +1042,28 @@ export function ProductionPanel({ message, workspace, sessionId }) {
   const someSelected = c.selected > 0
 
   return (
-    <div style={{
-      border: '1px solid rgba(99,102,241,0.3)', background: 'rgba(99,102,241,0.05)',
-      borderRadius: 12, padding: '16px 18px',
-    }}>
-      <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 10, marginBottom: 12 }}>
-        <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: '0.05em', color: 'rgba(190,192,255,1)' }}>
-          短剧制作面板 · {proj?.title || pid}
+    <div>
+      <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 16, marginBottom: 14 }}>
+        <div style={{ fontSize: 14, fontWeight: 600, color: 'rgba(255,255,255,0.87)' }}>
+          {proj?.title || pid}
         </div>
-        <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-          {c.total} 分镜 · 已出图 {c.with_candidates} · 已选 {c.selected} · 已出片 {c.done}
+        <div style={{ display: 'flex', gap: 14, fontSize: 12, color: 'rgba(255,255,255,0.52)' }}>
+          <span>总数 <b style={{ color: 'rgba(255,255,255,0.87)', fontWeight: 600 }}>{c.total}</b></span>
+          <span>已出图 <b style={{ color: '#eab308', fontWeight: 600 }}>{c.with_candidates}</b></span>
+          <span>已选 <b style={{ color: '#c084fc', fontWeight: 600 }}>{c.selected}</b></span>
+          <span>已出片 <b style={{ color: '#34d399', fontWeight: 600 }}>{c.done}</b></span>
         </div>
-        <button onClick={load} title="刷新" style={{ ...miniBtn, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}><Icon.Refresh size={13} /></button>
+        <button onClick={load} title="刷新" style={{ ...miniBtn, marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}><Icon.Refresh size={13} /></button>
       </div>
 
       {/* Tab 栏：剧本 / 角色&LoRA / 分镜 / 导出 */}
-      <div style={{ display: 'flex', gap: 2, marginBottom: 14, borderBottom: '1px solid var(--border)', flexWrap: 'wrap' }}>
+      <div style={{ display: 'flex', gap: 26, marginBottom: 18, borderBottom: '1px solid rgba(255,255,255,0.07)', flexWrap: 'wrap' }}>
         {[['script', '剧本', Icon.Script], ['cast', '角色 & LoRA', Icon.Users], ['shots', '分镜制作', Icon.Layers], ['export', '导出', Icon.Download]].map(([k, label, Ico]) => (
           <button key={k} onClick={() => setTab(k)} style={{
-            display: 'inline-flex', alignItems: 'center', gap: 6,
-            background: 'none', border: 'none', borderBottom: tab === k ? '2px solid var(--accent, #6366f1)' : '2px solid transparent',
-            color: tab === k ? 'var(--text)' : 'var(--text-sec)', cursor: 'pointer',
-            padding: '8px 14px', fontSize: 13, fontWeight: tab === k ? 650 : 500, marginBottom: -1,
+            display: 'inline-flex', alignItems: 'center', gap: 7,
+            background: 'none', border: 'none', borderBottom: tab === k ? '2px solid #6366f1' : '2px solid transparent',
+            color: tab === k ? 'rgba(255,255,255,0.87)' : 'rgba(255,255,255,0.52)', cursor: 'pointer',
+            padding: '0 0 11px', fontSize: 13, fontWeight: tab === k ? 650 : 500, marginBottom: -1,
             transition: 'color .14s',
           }}><Ico size={15} style={{ opacity: tab === k ? 1 : 0.7 }} />{label}</button>
         ))}
@@ -1210,7 +1210,11 @@ export function ProductionPanel({ message, workspace, sessionId }) {
       {/* 第③步：出片并合成（模型/段数/分辨率可选）*/}
       <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginBottom: 12 }}>
         <button onClick={() => runJob('finish')} disabled={!!busy || !someSelected}
-          style={panelBtn(busy === 'finish', !someSelected)}>
+          style={!someSelected ? panelBtn(false, true) : {
+            height: 32, padding: '0 14px', borderRadius: 8, border: 'none',
+            background: busy === 'finish' ? 'rgba(0,189,176,0.7)' : '#00bdb0',
+            color: '#04201e', fontSize: 12.5, fontWeight: 600, cursor: 'pointer',
+          }}>
           {busy === 'finish' ? '出片合成中…' : (allSelected ? '③ 一键出片并合成' : `③ 出片并合成（已选${c.selected}/${c.total}）`)}
         </button>
         {models.length > 0 && (
@@ -1349,12 +1353,13 @@ export function ProductionPanel({ message, workspace, sessionId }) {
             <div style={{
               maxHeight: 200, overflowY: 'auto', borderRadius: 8, padding: '8px 10px',
               background: '#0a0a0a', border: '1px solid var(--border)',
-              fontFamily: '"SF Mono","Fira Code",ui-monospace,monospace', fontSize: 11, lineHeight: 1.5,
-              color: 'rgba(180,230,200,0.92)', whiteSpace: 'pre-wrap', wordBreak: 'break-all',
+              fontFamily: '"SF Mono","Fira Code",ui-monospace,monospace', fontSize: 11, lineHeight: 1.7,
+              color: '#34d399', whiteSpace: 'pre-wrap', wordBreak: 'break-all',
             }}>
               {logs.map((l, i) => (
-                <div key={i} style={{ color: l.startsWith('✗') ? 'rgba(252,165,165,1)'
-                  : l.startsWith('»') ? 'rgba(147,197,253,0.95)' : 'inherit' }}>{l}</div>
+                <div key={i} style={{ color: l.startsWith('✗') ? '#f87171'
+                  : l.startsWith('»') ? '#6cb6ff'
+                  : /warn/i.test(l) ? '#eab308' : 'inherit' }}>{l}</div>
               ))}
               <div ref={logEndRef} />
             </div>
@@ -1385,8 +1390,8 @@ export function ProductionPanel({ message, workspace, sessionId }) {
           const sl = STATE_LABEL[s.state] || { t: s.state, c: 'var(--text-muted)' }
           return (
             <div key={s.scene_id} style={{
-              border: '1px solid var(--border)', borderRadius: 10, padding: '10px 12px',
-              background: 'rgba(255,255,255,0.02)',
+              border: `1px solid ${s.state === 'PENDING_FLUX_GEN' ? 'rgba(234,179,8,0.25)' : 'rgba(255,255,255,0.07)'}`,
+              borderRadius: 12, padding: '15px 18px', background: '#161616',
             }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
                 <span style={{ fontSize: 12, fontWeight: 700, color: 'rgba(255,255,255,0.8)' }}>
@@ -1465,7 +1470,15 @@ export function ProductionPanel({ message, workspace, sessionId }) {
                       }} />
                   </label>
                 )}
-                <span style={{ fontSize: 11, fontWeight: 600, color: sl.c }}>{sl.t}</span>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, height: 22, padding: '0 9px',
+                               borderRadius: 6, fontSize: 11, color: sl.c,
+                               background: sl.bg || 'rgba(255,255,255,0.06)',
+                               border: `1px solid ${sl.bd || 'rgba(255,255,255,0.13)'}` }}>
+                  {sl.spin
+                    ? <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" style={{ animation: 'al-spin 1s linear infinite' }}><path d="M21 12a9 9 0 1 1-6.2-8.5"/></svg>
+                    : <span style={{ width: 5, height: 5, borderRadius: '50%', background: 'currentColor' }} />}
+                  {sl.t}
+                </span>
               </div>
 
               {s.video ? (
@@ -1527,8 +1540,8 @@ export function ProductionPanel({ message, workspace, sessionId }) {
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(96px,1fr))', gap: 8 }}>
                   {s.candidates.map(img => (
                     <div key={img.assetId} style={{
-                      position: 'relative', borderRadius: 8, overflow: 'hidden', cursor: 'pointer',
-                      border: img.selected ? '2px solid rgba(34,197,94,0.9)' : '1px solid var(--border)',
+                      position: 'relative', borderRadius: 9, overflow: 'hidden', cursor: 'pointer',
+                      border: img.selected ? '2px solid #34d399' : '1px solid rgba(255,255,255,0.1)',
                     }}>
                       <img src={fileUrl(img.url)} alt={img.name} onClick={() => setZoom(img)}
                            style={{ width: '100%', aspectRatio: '3/4', objectFit: 'cover', display: 'block' }} />
@@ -1536,8 +1549,9 @@ export function ProductionPanel({ message, workspace, sessionId }) {
                         title={img.selected ? '已选' : '选这张'}
                         style={{
                           position: 'absolute', top: 4, right: 4, width: 22, height: 22, borderRadius: 6,
-                          border: 'none', cursor: 'pointer', fontSize: 12, color: '#fff',
-                          background: img.selected ? 'rgba(34,197,94,0.9)' : 'rgba(0,0,0,0.55)',
+                          border: 'none', cursor: 'pointer', fontSize: 12,
+                          color: img.selected ? '#04201a' : '#fff',
+                          background: img.selected ? '#34d399' : 'rgba(0,0,0,0.55)',
                         }}>{img.selected ? '✓' : '○'}</button>
                       <button onClick={() => delCandidate(img.assetId)} title="删除这张候选图"
                         style={{
@@ -1726,10 +1740,9 @@ function SegmentPromptsEditor({ segs, prompts, intent, busy, onIntent, onGenerat
 }
 
 const panelBtn = (active, disabled) => ({
-  height: 32, padding: '0 16px', borderRadius: 8,
-  border: '1px solid rgba(99,102,241,0.4)',
-  background: disabled ? 'rgba(255,255,255,0.05)' : active ? 'rgba(99,102,241,0.35)' : 'rgba(99,102,241,0.2)',
-  color: disabled ? 'var(--text-muted)' : 'rgba(190,192,255,1)',
+  height: 32, padding: '0 14px', borderRadius: 8, border: 'none',
+  background: disabled ? 'rgba(255,255,255,0.06)' : active ? '#5254cc' : '#6366f1',
+  color: disabled ? 'var(--text-muted)' : '#fff',
   fontSize: 12.5, fontWeight: 600, cursor: disabled ? 'default' : 'pointer',
 })
 // 单镜操作小按钮（出图=紫、出视频=青）
