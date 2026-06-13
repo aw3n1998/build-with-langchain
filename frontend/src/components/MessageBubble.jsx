@@ -1815,7 +1815,7 @@ function ToolSteps({ steps }) {
             <span style={{ color: s.done ? '#34d399' : 'rgba(234,179,8,0.9)' }}>
               {s.done ? '✓' : '·'}
             </span>
-            <span style={{ fontWeight: 600, color: 'rgba(255,255,255,0.7)' }}>{s.name}</span>
+            <span style={{ fontWeight: 600, color: 'rgba(255,255,255,0.52)' }}>{s.name}</span>
             {s.args && Object.keys(s.args).length > 0 && (
               <span style={{ color: 'rgba(255,255,255,0.4)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {summarizeArgs(s.args)}
