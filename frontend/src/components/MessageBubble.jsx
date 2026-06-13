@@ -55,16 +55,19 @@ export default function MessageBubble({ message, onResume, onSend, onGenerate, o
 function UserMessage({ content }) {
   return (
     <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '4px 0' }}>
-      <p style={{
+      <div style={{
         maxWidth: '72%',
-        fontSize: 14,
-        lineHeight: 1.7,
-        color: 'rgba(255,255,255,0.82)',
-        textAlign: 'right',
+        background: 'rgba(99,102,241,0.14)',
+        border: '1px solid rgba(99,102,241,0.25)',
+        borderRadius: '14px 14px 4px 14px',
+        padding: '11px 15px',
+        fontSize: 13.5,
+        lineHeight: 1.55,
+        color: 'rgba(255,255,255,0.87)',
         whiteSpace: 'pre-wrap',
       }}>
         {content}
-      </p>
+      </div>
     </div>
   )
 }
@@ -123,22 +126,18 @@ function AssistantMessage({ message, onSend, onSelectImage, stale }) {
   const sources = extractSources(main)
 
   return (
-    <div style={{
-      background: 'var(--card)',
-      border: '1px solid var(--border)',
-      borderRadius: 12,
-      padding: '16px 20px',
-    }}>
-      {/* AGENTLAB 标签 */}
+    <div>
+      {/* MIRAGE 品牌标签：裸渲染（无卡片框），紫色 SF Mono */}
       <p style={{
         fontSize: 10,
         fontWeight: 700,
-        letterSpacing: '0.1em',
+        letterSpacing: '1px',
         textTransform: 'uppercase',
-        color: 'var(--text-dim)',
-        marginBottom: 12,
+        color: '#6366f1',
+        fontFamily: "'SF Mono', ui-monospace, monospace",
+        marginBottom: 9,
       }}>
-        AGENTLAB
+        MIRAGE
       </p>
 
       {/* 工具调用链：让"调用了什么"在页面可见 */}
@@ -178,23 +177,21 @@ function AssistantMessage({ message, onSend, onSelectImage, stale }) {
         </div>
       )}
 
-      {/* RAG 来源标签 */}
+      {/* RAG 来源标签：靛蓝 pill（对齐 mockup #01 file.md）*/}
       {sources.length > 0 && !message.streaming && (
         <div style={{
-          display: 'flex', flexWrap: 'wrap', gap: 6,
-          marginTop: 16, paddingTop: 14,
-          borderTop: '1px solid var(--border)',
+          display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 11,
         }}>
           {sources.map((src, i) => (
             <span key={i} style={{
-              fontSize: 11, color: 'var(--text-muted)',
-              background: 'rgba(255,255,255,0.04)',
-              border: '1px solid var(--border)',
-              borderRadius: 5, padding: '2px 8px',
-              fontFamily: 'monospace', letterSpacing: '0.01em',
+              fontSize: 10.5, color: '#a5a8ff',
+              background: 'rgba(99,102,241,0.1)',
+              border: '1px solid rgba(99,102,241,0.25)',
+              borderRadius: 5, padding: '3px 8px',
+              fontFamily: "'SF Mono', ui-monospace, monospace", letterSpacing: '0.01em',
             }}>
-              <span style={{ color: 'var(--text-dim)', marginRight: 5 }}>
-                {String(i + 1).padStart(2, '0')}
+              <span style={{ color: 'rgba(165,168,255,0.6)', marginRight: 5 }}>
+                #{String(i + 1).padStart(2, '0')}
               </span>
               {src}
             </span>
@@ -236,8 +233,8 @@ function ImageWall({ images, onSelectImage, stale }) {
             onClick={() => setZoom(img)}
             title="点击放大查看"
             style={{
-              position: 'relative', borderRadius: 10, overflow: 'hidden', cursor: 'zoom-in',
-              border: img.selected ? '2px solid rgba(34,197,94,0.9)' : '1px solid var(--border)',
+              position: 'relative', borderRadius: 9, overflow: 'hidden', cursor: 'zoom-in',
+              border: img.selected ? '2px solid #34d399' : '1px solid rgba(255,255,255,0.1)',
               transition: 'all 0.15s',
             }}
             onMouseEnter={e => e.currentTarget.style.transform = 'scale(1.02)'}
@@ -254,8 +251,8 @@ function ImageWall({ images, onSelectImage, stale }) {
                 style={{
                   position: 'absolute', top: 6, right: 6, width: 24, height: 24, borderRadius: 6,
                   border: 'none', cursor: canSelect ? 'pointer' : 'default', fontSize: 13,
-                  background: img.selected ? 'rgba(34,197,94,0.9)' : 'rgba(0,0,0,0.5)',
-                  color: '#fff',
+                  background: img.selected ? '#34d399' : 'rgba(0,0,0,0.5)',
+                  color: img.selected ? '#04201a' : '#fff',
                 }}>{img.selected ? '✓' : '○'}</button>
             )}
             <div style={{
@@ -310,6 +307,8 @@ function ParamCard({ message, onGenerate, stale }) {
   const [p, setP] = useState(message.params)
   const submitted = message.submitted || stale   // 回合结束后参数卡也失效
   const sizePreset = `${p.width}x${p.height}`
+  // param_form 内输入框用青色描边（对齐 mockup），其余沿用 inputStyle
+  const cyanInput = { ...inputStyle, border: '1px solid rgba(0,189,176,0.25)' }
 
   const field = (label, key, type = 'number', opts) => (
     <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
@@ -317,32 +316,32 @@ function ParamCard({ message, onGenerate, stale }) {
       {opts ? (
         <select value={p[key]} disabled={submitted}
           onChange={e => setP({ ...p, [key]: e.target.value })}
-          style={inputStyle}>
+          style={cyanInput}>
           {opts.map(o => <option key={o.v} value={o.v}>{o.label}</option>)}
         </select>
       ) : (
         <input type={type} value={p[key]} disabled={submitted}
           onChange={e => setP({ ...p, [key]: type === 'number' ? Number(e.target.value) : e.target.value })}
-          style={inputStyle} />
+          style={cyanInput} />
       )}
     </label>
   )
 
   return (
     <div style={{
-      border: '1px solid rgba(99,102,241,0.3)', background: 'rgba(99,102,241,0.06)',
-      borderRadius: 12, padding: '16px 18px',
+      border: '1px solid rgba(0,189,176,0.3)', background: 'rgba(0,189,176,0.05)',
+      borderRadius: 12, padding: '15px 17px',
     }}>
-      <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase',
-                    color: 'rgba(165,168,255,0.8)', marginBottom: 12 }}>
-        出图参数 · 确认后生成
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#00bdb0" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M15 4V2"/><path d="M8 9h2"/><path d="m3 21 9-9"/><path d="M12.2 6.2 11 5"/></svg>
+        <span style={{ fontSize: 12.5, fontWeight: 600, color: '#5fe8de' }}>出图参数卡 param_form</span>
       </div>
 
       <label style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 10 }}>
         <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>提示词（角色触发词已自动加好）</span>
         <textarea value={p.image_prompt} disabled={submitted} rows={2}
           onChange={e => setP({ ...p, image_prompt: e.target.value })}
-          style={{ ...inputStyle, resize: 'vertical', fontFamily: 'inherit' }} />
+          style={{ ...cyanInput, resize: 'vertical', fontFamily: 'inherit' }} />
       </label>
 
       {/* 常用：张数 + 尺寸（小白只看这些）*/}
@@ -352,7 +351,7 @@ function ParamCard({ message, onGenerate, stale }) {
           <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>尺寸</span>
           <select value={sizePreset} disabled={submitted}
             onChange={e => { const [w, h] = e.target.value.split('x').map(Number); setP({ ...p, width: w, height: h }) }}
-            style={inputStyle}>
+            style={cyanInput}>
             <option value="768x1024">768×1024 竖屏</option>
             <option value="1024x768">1024×768 横屏</option>
             <option value="1024x1024">1024×1024 方形</option>
@@ -376,9 +375,9 @@ function ParamCard({ message, onGenerate, stale }) {
         disabled={submitted}
         style={{
           marginTop: 12,
-          height: 34, padding: '0 20px', borderRadius: 8, border: '1px solid rgba(99,102,241,0.35)',
-          background: submitted ? 'rgba(255,255,255,0.06)' : 'rgba(99,102,241,0.22)',
-          color: submitted ? 'var(--text-muted)' : 'rgba(190,192,255,1)',
+          height: 34, padding: '0 20px', borderRadius: 8, border: 'none',
+          background: submitted ? 'rgba(255,255,255,0.06)' : '#00bdb0',
+          color: submitted ? 'var(--text-muted)' : '#04201e',
           fontSize: 13, fontWeight: 600, cursor: submitted ? 'default' : 'pointer',
         }}>
         {submitted ? '已提交出图' : '出图'}
@@ -533,16 +532,16 @@ function VideoParamCard({ message, onRenderVideo, stale }) {
 
   return (
     <div style={{
-      border: '1px solid rgba(0,189,176,0.3)', background: 'rgba(0,189,176,0.06)',
-      borderRadius: 12, padding: '16px 18px',
+      border: '1px solid rgba(0,189,176,0.3)', background: 'rgba(0,189,176,0.05)',
+      borderRadius: 12, padding: '15px 17px',
     }}>
       {/* 顶部横条：标题 + 模型选择 + 预计时长，一行读完 */}
       <div style={{
         display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 12, marginBottom: 12,
       }}>
-        <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase',
-                      color: 'rgba(94,234,212,0.85)' }}>
-          出视频参数
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#00bdb0" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="m12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z"/></svg>
+          <span style={{ fontSize: 12.5, fontWeight: 600, color: '#5fe8de' }}>出视频参数卡 video_param_form</span>
         </div>
 
         {/* 模型选择（≥2 个模型时显示） */}
@@ -592,10 +591,10 @@ function VideoParamCard({ message, onRenderVideo, stale }) {
           onClick={submit}
           disabled={submitted}
           style={{
-            flex: '0 0 auto', height: 30, padding: '0 22px', borderRadius: 6,
-            border: '1px solid rgba(0,189,176,0.4)',
-            background: submitted ? 'rgba(255,255,255,0.06)' : 'rgba(0,189,176,0.22)',
-            color: submitted ? 'var(--text-muted)' : 'rgba(94,234,212,1)',
+            flex: '0 0 auto', height: 30, padding: '0 22px', borderRadius: 8,
+            border: 'none',
+            background: submitted ? 'rgba(255,255,255,0.06)' : '#00bdb0',
+            color: submitted ? 'var(--text-muted)' : '#04201e',
             fontSize: 13, fontWeight: 600, cursor: submitted ? 'default' : 'pointer',
           }}>
           {submitted ? '已提交' : '出视频'}
@@ -1789,23 +1788,23 @@ function ToolSteps({ steps }) {
     }
   }
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 14 }}>
+    <div style={{
+      border: '1px solid rgba(99,102,241,0.2)',
+      background: 'rgba(99,102,241,0.06)',
+      borderRadius: 10,
+      padding: '12px 14px',
+      marginBottom: 14,
+      display: 'flex', flexDirection: 'column', gap: 7,
+    }}>
       {steps.map((s, i) => (
-        <div key={i} style={{
-          fontSize: 12,
-          fontFamily: 'monospace',
-          border: '1px solid var(--border)',
-          borderRadius: 8,
-          padding: '8px 10px',
-          background: 'rgba(255,255,255,0.03)',
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-            <span style={{ color: s.done ? 'rgba(134,239,172,0.9)' : 'rgba(234,179,8,0.9)' }}>
+        <div key={i} style={{ fontSize: 12, fontFamily: "'SF Mono', ui-monospace, monospace" }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ color: s.done ? '#34d399' : 'rgba(234,179,8,0.9)' }}>
               {s.done ? '✓' : '·'}
             </span>
-            <span style={{ fontWeight: 700, color: 'rgba(147,197,253,0.95)' }}>{s.name}</span>
+            <span style={{ fontWeight: 600, color: 'rgba(255,255,255,0.7)' }}>{s.name}</span>
             {s.args && Object.keys(s.args).length > 0 && (
-              <span style={{ color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              <span style={{ color: 'rgba(255,255,255,0.4)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {summarizeArgs(s.args)}
               </span>
             )}
@@ -1814,8 +1813,8 @@ function ToolSteps({ steps }) {
             <div style={{
               marginTop: 6,
               paddingTop: 6,
-              borderTop: '1px solid var(--border)',
-              color: 'var(--text-muted)',
+              borderTop: '1px solid rgba(99,102,241,0.15)',
+              color: 'rgba(255,255,255,0.4)',
               whiteSpace: 'pre-wrap',
               wordBreak: 'break-all',
               maxHeight: 90,
@@ -1837,8 +1836,14 @@ function PcActionButton({ action, onSend, isQuickReply = false }) {
 
   // 颜色主题
   let bgColor, borderColor, textColor, hoverBg
-  if (hasUserInput || isQuickReply) {
-    // 快捷回复按钮：紫色调
+  if (isQuickReply) {
+    // 快捷回复区按钮：中性灰（对齐 mockup）
+    bgColor   = 'rgba(255,255,255,0.04)'
+    borderColor = 'rgba(255,255,255,0.13)'
+    textColor = 'rgba(255,255,255,0.87)'
+    hoverBg   = 'rgba(255,255,255,0.08)'
+  } else if (hasUserInput) {
+    // 内联快捷动作：紫色调
     bgColor   = 'rgba(99,102,241,0.12)'
     borderColor = 'rgba(99,102,241,0.3)'
     textColor = 'rgba(165,168,255,0.9)'
@@ -1886,8 +1891,8 @@ function PcActionButton({ action, onSend, isQuickReply = false }) {
         display: 'inline-flex',
         alignItems: 'center',
         gap: 6,
-        height: 30,
-        padding: '0 14px',
+        height: isQuickReply ? 28 : 30,
+        padding: isQuickReply ? '0 12px' : '0 14px',
         borderRadius: 8,
         border: `1px solid ${borderColor}`,
         background: bgColor,
@@ -1902,7 +1907,7 @@ function PcActionButton({ action, onSend, isQuickReply = false }) {
       onMouseEnter={e => { if (hasUserInput) e.currentTarget.style.background = hoverBg }}
       onMouseLeave={e => { if (hasUserInput) e.currentTarget.style.background = bgColor }}
     >
-      <span style={{ fontSize: 13, lineHeight: 1 }}>{icon}</span>
+      {!isQuickReply && <span style={{ fontSize: 13, lineHeight: 1 }}>{icon}</span>}
       {action.label || action.name || '操作'}
     </button>
   )
@@ -1941,14 +1946,6 @@ function extractSources(content) {
 function InterruptCard({ message, onResume }) {
   const resolved = message.resolved
 
-  const WarningIcon = () => (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
-         stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
-      <line x1="12" y1="9" x2="12" y2="13"/>
-      <line x1="12" y1="17" x2="12.01" y2="17"/>
-    </svg>
-  )
   const CheckIcon = () => (
     <svg width="12" height="12" viewBox="0 0 24 24" fill="none"
          stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -1962,64 +1959,48 @@ function InterruptCard({ message, onResume }) {
     </svg>
   )
 
-  const accentColor = resolved === undefined
-    ? 'rgba(234,179,8,0.85)'
-    : resolved ? 'rgba(34,197,94,0.85)' : 'rgba(239,68,68,0.85)'
-
   return (
     <div style={{
-      border: `1px solid ${resolved === undefined ? 'rgba(234,179,8,0.35)' : resolved ? 'rgba(34,197,94,0.3)' : 'rgba(239,68,68,0.3)'}`,
+      border: '1px solid rgba(255,255,255,0.13)',
       borderRadius: 12,
-      padding: '14px 18px',
-      background: resolved === undefined
-        ? 'rgba(234,179,8,0.06)'
-        : resolved ? 'rgba(34,197,94,0.05)' : 'rgba(239,68,68,0.05)',
+      padding: '15px 17px',
+      background: '#161616',
       transition: 'all 0.2s',
     }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-        <span style={{ color: accentColor }}><WarningIcon /></span>
-        <span style={{
-          fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase',
-          color: accentColor.replace('0.85', '0.7'),
-        }}>
-          Human-in-the-loop · 等待确认
-        </span>
-      </div>
-
       <p style={{
-        fontSize: 13.5, lineHeight: 1.65,
-        color: 'rgba(255,255,255,0.75)',
-        marginBottom: resolved === undefined ? 14 : 0,
+        fontSize: 12.5, lineHeight: 1.6,
+        color: 'rgba(255,255,255,0.87)',
+        marginBottom: resolved === undefined ? 13 : 0,
       }}>
         {message.content}
       </p>
 
       {resolved === undefined ? (
-        <div style={{ display: 'flex', gap: 8 }}>
+        <div style={{ display: 'flex', gap: 10 }}>
           <button
             onClick={() => onResume?.(true)}
             style={{
-              height: 30, padding: '0 16px', borderRadius: 8, border: '1px solid rgba(34,197,94,0.25)',
-              background: 'rgba(34,197,94,0.18)', color: 'rgba(34,197,94,0.9)',
-              fontSize: 12, fontWeight: 600, cursor: 'pointer',
+              height: 32, padding: '0 16px', borderRadius: 8, border: 'none',
+              background: '#34d399', color: '#04201a',
+              fontSize: 12.5, fontWeight: 600, cursor: 'pointer',
               display: 'flex', alignItems: 'center', gap: 6, transition: 'all 0.15s',
             }}
-            onMouseEnter={e => e.currentTarget.style.background = 'rgba(34,197,94,0.28)'}
-            onMouseLeave={e => e.currentTarget.style.background = 'rgba(34,197,94,0.18)'}
+            onMouseEnter={e => e.currentTarget.style.opacity = '0.88'}
+            onMouseLeave={e => e.currentTarget.style.opacity = '1'}
           >
             <CheckIcon /> 确认执行
           </button>
           <button
             onClick={() => onResume?.(false)}
             style={{
-              height: 30, padding: '0 16px', borderRadius: 8,
-              background: 'rgba(239,68,68,0.12)', color: 'rgba(239,68,68,0.85)',
-              fontSize: 12, fontWeight: 600, cursor: 'pointer',
+              height: 32, padding: '0 16px', borderRadius: 8,
+              background: 'rgba(239,68,68,0.1)', color: '#f87171',
+              fontSize: 12.5, fontWeight: 600, cursor: 'pointer',
               display: 'flex', alignItems: 'center', gap: 6,
-              border: '1px solid rgba(239,68,68,0.22)', transition: 'all 0.15s',
+              border: '1px solid rgba(239,68,68,0.4)', transition: 'all 0.15s',
             }}
-            onMouseEnter={e => e.currentTarget.style.background = 'rgba(239,68,68,0.22)'}
-            onMouseLeave={e => e.currentTarget.style.background = 'rgba(239,68,68,0.12)'}
+            onMouseEnter={e => e.currentTarget.style.background = 'rgba(239,68,68,0.2)'}
+            onMouseLeave={e => e.currentTarget.style.background = 'rgba(239,68,68,0.1)'}
           >
             <XIcon /> 取消
           </button>
@@ -2027,7 +2008,7 @@ function InterruptCard({ message, onResume }) {
       ) : (
         <span style={{
           fontSize: 12, fontWeight: 500,
-          color: resolved ? 'rgba(34,197,94,0.7)' : 'rgba(239,68,68,0.7)',
+          color: resolved ? '#34d399' : '#f87171',
           display: 'flex', alignItems: 'center', gap: 5,
         }}>
           {resolved ? <CheckIcon /> : <XIcon />}
