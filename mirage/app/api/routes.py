@@ -1228,6 +1228,79 @@ async def pipeline_auto_storyboard(req: AutoStoryboardRequest):
     return {"project_id": req.project_id, "created": created, "count": len(created)}
 
 
+class AutoFillRequest(BaseModel):
+    workspace: str | None = None
+    project_id: str
+    novel_text: str
+    scenes: int = 8
+    replace: bool = False         # true=替换现有角色/风格/分镜（LoRA 任务不删，保住已传图）
+
+
+@router.post("/pipeline/auto_fill")
+async def pipeline_auto_fill(req: AutoFillRequest):
+    """一键 AI 分析小说 → 自动填 角色(+按名建空 LoRA) / 本集风格 / 分镜。各步失败走保底不中断。"""
+    from mirage.app.pipeline.novel_analyze import extract_characters, generate_style
+    from mirage.app.pipeline.storyboard import breakdown_storyboard
+    store = _ws_store(req.workspace)
+    pid = req.project_id
+    if not store.get_project(pid):
+        raise HTTPException(status_code=404, detail="项目不存在")
+    novel = req.novel_text or ""
+
+    # 1) 角色（replace 时先清空旧角色）
+    chars = await extract_characters(novel)
+    if req.replace:
+        for c in store.list_characters(pid):
+            store.delete_character(c["id"])
+    existing_lora = {t.get("name") for t in store.list_lora_trainings(pid)}
+    char_rows, lora_created = [], 0
+    for c in chars:
+        row = store.add_character(pid, c["name"], c.get("appearance", ""), c.get("voice", ""))
+        char_rows.append(row)
+        if c["name"] not in existing_lora:   # 每角色建空 LoRA（按名去重，不删旧的）
+            try:
+                store.add_lora_training(pid, c["name"], "", row.get("id", "") or "")
+                existing_lora.add(c["name"]); lora_created += 1
+            except Exception:  # noqa: BLE001
+                pass
+
+    # 2) 风格
+    style = await generate_style(novel)
+    try:
+        store.update_project_style(pid, **style)
+    except Exception:  # noqa: BLE001
+        pass
+
+    # 3) 分镜（带新角色 + 新风格；逻辑同 auto_storyboard）
+    chars_now = store.list_characters(pid)
+    n = max(1, min(int(req.scenes or 8), 40))
+    scenes = await breakdown_storyboard(novel, n, style=style.get("style_prompt", ""), characters=chars_now)
+    if req.replace:
+        for s in store.list_scenes(pid):
+            store.delete_scene(s["id"])
+    base = 0 if req.replace else max((s["scene_number"] for s in store.list_scenes(pid)), default=0)
+    if novel and hasattr(store, "set_project_novel"):
+        try:
+            store.set_project_novel(pid, novel)
+        except Exception:  # noqa: BLE001
+            pass
+    voice_of = {c.get("name"): c.get("voice") for c in chars_now}
+    created = []
+    for i, sc in enumerate(scenes, 1):
+        rrow = store.add_scene(pid, base + i, narration=sc["narration"],
+                               image_prompt=sc["image_prompt"], motion_prompt=sc["motion_prompt"],
+                               title=sc["title"], subtitle=sc["subtitle"])
+        if sc.get("lipsync"):
+            store.set_scene_lipsync(rrow["id"], True)
+        v = voice_of.get(sc.get("character"))
+        if v and hasattr(store, "set_scene_voice"):
+            store.set_scene_voice(rrow["id"], v)
+        created.append({"scene_id": rrow["id"], "scene_number": rrow["scene_number"]})
+
+    return {"project_id": pid, "characters": len(char_rows), "lora_created": lora_created,
+            "style": style, "scenes_count": len(created)}
+
+
 class CharacterRequest(BaseModel):
     workspace: str | None = None
     project_id: str

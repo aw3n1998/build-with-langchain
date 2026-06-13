@@ -276,6 +276,15 @@ export async function autoStoryboard(projectId, novelText, scenes, replace, work
   if (!r.ok) throw new Error(`status ${r.status}`)
   return r.json()
 }
+// 一键 AI 分析小说 → 自动填角色(+空 LoRA)/风格/分镜
+export async function autoFill(projectId, novelText, scenes, replace, workspace = null) {
+  const r = await fetch(`${getBase()}/pipeline/auto_fill`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ project_id: projectId, novel_text: novelText, scenes, replace, workspace }),
+  })
+  if (!r.ok) throw new Error(`status ${r.status}`)
+  return r.json()
+}
 // 角色/声音圣经：action=list/add/update/delete
 export async function characters(projectId, action, fields = {}, workspace = null) {
   const r = await fetch(`${getBase()}/pipeline/characters`, {

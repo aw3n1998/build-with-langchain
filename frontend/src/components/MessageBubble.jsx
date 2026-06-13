@@ -19,7 +19,7 @@ import ReactMarkdown from 'react-markdown'
 import { fileUrl, getVideoProviders, getImageProviders, getProject, batchGenerate, batchFinish,
          pipelineSelect, streamJobEvents, uploadCandidate, updateScenePrompts,
          deleteCandidate, deleteSceneVideo, sceneUndoAppend, deleteEpisode, suggestSegmentPrompts,
-         autoStoryboard, characters as charactersApi,
+         autoStoryboard, autoFill, characters as charactersApi,
          loraCreate, loraAction, loraUploadImage,
          suggestContinuation, sceneGenerate, sceneRender, sceneAppend,
          cancelJob, listActiveJobs,
@@ -698,6 +698,9 @@ export function ProductionPanel({ message, workspace, sessionId }) {
   const [sbN, setSbN] = usePersistedState('sbN', 8)
   const [sbReplace, setSbReplace] = useState(false)
   const [sbBusy, setSbBusy] = useState(false)
+  // 一键 AI 分析填充（角色+风格+LoRA+分镜）
+  const [afBusy, setAfBusy] = useState(false)
+  const [afReplace, setAfReplace] = useState(false)
   // 角色/声音圣经
   const [showChars, setShowChars] = useState(false)
   const [charsBusy, setCharsBusy] = useState(false)
@@ -868,6 +871,23 @@ export function ProductionPanel({ message, workspace, sessionId }) {
       setShowSB(false); await load()
     } catch (e) { setProgress('拆分镜失败：' + String(e.message || e)) }
     finally { setSbBusy(false) }
+  }
+  // 一键 AI 分析：抽角色(+空 LoRA) → 风格 → 分镜，全套入库
+  const doAutoFill = async () => {
+    if (!novel.trim()) { setProgress('先粘一段小说/剧情文本'); return }
+    const hasContent = (proj?.characters?.length || 0) > 0 || (proj?.scenes?.length || 0) > 0 || !!(proj?.style?.style_prompt)
+    if (afReplace && hasContent) {
+      if (!await dialog.confirm('将替换现有 角色 / 风格 / 分镜，继续？', {
+        message: '已有内容会被本次分析结果覆盖（LoRA 任务保留，不会误删你传的参考图）。', danger: true, confirmText: '替换',
+      })) return
+    }
+    setAfBusy(true); setProgress('AI 分析小说中…（抽角色 → 风格 → 分镜，约 20-60 秒）')
+    try {
+      const r = await autoFill(pid, novel, Number(sbN) || 8, afReplace, workspace)
+      setProgress(`已自动填充：${r.characters} 角色 · ${r.lora_created} 个新 LoRA · 风格已生成 · ${r.scenes_count} 分镜`)
+      await load()
+    } catch (e) { setProgress('一键分析失败：' + String(e.message || e)) }
+    finally { setAfBusy(false) }
   }
   // 角色/声音圣经
   const charOp = async (action, fields = {}) => {
@@ -1101,9 +1121,25 @@ export function ProductionPanel({ message, workspace, sessionId }) {
               <input type="checkbox" checked={sbReplace} onChange={e => setSbReplace(e.target.checked)} />替换现有分镜
             </label>
           </div>
-          <div style={{ fontSize: 10.5, color: 'var(--text-dim)', marginBottom: 8 }}>提示：先在「角色圣经」「本集风格」设好角色和风格，拆出来更统一。</div>
-          <button onClick={doStoryboard} disabled={sbBusy} style={{ ...panelBtn(sbBusy), display: 'inline-flex', alignItems: 'center', gap: 7 }}>
-            {sbBusy ? 'AI 拆分镜中…' : <><Icon.Wand size={15} />开始拆分镜</>}
+          {/* 主推：一键 AI 分析，把角色/风格/LoRA/分镜 全套填好 */}
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 6 }}>
+            <button onClick={doAutoFill} disabled={afBusy || sbBusy}
+              style={{ height: 36, padding: '0 16px', borderRadius: 8, border: 'none',
+                       background: (afBusy || sbBusy) ? 'rgba(255,255,255,0.06)' : (afBusy ? '#5254cc' : '#6366f1'),
+                       color: (afBusy || sbBusy) ? 'var(--text-muted)' : '#fff', fontSize: 13, fontWeight: 600,
+                       cursor: (afBusy || sbBusy) ? 'default' : 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+              {afBusy ? 'AI 分析中…' : '🪄 一键 AI 分析填充'}
+            </button>
+            <label style={{ fontSize: 12, display: 'inline-flex', gap: 4, alignItems: 'center', color: 'var(--text-muted)' }}>
+              <input type="checkbox" checked={afReplace} onChange={e => setAfReplace(e.target.checked)} />替换现有
+            </label>
+            <span style={{ fontSize: 11, color: 'var(--text-dim)' }}>角色 + 风格 + LoRA + 分镜，全自动</span>
+          </div>
+          {/* 次要：角色/风格已设好、只想补分镜 */}
+          <div style={{ fontSize: 10.5, color: 'var(--text-dim)', marginBottom: 6 }}>或只想补分镜（角色/风格已弄好时）：</div>
+          <button onClick={doStoryboard} disabled={sbBusy || afBusy}
+            style={{ ...miniBtn2, height: 30, padding: '0 12px' }}>
+            {sbBusy ? 'AI 拆分镜中…' : <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Icon.Wand size={13} />只拆分镜</span>}
           </button>
         </div>
       )}
