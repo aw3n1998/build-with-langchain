@@ -33,23 +33,38 @@ import { fileUrl, getVideoProviders, getImageProviders, getProject, batchGenerat
  * Interrupt：HITL 确认卡片
  * param_form：出图参数交互卡
  */
-export default function MessageBubble({ message, onResume, onSend, onGenerate, onSelectImage, onRenderVideo, workspace, sessionId, stale }) {
+export default function MessageBubble({ message, onResume, onSend, onGenerate, onSelectImage, onRenderVideo, workspace, sessionId, stale, compact }) {
   if (message.role === 'user') {
     return <UserMessage content={message.content} />
   }
   if (message.role === 'interrupt') {
     return <InterruptCard message={message} onResume={onResume} />
   }
+  // compact（浮动小助手）模式：生产类卡片不在小窗里堆，给一行轻量占位，引导去工作台。
   if (message.role === 'param_form') {
-    return <ParamCard message={message} onGenerate={onGenerate} stale={stale} />
+    return compact ? <CompactNote text="出图参数卡 —— 请到工作台面板出图" /> : <ParamCard message={message} onGenerate={onGenerate} stale={stale} />
   }
   if (message.role === 'video_param_form') {
-    return <VideoParamCard message={message} onRenderVideo={onRenderVideo} stale={stale} />
+    return compact ? <CompactNote text="出视频参数卡 —— 请到工作台面板出片" /> : <VideoParamCard message={message} onRenderVideo={onRenderVideo} stale={stale} />
   }
   if (message.role === 'production') {
-    return <ProductionPanel message={message} workspace={workspace} sessionId={sessionId} />
+    return compact ? <CompactNote text="短剧制作面板 —— 请在工作台查看" /> : <ProductionPanel message={message} workspace={workspace} sessionId={sessionId} />
   }
-  return <AssistantMessage message={message} onSend={onSend} onSelectImage={onSelectImage} stale={stale} />
+  return <AssistantMessage message={message} onSend={onSend} onSelectImage={onSelectImage} stale={stale} compact={compact} />
+}
+
+/* 浮动小助手里的生产类占位条：不渲染重卡片，引导回工作台 */
+function CompactNote({ text }) {
+  return (
+    <div style={{
+      display: 'inline-flex', alignItems: 'center', gap: 7, alignSelf: 'flex-start',
+      fontSize: 12, color: 'rgba(255,255,255,0.52)',
+      background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.2)',
+      borderRadius: 8, padding: '7px 11px',
+    }}>
+      <span>📋</span>{text}
+    </div>
+  )
 }
 
 /* ── 用户消息 ──────────────────────────────────────── */
@@ -119,7 +134,7 @@ function parsePcActions(text) {
 }
 
 /* ── AI 消息卡片 ────────────────────────────────────── */
-function AssistantMessage({ message, onSend, onSelectImage, stale }) {
+function AssistantMessage({ message, onSend, onSelectImage, stale, compact }) {
   const { main, quickReplies } = splitMsgSplit(message.content || '')
   const mainParts = parsePcActions(main)
   const quickParts = parsePcActions(quickReplies)
@@ -161,13 +176,13 @@ function AssistantMessage({ message, onSend, onSelectImage, stale }) {
         {message.streaming && <span className="cursor-blink" />}
       </div>
 
-      {/* 候选图墙：点击=放大，按钮=选图 */}
-      {message.images && message.images.length > 0 && (
+      {/* 候选图墙：点击=放大，按钮=选图（compact 小助手里不堆图，去工作台看）*/}
+      {!compact && message.images && message.images.length > 0 && (
         <ImageWall images={message.images} onSelectImage={onSelectImage} stale={stale} />
       )}
 
       {/* 成片内嵌播放器 */}
-      {message.video && (
+      {!compact && message.video && (
         <div style={{ marginTop: 14 }}>
           <video src={fileUrl(message.video.url)} controls
                  style={{ maxWidth: '100%', maxHeight: 420, borderRadius: 10,

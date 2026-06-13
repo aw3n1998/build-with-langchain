@@ -21,28 +21,10 @@ function getAgentConfigs() {
   }
 }
 
-// ── RAG 状态 ─────────────────────────────────────────────────
+// ── 应用状态（当前模型 / 模式）────────────────────────────────
 
 export async function getStatus() {
-  const r = await fetch(`${getBase()}/rag/status`)
-  if (!r.ok) throw new Error(`status ${r.status}`)
-  return r.json()
-}
-
-// ── 知识库导入 ────────────────────────────────────────────────
-
-export async function ingestText(content, sourceName = 'inline', projectId = 'default') {
-  const body = new URLSearchParams({ content, source_name: sourceName, project_id: projectId })
-  const r = await fetch(`${getBase()}/rag/ingest/text`, { method: 'POST', body })
-  if (!r.ok) throw new Error(`status ${r.status}`)
-  return r.json()
-}
-
-export async function ingestFile(file, projectId = 'default') {
-  const form = new FormData()
-  form.append('file', file)
-  form.append('project_id', projectId)
-  const r = await fetch(`${getBase()}/rag/ingest/file`, { method: 'POST', body: form })
+  const r = await fetch(`${getBase()}/status`)
   if (!r.ok) throw new Error(`status ${r.status}`)
   return r.json()
 }
