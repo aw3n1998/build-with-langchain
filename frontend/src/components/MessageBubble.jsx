@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
+import { Icon } from './icons'
 
 // 面板参数持久化：存到浏览器 localStorage，刷新后不丢，省得每次重设。
 // 只用于「设置类」状态（模型/尺寸/段数/高级参数等），不用于每镜临时态或拉取的数据。
@@ -17,6 +18,8 @@ import ReactMarkdown from 'react-markdown'
 import { fileUrl, getVideoProviders, getImageProviders, getProject, batchGenerate, batchFinish,
          pipelineSelect, streamJobEvents, uploadCandidate, updateScenePrompts,
          deleteCandidate, deleteSceneVideo, sceneUndoAppend, deleteEpisode, suggestSegmentPrompts,
+         autoStoryboard, characters as charactersApi,
+         loraCreate, loraAction, loraUploadImage,
          suggestContinuation, sceneGenerate, sceneRender, sceneAppend,
          cancelJob, listActiveJobs,
          projectStyle, sceneAdd, sceneDelete } from '../api'
@@ -673,6 +676,17 @@ export function ProductionPanel({ message, workspace, sessionId }) {
   const [showAddScene, setShowAddScene] = useState(false)
   const [newScene, setNewScene] = useState({ title: '', narration: '', image_prompt: '', motion_prompt: '', subtitle: '', lipsync: false })
   const [addBusy, setAddBusy] = useState(false)
+  // 小说→自动拆分镜
+  const [showSB, setShowSB] = useState(false)
+  const [novel, setNovel] = usePersistedState('sbNovel', '')
+  const [sbN, setSbN] = usePersistedState('sbN', 8)
+  const [sbReplace, setSbReplace] = useState(false)
+  const [sbBusy, setSbBusy] = useState(false)
+  // 角色/声音圣经
+  const [showChars, setShowChars] = useState(false)
+  const [charsBusy, setCharsBusy] = useState(false)
+  // 面板分 Tab：script(剧本) / cast(角色&LoRA) / shots(分镜) / export(导出)
+  const [tab, setTab] = usePersistedState('panelTab', 'shots')
   const [logs, setLogs] = useState([])             // GPU 实时日志行（尾部 N 条）
   const [showLogs, setShowLogs] = useState(true)
   const logEndRef = useRef(null)
@@ -828,6 +842,47 @@ export function ProductionPanel({ message, workspace, sessionId }) {
     catch (e) { setProgress('保存风格失败：' + String(e.message || e)) }
     finally { setStyleBusy(false) }
   }
+  // 小说 → 自动拆分镜（导演式，一次拆 N 镜入库）
+  const doStoryboard = async () => {
+    if (!novel.trim()) { setProgress('先粘一段小说/剧情文本'); return }
+    setSbBusy(true); setProgress('AI 导演拆分镜中…（读全文，约 10-30 秒）')
+    try {
+      const r = await autoStoryboard(pid, novel, Number(sbN) || 8, sbReplace, workspace)
+      setProgress(`已拆出 ${r.count} 个分镜${sbReplace ? '（已替换原有）' : '（接在末尾）'}，可逐镜出图了`)
+      setShowSB(false); await load()
+    } catch (e) { setProgress('拆分镜失败：' + String(e.message || e)) }
+    finally { setSbBusy(false) }
+  }
+  // 角色/声音圣经
+  const charOp = async (action, fields = {}) => {
+    setCharsBusy(true)
+    try { await charactersApi(pid, action, fields, workspace); await load() }
+    catch (e) { setProgress('角色操作失败：' + String(e.message || e)) }
+    finally { setCharsBusy(false) }
+  }
+  // 人物 LoRA 训练（界面框架）
+  const [loraBusy, setLoraBusy] = useState(false)
+  const newLora = async () => {
+    setLoraBusy(true)
+    try { await loraCreate(pid, '新角色LoRA', '', null, workspace); await load() }
+    catch (e) { setProgress('新建 LoRA 失败：' + String(e.message || e)) }
+    finally { setLoraBusy(false) }
+  }
+  const loraOp = async (action, tid) => {
+    setLoraBusy(true)
+    try { const r = await loraAction(pid, action, tid, workspace); await load()
+      const t = (r.trainings || []).find(x => x.id === tid)
+      if (action === 'train' && t && t.message) setProgress(t.message)
+    } catch (e) { setProgress('LoRA 操作失败：' + String(e.message || e)) }
+    finally { setLoraBusy(false) }
+  }
+  const loraUpload = async (tid, files) => {
+    setLoraBusy(true)
+    try { for (const f of files) await loraUploadImage(tid, f, workspace); await load() }
+    catch (e) { setProgress('传图失败：' + String(e.message || e)) }
+    finally { setLoraBusy(false) }
+  }
+
   // 自助新增 / 删除分镜（不绕 agent）
   const addScene = async () => {
     if (!newScene.image_prompt && !newScene.title) { setProgress('至少填个标题或出图提示词'); return }
@@ -861,6 +916,7 @@ export function ProductionPanel({ message, workspace, sessionId }) {
   )
   const subBox = { background: 'rgba(99,102,241,0.06)', border: '1px solid rgba(99,102,241,0.2)', borderRadius: 10, padding: '12px 14px', marginBottom: 10 }
   useEffect(() => { cancelled.current = false; load(); return () => { cancelled.current = true } }, [pid])  // eslint-disable-line
+  useEffect(() => { if (tab === 'script' && !style) loadStyle() }, [tab])  // eslint-disable-line 进剧本 tab 时加载本集风格
   useEffect(() => {
     getVideoProviders().then(d => {
       setModels(d.providers || [])
@@ -998,13 +1054,101 @@ export function ProductionPanel({ message, workspace, sessionId }) {
         <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
           {c.total} 分镜 · 已出图 {c.with_candidates} · 已选 {c.selected} · 已出片 {c.done}
         </div>
-        <button onClick={load} title="刷新" style={miniBtn}>↻</button>
-        <button onClick={() => { const v = !showStyle; setShowStyle(v); if (v && !style) loadStyle() }}
-          title="本集统一风格" style={miniBtn2}>🎨 本集风格</button>
-        <button onClick={() => setShowAddScene(v => !v)} title="自己加一个分镜" style={miniBtn2}>➕ 新增分镜</button>
+        <button onClick={load} title="刷新" style={{ ...miniBtn, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}><Icon.Refresh size={13} /></button>
       </div>
 
-      {showStyle && (
+      {/* Tab 栏：剧本 / 角色&LoRA / 分镜 / 导出 */}
+      <div style={{ display: 'flex', gap: 2, marginBottom: 14, borderBottom: '1px solid var(--border)', flexWrap: 'wrap' }}>
+        {[['script', '剧本', Icon.Script], ['cast', '角色 & LoRA', Icon.Users], ['shots', '分镜制作', Icon.Layers], ['export', '导出', Icon.Download]].map(([k, label, Ico]) => (
+          <button key={k} onClick={() => setTab(k)} style={{
+            display: 'inline-flex', alignItems: 'center', gap: 6,
+            background: 'none', border: 'none', borderBottom: tab === k ? '2px solid var(--accent, #6366f1)' : '2px solid transparent',
+            color: tab === k ? 'var(--text)' : 'var(--text-sec)', cursor: 'pointer',
+            padding: '8px 14px', fontSize: 13, fontWeight: tab === k ? 650 : 500, marginBottom: -1,
+            transition: 'color .14s',
+          }}><Ico size={15} style={{ opacity: tab === k ? 1 : 0.7 }} />{label}</button>
+        ))}
+      </div>
+
+      {tab === 'script' && (
+        <div style={subBox}>
+          <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 8 }}>
+            粘一段小说/剧情，AI 当导演自动拆成整套分镜（标题/出图词/运镜/旁白台词/对口型），自动套本集风格 + 角色外貌。
+          </div>
+          <textarea value={novel} onChange={e => setNovel(e.target.value)} rows={5}
+            placeholder="把这一集的小说/剧情粘进来…" style={{ ...inputStyle, width: '100%', resize: 'vertical', minHeight: 90 }} />
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center', margin: '8px 0' }}>
+            <label style={{ fontSize: 12, color: 'var(--text-muted)' }}>拆成
+              <input type="number" min={1} max={40} value={sbN} onChange={e => setSbN(e.target.value)}
+                style={{ ...inputStyle, width: 56, height: 28, margin: '0 4px' }} />镜</label>
+            <label style={{ fontSize: 12, display: 'inline-flex', gap: 4, alignItems: 'center' }}>
+              <input type="checkbox" checked={sbReplace} onChange={e => setSbReplace(e.target.checked)} />替换现有分镜
+            </label>
+          </div>
+          <div style={{ fontSize: 10.5, color: 'var(--text-dim)', marginBottom: 8 }}>提示：先在「角色圣经」「本集风格」设好角色和风格，拆出来更统一。</div>
+          <button onClick={doStoryboard} disabled={sbBusy} style={{ ...panelBtn(sbBusy), display: 'inline-flex', alignItems: 'center', gap: 7 }}>
+            {sbBusy ? 'AI 拆分镜中…' : <><Icon.Wand size={15} />开始拆分镜</>}
+          </button>
+        </div>
+      )}
+
+      {tab === 'cast' && (<>
+        <div style={subBox}>
+          <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 8 }}>
+            角色/声音圣经 —— 每个角色固定外貌+音色。拆分镜/出图自动用其外貌（跨镜同一个人），配音用其音色。
+          </div>
+          {(proj?.characters || []).map(c => (
+            <div key={c.id} style={{ border: '1px solid var(--border)', borderRadius: 6, padding: 8, marginBottom: 6 }}>
+              <input defaultValue={c.name} placeholder="角色名"
+                onBlur={e => e.target.value !== c.name && charOp('update', { char_id: c.id, name: e.target.value })}
+                style={{ ...inputStyle, height: 28, marginBottom: 4 }} />
+              <textarea defaultValue={c.appearance} rows={2}
+                placeholder="外貌（写明确年龄+发型+特征，如：45岁中年男，短寸花白发，左眉旧疤）"
+                onBlur={e => e.target.value !== c.appearance && charOp('update', { char_id: c.id, appearance: e.target.value })}
+                style={{ ...inputStyle, width: '100%', resize: 'vertical', marginBottom: 4 }} />
+              <div style={{ display: 'flex', gap: 6 }}>
+                <select defaultValue={c.voice || ''} onChange={e => charOp('update', { char_id: c.id, voice: e.target.value })}
+                  style={{ ...inputStyle, height: 28, flex: 1 }}>
+                  {VOICES.map(v => <option key={v.v} value={v.v}>{v.label}</option>)}
+                </select>
+                <button onClick={() => charOp('delete', { char_id: c.id })} disabled={charsBusy}
+                  style={{ ...miniBtn2, color: '#fca5a5', borderColor: 'rgba(239,68,68,0.4)' }}>删除</button>
+              </div>
+            </div>
+          ))}
+          <button onClick={() => charOp('add', { name: '新角色', appearance: '', voice: '' })} disabled={charsBusy}
+            style={{ ...panelBtn(charsBusy), display: 'inline-flex', alignItems: 'center', gap: 6 }}><Icon.Plus size={14} />添加角色</button>
+        </div>
+
+        <div style={subBox}>
+          <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 8 }}>
+            人物 LoRA 训练 —— 传同一人物 10-20 张清晰照，训出专属 LoRA，出图锁定这张脸（最稳的人物一致）。
+            <span style={{ color: '#ffb454' }}>（训练后端待接入 GPU/Colab；现可先建任务、传图、存配置。）</span>
+          </div>
+          {(proj?.lora_trainings || []).map(t => (
+            <div key={t.id} style={{ border: '1px solid var(--border)', borderRadius: 6, padding: 8, marginBottom: 6 }}>
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 4 }}>
+                <strong style={{ fontSize: 12 }}>{t.name}</strong>
+                <span style={{ fontSize: 10.5, color: 'var(--text-muted)' }}>{t.image_count} 张图 · {t.status}</span>
+                <button onClick={() => loraOp('delete', t.id)} disabled={loraBusy}
+                  style={{ ...miniBtn2, marginLeft: 'auto', color: '#fca5a5', borderColor: 'rgba(239,68,68,0.4)' }}>删除</button>
+              </div>
+              {t.message && <div style={{ fontSize: 10.5, color: '#ffb454', marginBottom: 4 }}>{t.message}</div>}
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                <label style={{ ...miniBtn2, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                  <Icon.Plus size={13} />传参考图
+                  <input type="file" accept="image/*" multiple style={{ display: 'none' }}
+                    onChange={e => { loraUpload(t.id, Array.from(e.target.files || [])); e.target.value = '' }} />
+                </label>
+                <button onClick={() => loraOp('train', t.id)} disabled={loraBusy} style={panelBtn(loraBusy)}>开始训练</button>
+              </div>
+            </div>
+          ))}
+          <button onClick={newLora} disabled={loraBusy} style={{ ...panelBtn(loraBusy), display: 'inline-flex', alignItems: 'center', gap: 6 }}><Icon.Plus size={14} />新建 LoRA 训练</button>
+        </div>
+      </>)}
+
+      {tab === 'script' && (
         <div style={subBox}>
           <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 8 }}>
             本集统一风格 —— 出图自动套用到每个分镜，全集一个调性（这就是「一集一种风格」）。
@@ -1020,6 +1164,10 @@ export function ProductionPanel({ message, workspace, sessionId }) {
         </div>
       )}
 
+      {tab === 'shots' && (<>
+      <div style={{ marginBottom: 8 }}>
+        <button onClick={() => setShowAddScene(v => !v)} style={{ ...miniBtn2, display: 'inline-flex', alignItems: 'center', gap: 5 }}><Icon.Plus size={13} />新增分镜</button>
+      </div>
       {showAddScene && (
         <div style={subBox}>
           <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 8 }}>新增一个分镜（接在本集末尾，之后可出图/出片）。</div>
@@ -1031,7 +1179,7 @@ export function ProductionPanel({ message, workspace, sessionId }) {
           <label style={{ fontSize: 12, display: 'flex', gap: 6, alignItems: 'center', margin: '4px 0 8px' }}>
             <input type="checkbox" checked={newScene.lipsync}
               onChange={e => setNewScene(s => ({ ...s, lipsync: e.target.checked }))} />
-            🗣 对口型镜头（人物开口说话，走 S2V）
+            <Icon.Mic size={13} style={{ opacity: 0.75 }} />对口型镜头（人物开口说话，走 S2V）
           </label>
           <button onClick={addScene} disabled={addBusy} style={panelBtn(addBusy)}>
             {addBusy ? '添加中…' : '添加到本集'}
@@ -1248,7 +1396,7 @@ export function ProductionPanel({ message, workspace, sessionId }) {
                 <span style={{ fontSize: 12, color: 'var(--text-sec)', flex: 1, overflow: 'hidden',
                                textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.title || '(无题)'}</span>
                 <button onClick={() => removeScene(s.scene_id)} disabled={!!busy} title="删除这个分镜（含候选图）"
-                  style={{ ...miniBtn, color: 'rgba(252,165,165,0.9)', borderColor: 'rgba(239,68,68,0.3)' }}>🗑</button>
+                  style={{ ...miniBtn, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: 'rgba(252,165,165,0.9)', borderColor: 'rgba(239,68,68,0.3)' }}><Icon.Trash size={13} /></button>
 
                 {/* 单镜独立操作：出图（随时可重出）/ 出视频（已选图后）*/}
                 {(() => {
@@ -1279,7 +1427,7 @@ export function ProductionPanel({ message, workspace, sessionId }) {
                                    color: ls ? 'rgba(94,234,212,1)' : 'var(--text-muted)' }}>
                           <input type="checkbox" checked={ls} disabled={disabled}
                             onChange={e => toggleLipsync(s.scene_id, e.target.checked)} />
-                          🗣 对口型
+                          <Icon.Mic size={12} />对口型
                         </label>
                         {!ls && (
                           <label style={{ fontSize: 11, color: 'var(--text-muted)', display: 'inline-flex',
@@ -1330,7 +1478,7 @@ export function ProductionPanel({ message, workspace, sessionId }) {
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 6, alignItems: 'center' }}>
                     <input value={appendPrompt[s.scene_id] || ''} disabled={busy || !!sceneBusy[s.scene_id]}
                       onChange={e => setAppendPrompt(p => ({ ...p, [s.scene_id]: e.target.value }))}
-                      placeholder="续段运镜提示词（可空；点✨让AI据尾帧推荐，可改）"
+                      placeholder="续段运镜提示词（可空；点「AI 推荐」据尾帧给一句，可改）"
                       style={{ ...inputStyle, flex: '1 1 160px', height: 26, fontSize: 11.5 }} />
                     <select value={appendLang[s.scene_id] || 'zh'} disabled={busy || !!sceneBusy[s.scene_id]}
                       onChange={e => setAppendLang(p => ({ ...p, [s.scene_id]: e.target.value }))}
@@ -1342,8 +1490,8 @@ export function ProductionPanel({ message, workspace, sessionId }) {
                     <button onClick={() => suggestAppendPrompt(s.scene_id)}
                       disabled={busy || !!sceneBusy[s.scene_id] || !!appendSugBusy[s.scene_id]}
                       title="据现有视频的最后一帧，AI 推荐一句续段运镜提示词（配了视觉模型则真看画面）。不用自己憋提示词、少抽卡。"
-                      style={miniAct(false)}>
-                      {appendSugBusy[s.scene_id] ? '推荐中…' : '✨AI推荐'}
+                      style={{ ...miniAct(false), display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                      {appendSugBusy[s.scene_id] ? '推荐中…' : <><Icon.Wand size={12} />AI 推荐</>}
                     </button>
                     <label style={{ fontSize: 11, color: 'var(--text-muted)', display: 'inline-flex',
                                     alignItems: 'center', gap: 3 }}
@@ -1357,16 +1505,17 @@ export function ProductionPanel({ message, workspace, sessionId }) {
                     </label>
                     <button onClick={() => runScene('append', s.scene_id)} disabled={busy || !!sceneBusy[s.scene_id]}
                       title="取现有视频最后一帧继续生成、拼到末尾，让这镜变长（可反复点，看效果再决定加多少）"
-                      style={miniAct(false, true)}>
-                      ➕ 再续一段{sceneBusy[s.scene_id] === 'append' ? `…${fmtElapsed(s.scene_id)}` : ''}
+                      style={{ ...miniAct(false, true), display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                      <Icon.Plus size={12} />再续一段{sceneBusy[s.scene_id] === 'append' ? `…${fmtElapsed(s.scene_id)}` : ''}
                     </button>
                     <button onClick={() => undoAppend(s.scene_id)} disabled={busy || !!sceneBusy[s.scene_id]}
                       title="撤销最近一次「再续一段」，成片回退到续接之前（可多次回退），然后可重新续"
                       style={{
+                        display: 'inline-flex', alignItems: 'center', gap: 4,
                         height: 26, padding: '0 12px', borderRadius: 6,
                         border: '1px solid rgba(124,108,255,0.4)', background: 'rgba(124,108,255,0.12)',
                         color: 'rgba(203,166,255,1)', fontSize: 11.5, cursor: 'pointer',
-                      }}>↩ 撤销上一段{sceneBusy[s.scene_id] === 'undo' ? '…' : ''}</button>
+                      }}><Icon.Undo size={12} />撤销上一段{sceneBusy[s.scene_id] === 'undo' ? '…' : ''}</button>
                     <button onClick={() => delSceneVideo(s.scene_id)} disabled={busy || !!sceneBusy[s.scene_id]}
                       title="删除这个分镜的成片（图还在，可重新出片）" style={{
                         height: 26, padding: '0 12px', borderRadius: 6,
@@ -1423,6 +1572,24 @@ export function ProductionPanel({ message, workspace, sessionId }) {
           )
         })}
       </div>
+      </>)}
+
+      {tab === 'export' && (
+        <div style={subBox}>
+          <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 8 }}>
+            导出 —— 全部分镜出完片后，「③ 一键出片并合成」在「分镜制作」里点；成片在这里下载。
+          </div>
+          {proj?.episode ? (
+            <div>
+              <video src={fileUrl(proj.episode.url)} controls style={{ width: '100%', borderRadius: 8, marginBottom: 8 }} />
+              <a href={fileUrl(proj.episode.url)} download style={{ ...panelBtn(false), textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 6 }}><Icon.Download size={14} />下载整集 mp4</a>
+            </div>
+          ) : (
+            <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>还没有整集成片。去「分镜制作」点「③ 一键出片并合成」。</div>
+          )}
+          <div style={{ fontSize: 10.5, color: '#ffb454', marginTop: 8 }}>平台导出预设（抖音 1080×1920 等）待补。</div>
+        </div>
+      )}
 
       {zoom && (
         <div onClick={() => setZoom(null)} style={{
@@ -1578,6 +1745,25 @@ const miniBtn = {
   width: 24, height: 24, borderRadius: 6, border: '1px solid var(--border)',
   background: 'rgba(255,255,255,0.05)', color: 'var(--text-sec)', cursor: 'pointer', fontSize: 13,
 }
+// edge-tts 常用中文音色（角色声音圣经用）
+const VOICES = [
+  { v: '', label: '默认音色' },
+  { v: 'zh-CN-YunxiNeural', label: '云希·男·活泼' },
+  { v: 'zh-CN-YunyangNeural', label: '云扬·男·沉稳' },
+  { v: 'zh-CN-YunjianNeural', label: '云健·男·浑厚' },
+  { v: 'zh-CN-XiaoxiaoNeural', label: '晓晓·女·温柔' },
+  { v: 'zh-CN-XiaoyiNeural', label: '晓伊·女·少女' },
+  { v: 'zh-CN-XiaohanNeural', label: '晓涵·女·成熟' },
+  { v: 'zh-CN-XiaomoNeural', label: '晓墨·男·清朗' },
+  // 英文音色（欧美短剧台词用英文，必须配英文嗓；edge-tts 后端可直接用这些 id）
+  { v: 'en-US-GuyNeural', label: 'EN · Guy · 男 · 年轻沉稳' },
+  { v: 'en-US-ChristopherNeural', label: 'EN · Christopher · 男 · 低沉旁白' },
+  { v: 'en-US-EricNeural', label: 'EN · Eric · 男 · 冷峻' },
+  { v: 'en-GB-RyanNeural', label: 'EN-GB · Ryan · 男 · 英式贵族' },
+  { v: 'en-US-JennyNeural', label: 'EN · Jenny · 女 · 自然' },
+  { v: 'en-US-AriaNeural', label: 'EN · Aria · 女 · 成熟' },
+  { v: 'en-GB-SoniaNeural', label: 'EN-GB · Sonia · 女 · 英式高傲' },
+]
 // 多字小按钮（本集风格 / 新增分镜等）：自动宽度 + 不换行，避免文字竖排
 const miniBtn2 = {
   height: 24, padding: '0 9px', borderRadius: 6, border: '1px solid var(--border)',

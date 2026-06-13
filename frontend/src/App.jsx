@@ -11,16 +11,22 @@ import { getStatus, chatSubmit, resumeSubmit, cancelJob, getHistory, getSessionH
          getContextUsage, compactContext, getAgents, connectJobsWS,
          initWorkspace, projectCreate, projectRename, projectDelete } from './api'
 import { ProductionPanel } from './components/MessageBubble'
+import { Icon } from './components/icons'
+import ProjectSidebar from './components/ProjectSidebar'
 
 // 每个会话独立的工作目录（互不影响）
 function loadWorkspaceMap() {
   try { return JSON.parse(localStorage.getItem('agentlab_workspaces') || '{}') } catch { return {} }
 }
-function getSessionWorkspace(sid) { return loadWorkspaceMap()[sid] || '' }
+// 会话工作目录：优先本会话的；没有则回退「上次用过的工作目录」（避免新会话/刷新后工作台空白、像"数据没了"）
+function getSessionWorkspace(sid) {
+  return loadWorkspaceMap()[sid] || localStorage.getItem('agentlab_last_workspace') || ''
+}
 function setSessionWorkspace(sid, path) {
   const m = loadWorkspaceMap()
   if (path) m[sid] = path; else delete m[sid]
   localStorage.setItem('agentlab_workspaces', JSON.stringify(m))
+  if (path) { try { localStorage.setItem('agentlab_last_workspace', path) } catch {} }  // 记成全局"上次用过"
 }
 
 function genId() {
@@ -47,6 +53,15 @@ function loadSessionId() {
   return sid
 }
 
+const studioHdrBtn = {
+  display: 'inline-flex', alignItems: 'center', gap: 6,
+  height: 32, padding: '0 13px', borderRadius: 8, border: '1px solid var(--border)',
+  background: 'rgba(255,255,255,0.05)', color: 'var(--text)', fontSize: 12.5, fontWeight: 500,
+  cursor: 'pointer', whiteSpace: 'nowrap', transition: 'background .14s, border-color .14s',
+}
+// 仅图标的方形按钮（重命名/删除）：与 studioHdrBtn 等高，正方形留白
+const studioHdrIcon = { ...studioHdrBtn, width: 32, padding: 0, justifyContent: 'center' }
+
 export default function App() {
   const [sessionId, setSessionId]         = useState(loadSessionId)
   const [messages, setMessages]           = useState([])
@@ -65,6 +80,11 @@ export default function App() {
   const [showFolderPicker, setShowFolderPicker] = useState(false)
   const [ctxUsage, setCtxUsage]           = useState(null)  // 真实上下文窗口用量
   const [agentList, setAgentList]         = useState([])    // 动态 Agent 列表（注册即出现）
+  // 视图模式：studio=短剧工作台(主舞台，默认) / chat=AI 助手对话。突出短剧、聊天退为辅助。
+  const [viewMode, setViewMode] = useState(() => {
+    try { return localStorage.getItem('agentlab.viewMode') || 'studio' } catch { return 'studio' }
+  })
+  useEffect(() => { try { localStorage.setItem('agentlab.viewMode', viewMode) } catch {} }, [viewMode])
   // 制作面板抽屉：常驻入口（小白不需要"知道要说打开面板"），自动指向当前工作目录最新项目
   const [showPanel, setShowPanel]         = useState(false)
   const [panelProjectId, setPanelProjectId] = useState(null)
@@ -567,6 +587,7 @@ export default function App() {
 
   const handleSelectSession = useCallback(async (sid) => {
     cancelActiveStream()
+    setViewMode('chat')   // 选中会话必定进对话视图，避免 studio 下静默加载却看不见
     try {
       persistSession(sid)
       const data = await getSessionHistory(sid)
@@ -610,15 +631,26 @@ export default function App() {
       background: 'var(--bg)', position: 'relative', overflow: 'hidden',
       width: '100%'
     }}>
-      {/* 历史侧边栏 */}
-      <HistorySidebar
-        currentSessionId={sessionId}
-        sessions={sessions}
-        onSelectSession={handleSelectSession}
-        onNewChat={startNewChat}
-        onDeleteSession={handleDeleteSession}
-        runningSessions={runningSessions}
-      />
+      {/* 左侧栏：按模式二选一 —— 工作台=剧集列表(点选打开)，AI 助手=会话历史。
+          解决「studio 下点会话列表没用」的语义错配。*/}
+      {viewMode === 'studio' ? (
+        <ProjectSidebar
+          projects={allProjects}
+          currentProjectId={panelProjectId}
+          onSelect={setPanelProjectId}
+          onNew={newProject}
+          onToChat={() => setViewMode('chat')}
+        />
+      ) : (
+        <HistorySidebar
+          currentSessionId={sessionId}
+          sessions={sessions}
+          onSelectSession={handleSelectSession}
+          onNewChat={startNewChat}
+          onDeleteSession={handleDeleteSession}
+          runningSessions={runningSessions}
+        />
+      )}
 
       {/* 主对话区 */}
       <div style={{
@@ -630,6 +662,53 @@ export default function App() {
         position: 'relative',
         overflow: 'hidden'
       }}>
+        {/* 🎬 短剧工作台：主舞台（默认）。聊天退为可切换的 AI 助手。*/}
+        {viewMode === 'studio' && (
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100%', minWidth: 0, overflow: 'hidden' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '13px 22px',
+                          borderBottom: '1px solid var(--border)', background: 'var(--bg)', flexWrap: 'wrap' }}>
+              {/* 当前剧集名（切换/新建由左栏剧集列表负责，顶栏只对「当前剧集」做操作，避免多处重复入口）*/}
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 9, marginRight: 4, minWidth: 0 }}>
+                <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                               width: 28, height: 28, borderRadius: 8, color: '#fff', flexShrink: 0,
+                               background: 'linear-gradient(135deg,#6366f1,#4338ca)' }}>
+                  <Icon.Clapper size={16} />
+                </span>
+                <span title={(allProjects.find(p => p.project_id === panelProjectId)?.title) || ''}
+                  style={{ fontSize: 15.5, fontWeight: 700, letterSpacing: '0.01em',
+                           color: panelProjectId ? 'var(--text)' : 'var(--text-muted)',
+                           maxWidth: 320, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {(allProjects.find(p => p.project_id === panelProjectId)?.title) || '选择或新建剧集'}
+                </span>
+              </span>
+              {panelProjectId && <button onClick={renameProject} style={studioHdrIcon} title="给当前剧集改名"><Icon.Pencil /></button>}
+              {panelProjectId && <button onClick={removeProject} style={{ ...studioHdrIcon, color: 'rgba(252,165,165,0.9)', borderColor: 'rgba(239,68,68,0.28)' }} title="删除当前剧集"><Icon.Trash /></button>}
+              <button onClick={() => setShowFolderPicker(true)} style={studioHdrBtn} title={workspace || '默认工作目录'}><Icon.Folder />工作目录</button>
+              <button onClick={() => setViewMode('chat')}
+                style={{ ...studioHdrBtn, marginLeft: 'auto', borderColor: 'rgba(99,102,241,0.45)', color: 'rgba(190,192,255,1)', background: 'rgba(99,102,241,0.10)' }}><Icon.Chat />AI 助手</button>
+            </div>
+            <div style={{ flex: 1, overflowY: 'auto', padding: '18px 22px' }}>
+              {panelProjectId ? (
+                <ProductionPanel message={{ project_id: panelProjectId }} workspace={workspace} sessionId={sessionId} />
+              ) : (
+                <div style={{ maxWidth: 520, margin: '72px auto', textAlign: 'center', color: 'var(--text-sec)' }}>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                                 width: 58, height: 58, borderRadius: 16, marginBottom: 18, color: 'rgba(190,192,255,0.9)',
+                                 background: 'rgba(99,102,241,0.10)', border: '1px solid rgba(99,102,241,0.22)' }}>
+                    <Icon.Clapper size={28} stroke={1.5} />
+                  </span>
+                  <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--text)', marginBottom: 10 }}>开始做一部短剧</div>
+                  <p style={{ fontSize: 13, lineHeight: 1.95, color: 'var(--text-sec)' }}>当前工作目录还没有剧集。点 <b style={{ color: 'var(--text)' }}>新建剧集</b> 建一个，进去用 <b style={{ color: 'var(--text)' }}>AI 拆分镜</b> 把小说一键拆成整套分镜；
+                    或先点 <b style={{ color: 'var(--text)' }}>工作目录</b> 选好素材目录。复杂需求可切到 <b style={{ color: 'var(--text)' }}>AI 助手</b> 让它帮你。</p>
+                  <button onClick={newProject} style={{ ...studioHdrBtn, padding: '0 18px', height: 36, fontSize: 13, marginTop: 16,
+                    background: 'var(--accent)', borderColor: 'var(--accent)', color: '#fff', fontWeight: 600 }}><Icon.Plus size={16} />新建剧集</button>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {viewMode === 'chat' && (<>
         <TopBar
           model={topBarModel}
           ragStatus={ragStatus}
@@ -650,6 +729,12 @@ export default function App() {
           padding: '6px 24px', fontSize: 12, color: 'var(--text-muted)',
           borderTop: '1px solid var(--border)', background: 'var(--bg)',
         }}>
+          <button onClick={() => setViewMode('studio')} title="回到短剧工作台" style={{
+            display: 'inline-flex', alignItems: 'center', gap: 5,
+            height: 24, padding: '0 11px', borderRadius: 6, marginRight: 4,
+            border: '1px solid rgba(99,102,241,0.5)', background: 'rgba(99,102,241,0.18)',
+            color: 'rgba(190,192,255,1)', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+          }}><Icon.Clapper size={13} />工作台</button>
           <span>工作目录：</span>
           <span style={{
             fontFamily: 'monospace', color: workspace ? 'rgba(134,239,172,0.9)' : 'var(--text-dim)',
@@ -688,7 +773,9 @@ export default function App() {
           onOpenWorkspace={() => setShowFolderPicker(true)}
           onCompact={handleCompact}
           agents={agentList}
+          videoOnly={ragStatus.video_agent_only !== false}
         />
+        </>)}
 
         <KnowledgePanel
           open={showKnowledge}
@@ -700,6 +787,7 @@ export default function App() {
           open={showSettings}
           onClose={() => setShowSettings(false)}
           onSaved={handleSettingsSaved}
+          videoOnly={ragStatus.video_agent_only !== false}
         />
 
         <FolderPicker
@@ -720,31 +808,18 @@ export default function App() {
               background: 'var(--bg)', borderLeft: '1px solid var(--border)',
               padding: '18px 20px', boxShadow: '-12px 0 40px rgba(0,0,0,0.5)',
             }}>
+              {/* 抽屉只做「快速查看当前剧集面板」。切换/新建/改名/删除剧集统一在「工作台」做，不在此重复一套控件。*/}
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
-                <span style={{ fontSize: 14, fontWeight: 700, color: 'rgba(255,255,255,0.85)' }}>短剧制作面板</span>
-                {allProjects.length > 0 && (
-                  <select value={panelProjectId || ''} onChange={e => setPanelProjectId(e.target.value)}
-                    title="切换工作目录里的项目（面板默认显示最新建的，可在这里选别的）"
-                    style={{ maxWidth: 340, height: 28, borderRadius: 6, fontSize: 12, cursor: 'pointer',
-                             border: '1px solid var(--border)', background: 'rgba(255,255,255,0.06)',
-                             color: 'rgba(255,255,255,0.85)', padding: '0 8px' }}>
-                    {allProjects.map(p => (
-                      <option key={p.project_id} value={p.project_id}>
-                        {(p.title || '(无题)')}（{p.scenes}镜）
-                      </option>
-                    ))}
-                  </select>
-                )}
-                {(() => {
-                  const mb = { height: 26, padding: '0 8px', borderRadius: 6, border: '1px solid var(--border)',
-                    background: 'rgba(255,255,255,0.06)', color: 'rgba(255,255,255,0.8)', fontSize: 12, cursor: 'pointer' }
-                  return (<>
-                    <button onClick={newProject} title="新建一个剧集（不用让 agent 建）" style={mb}>➕ 新建剧集</button>
-                    {panelProjectId && <button onClick={renameProject} title="给当前剧集改名" style={mb}>✎</button>}
-                    {panelProjectId && <button onClick={removeProject} title="删除当前剧集（含全部分镜）"
-                      style={{ ...mb, color: 'rgba(252,165,165,0.9)', borderColor: 'rgba(239,68,68,0.3)' }}>🗑</button>}
-                  </>)
-                })()}
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, fontSize: 14, fontWeight: 700, color: 'rgba(255,255,255,0.85)' }}>
+                  <Icon.Clapper size={15} />短剧制作面板
+                </span>
+                <button onClick={() => { setShowPanel(false); setViewMode('studio') }}
+                  title="切换/新建/管理剧集请到工作台"
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: 5, height: 26, padding: '0 10px', borderRadius: 6,
+                           border: '1px solid rgba(99,102,241,0.4)', background: 'rgba(99,102,241,0.12)',
+                           color: 'rgba(190,192,255,1)', fontSize: 12, cursor: 'pointer' }}>
+                  <Icon.Clapper size={13} />去工作台管理剧集
+                </button>
                 <button onClick={() => setShowPanel(false)} style={{
                   marginLeft: 'auto', height: 26, padding: '0 12px', borderRadius: 6,
                   border: '1px solid var(--border)', background: 'rgba(255,255,255,0.06)',

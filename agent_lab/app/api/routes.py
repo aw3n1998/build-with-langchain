@@ -65,6 +65,8 @@ class ChatRequest(BaseModel):
         default=None,
         description="本次对话的工作目录（出图/出视频落地根）；为空则用默认 agent_workspace。",
     )
+    # 多租户预留口子：toC 时由鉴权中间件自动填，按用户隔离数据/工作目录/session。现默认 None（单用户无感）。
+    user_id: str | None = Field(default=None, description="（预留）用户标识，多租户隔离用；现可不传。")
 
 
 class ResumeRequest(BaseModel):
@@ -83,6 +85,8 @@ class StatusResponse(BaseModel):
     rag_connected: bool
     chunk_count: int
     model: str
+    # 视频专用模式：True 时前端隐藏多 agent 选择器/配置等误导性 UI（后端基础设施仍保留，供切回多 agent）。
+    video_agent_only: bool = True
 
 
 # ── 工具函数 ────────────────────────────────────────────────────
@@ -291,6 +295,7 @@ async def rag_status():
         rag_connected=pipeline.is_connected if pipeline else False,
         chunk_count=pipeline.chunk_count if pipeline else 0,
         model=settings.MODEL_NAME,
+        video_agent_only=getattr(settings, "VIDEO_AGENT_ONLY", True),
     )
 
 
@@ -920,6 +925,7 @@ async def pipeline_project(project_id: str, workspace: str | None = None):
             "narration": s.get("narration") or "",
             "subtitle": s.get("subtitle") or "",
             "lipsync": bool(s.get("lipsync")),
+            "voice": s.get("voice") or "",
             "image_prompt": s.get("image_prompt") or "",
             "motion_prompt": s.get("motion_prompt") or "",
             "candidates": cands,
@@ -931,9 +937,14 @@ async def pipeline_project(project_id: str, workspace: str | None = None):
                       if (s.get("video_path") and os.path.exists(vlocal)) else None),
         })
     episode = os.path.join(vdir, f"episode_{project_id}.mp4")
+    characters = store.list_characters(project_id) if hasattr(store, "list_characters") else []
+    loras = store.list_lora_trainings(project_id) if hasattr(store, "list_lora_trainings") else []
     return {
         "project_id": project_id, "title": st["project"].get("title") or "",
         "scenes": scenes,
+        "characters": characters,
+        "lora_trainings": loras,
+        "style": (store.get_project_style(project_id) if hasattr(store, "get_project_style") else {}),
         "counts": {
             "total": len(scenes),
             "with_candidates": sum(1 for s in scenes if s["candidates"]),
@@ -1076,6 +1087,7 @@ class ScenePromptsRequest(BaseModel):
     lipsync: bool | None = None        # 对口型(S2V)开关；None=不改
     title: str | None = None           # 分镜标题；None=不改
     scene_number: int | None = None    # 镜号；None=不改
+    voice: str | None = None           # 这一镜 TTS 音色(角色圣经)；None=不改
 
 
 @router.post("/pipeline/scene_prompts")
@@ -1093,10 +1105,13 @@ async def pipeline_scene_prompts(req: ScenePromptsRequest):
         title=req.title, scene_number=req.scene_number)
     if req.lipsync is not None:
         s = store.set_scene_lipsync(req.scene_id, req.lipsync)
+    if req.voice is not None:
+        s = store.set_scene_voice(req.scene_id, req.voice)
     return {"scene_id": s["id"], "image_prompt": s.get("image_prompt") or "",
             "motion_prompt": s.get("motion_prompt") or "", "narration": s.get("narration") or "",
             "subtitle": s.get("subtitle") or "", "lipsync": bool(s.get("lipsync")),
-            "title": s.get("title") or "", "scene_number": s.get("scene_number")}
+            "title": s.get("title") or "", "scene_number": s.get("scene_number"),
+            "voice": s.get("voice") or ""}
 
 
 # ── 剧集（项目）管理 + 每集风格 + 分镜 增/删（面板自助，不绕 agent）──
@@ -1213,6 +1228,161 @@ async def pipeline_scene_delete(req: SceneDeleteRequest):
     if not ok:
         raise HTTPException(status_code=404, detail="分镜不存在")
     return {"deleted": True, "scene_id": req.scene_id}
+
+
+class AutoStoryboardRequest(BaseModel):
+    workspace: str | None = None
+    project_id: str
+    novel_text: str
+    scenes: int = 8           # 想拆几镜
+    replace: bool = False     # true=先清空现有分镜再拆；false=接在现有后面
+
+
+@router.post("/pipeline/auto_storyboard")
+async def pipeline_auto_storyboard(req: AutoStoryboardRequest):
+    """小说 → 自动拆分镜：LLM 当导演一次拆成 N 镜并入库（带本集统一风格 + 角色圣经）。"""
+    from agent_lab.app.pipeline.storyboard import breakdown_storyboard
+    store = _ws_store(req.workspace)
+    if not store.get_project(req.project_id):
+        raise HTTPException(status_code=404, detail="项目不存在")
+    style = (store.get_project_style(req.project_id) or {}).get("style_prompt") or ""
+    chars = store.list_characters(req.project_id) if hasattr(store, "list_characters") else []
+    n = max(1, min(int(req.scenes or 8), 40))     # 上限保护，避免一次拆太多
+    scenes = await breakdown_storyboard(req.novel_text or "", n, style=style, characters=chars)
+    if req.replace:
+        for s in store.list_scenes(req.project_id):
+            store.delete_scene(s["id"])
+    base = 0 if req.replace else max((s["scene_number"] for s in store.list_scenes(req.project_id)), default=0)
+    # 顺手把小说原文留在项目里（可重拆/存档）
+    if req.novel_text and hasattr(store, "set_project_novel"):
+        try:
+            store.set_project_novel(req.project_id, req.novel_text)
+        except Exception:  # noqa: BLE001
+            pass
+    created = []
+    voice_of = {c.get("name"): c.get("voice") for c in chars} if chars else {}
+    for i, sc in enumerate(scenes, 1):
+        row = store.add_scene(req.project_id, base + i, narration=sc["narration"],
+                              image_prompt=sc["image_prompt"], motion_prompt=sc["motion_prompt"],
+                              title=sc["title"], subtitle=sc["subtitle"])
+        if sc.get("lipsync"):
+            store.set_scene_lipsync(row["id"], True)
+        v = voice_of.get(sc.get("character"))
+        if v and hasattr(store, "set_scene_voice"):
+            store.set_scene_voice(row["id"], v)
+        created.append({"scene_id": row["id"], "scene_number": row["scene_number"], "title": row.get("title") or ""})
+    return {"project_id": req.project_id, "created": created, "count": len(created)}
+
+
+class CharacterRequest(BaseModel):
+    workspace: str | None = None
+    project_id: str
+    action: str = "list"          # list / add / update / delete
+    char_id: str | None = None
+    name: str | None = None
+    appearance: str | None = None
+    voice: str | None = None      # edge-tts 音色名，如 zh-CN-YunxiNeural
+
+
+@router.post("/pipeline/characters")
+async def pipeline_characters(req: CharacterRequest):
+    """角色/声音圣经的增删改查（每剧：名字 + 外貌 + 固定 TTS 音色）。返回最新角色列表。"""
+    store = _ws_store(req.workspace)
+    if not store.get_project(req.project_id):
+        raise HTTPException(status_code=404, detail="项目不存在")
+    act = (req.action or "list").lower()
+    if act == "add":
+        store.add_character(req.project_id, req.name or "", req.appearance or "", req.voice or "")
+    elif act == "update" and req.char_id:
+        store.update_character(req.char_id, name=req.name, appearance=req.appearance, voice=req.voice)
+    elif act == "delete" and req.char_id:
+        store.delete_character(req.char_id)
+    return {"project_id": req.project_id, "characters": store.list_characters(req.project_id)}
+
+
+# ── 人物 LoRA 训练（界面框架 + 门控；实际训练等 Colab 训练后端接入）──
+def _lora_dir(tid: str) -> str:
+    from agent_lab.app.pipeline.runtime import agent_dir
+    d = os.path.join(agent_dir(), "lora_train", tid)
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
+class LoraCreateRequest(BaseModel):
+    workspace: str | None = None
+    project_id: str
+    name: str = "新角色LoRA"
+    trigger_word: str = ""
+    char_id: str | None = None
+
+
+@router.post("/pipeline/lora_create")
+async def pipeline_lora_create(req: LoraCreateRequest):
+    """新建一个人物 LoRA 训练任务（之后往里传参考图、再开训）。"""
+    store = _ws_store(req.workspace)
+    if not store.get_project(req.project_id):
+        raise HTTPException(status_code=404, detail="项目不存在")
+    t = store.add_lora_training(req.project_id, req.name or "新角色LoRA",
+                                req.trigger_word or "", req.char_id or "")
+    _lora_dir(t["id"])
+    return {"training": t}
+
+
+@router.post("/pipeline/lora_upload_image")
+async def pipeline_lora_upload_image(training_id: str = Form(...), workspace: str = Form(default=""),
+                                     file: UploadFile = File(...)):
+    """往某 LoRA 训练任务里传一张参考图（同一人物多角度，建议 10-20 张）。"""
+    import pathlib
+    from uuid import uuid4
+    suffix = pathlib.Path(file.filename or "").suffix.lower()
+    if suffix not in {".png", ".jpg", ".jpeg", ".webp"}:
+        raise HTTPException(status_code=400, detail=f"不支持的图片类型 {suffix}（png/jpg/webp）")
+    store = _ws_store(workspace or None)
+    if not store.get_lora_training(training_id):
+        raise HTTPException(status_code=404, detail="训练任务不存在")
+    d = _lora_dir(training_id)
+    name = f"{uuid4().hex[:8]}{suffix}"
+    with open(os.path.join(d, name), "wb") as f:
+        f.write(await file.read())
+    cnt = len([x for x in os.listdir(d) if x.lower().endswith((".png", ".jpg", ".jpeg", ".webp"))])
+    store.update_lora_training(training_id, image_count=cnt)
+    from urllib.parse import quote as _quote
+    return {"training_id": training_id, "image_count": cnt,
+            "url": f"/api/file?path={_quote(os.path.join(d, name))}"}
+
+
+class LoraActionRequest(BaseModel):
+    workspace: str | None = None
+    project_id: str
+    training_id: str | None = None
+    action: str = "list"          # list / train / delete
+
+
+@router.post("/pipeline/lora_trainings")
+async def pipeline_lora_trainings(req: LoraActionRequest):
+    """LoRA 训练任务的列表 / 开训 / 删除。开训是门控的：训练后端(LORA_TRAIN_ENDPOINT)没接入时只暂存。"""
+    store = _ws_store(req.workspace)
+    if not store.get_project(req.project_id):
+        raise HTTPException(status_code=404, detail="项目不存在")
+    act = (req.action or "list").lower()
+    if act == "delete" and req.training_id:
+        store.delete_lora_training(req.training_id)
+    elif act == "train" and req.training_id:
+        t = store.get_lora_training(req.training_id)
+        if not t:
+            raise HTTPException(status_code=404, detail="训练任务不存在")
+        if int(t.get("image_count") or 0) < 5:
+            store.update_lora_training(req.training_id, status="DRAFT",
+                                       message="参考图太少：至少 5 张，建议 10-20 张同一人物多角度清晰照。")
+        elif not settings.LORA_TRAIN_ENDPOINT:
+            store.update_lora_training(
+                req.training_id, status="PENDING_BACKEND", steps=settings.LORA_TRAIN_STEPS,
+                message="训练后端未接入（等 Colab）。图片+配置已暂存，Colab 训练服务接好后一键开训。")
+        else:
+            # TODO: 真正派发到 LORA_TRAIN_ENDPOINT(Colab 训练服务)；现框架先标 QUEUED
+            store.update_lora_training(req.training_id, status="QUEUED",
+                                       steps=settings.LORA_TRAIN_STEPS, message="已派发到训练后端，排队中。")
+    return {"project_id": req.project_id, "trainings": store.list_lora_trainings(req.project_id)}
 
 
 class SuggestSegmentPromptsRequest(BaseModel):

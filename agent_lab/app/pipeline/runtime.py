@@ -21,6 +21,10 @@ _workspace: ContextVar[str | None] = ContextVar("np2v_workspace", default=None)
 # 曾经用过的工作目录根集合（供 /api/file 静态服图做安全校验，跨请求共享）。
 _known_roots: set[str] = set()
 
+# 多租户预留口子：user_id -> 允许的工作目录集合。toC 时用它做"用户只能进自己目录"的名单制越权校验。
+# 现为空、不启用（单用户无感）。
+_user_workspaces: dict[str, set[str]] = {}
+
 
 def default_workspace() -> str:
     """没显式指定时的默认工作目录。"""
@@ -30,12 +34,17 @@ def default_workspace() -> str:
     return os.path.abspath(os.path.join(os.getcwd(), "agent_workspace"))
 
 
-def set_workspace(path: str | None):
+def set_workspace(path: str | None, user_id: str | None = None):
     """设置本请求工作目录，返回 token（可用于 reset，通常不需要）。
 
     显式指定工作目录时**立即创建 .agent 结构**，让用户一选目录就能看到它生效，
     而不是等到建项目/出图才懒创建。
+
+    user_id（预留口子）：toC 多租户时传入，做"该用户只能进自己目录"的越权校验。
+    现默认 None，不启用——单用户行为完全不变。
     """
+    # TODO(toC): user_id 不为 None 时，校验 abs_path 属于 _user_workspaces.get(user_id, set())，否则拒绝(防越权)；
+    #            首次进入时把目录加进该用户的名单。
     abs_path = os.path.abspath(path) if path else None
     if abs_path:
         _known_roots.add(os.path.realpath(abs_path))

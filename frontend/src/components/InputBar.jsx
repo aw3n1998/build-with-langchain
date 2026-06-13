@@ -54,7 +54,7 @@ function writeSupCfg(patch) {
  */
 export default function InputBar({ onSend, disabled, agent, onAgentChange,
                                    onNewChat, onClearChat, onOpenWorkspace, onCompact,
-                                   agents, onStop }) {
+                                   agents, onStop, videoOnly = false }) {
   const [value, setValue] = useState('')
   const [slashIdx, setSlashIdx] = useState(0)
   const textareaRef = useRef(null)
@@ -186,7 +186,9 @@ export default function InputBar({ onSend, disabled, agent, onAgentChange,
           </select>
         </div>
 
-        {/* Agent 选择器 */}
+        {/* Agent 选择器：视频专用模式下隐藏（后端会把所有请求路由到 video agent，选了也无效，避免误导）。
+            agents/onAgentChange 链路保留，切回多 agent 模式自动恢复。*/}
+        {!videoOnly && (
         <div style={{
           display: 'flex', gap: 5,
           marginBottom: 8,
@@ -241,6 +243,7 @@ export default function InputBar({ onSend, disabled, agent, onAgentChange,
             — {activeAgent.desc}
           </span>
         </div>
+        )}
 
         {/* slash 命令菜单 */}
         {showSlash && slashMatches.length > 0 && (

@@ -246,7 +246,8 @@ def _assemble_in(work: str, clips: list[dict], out_path: str, ff: str,
             out_dur, freeze = vd, 0.0     # 用片子自带音轨，时长以视频为准，不冻结
         else:
             mp3 = os.path.join(work, f"narr_{i}.mp3")
-            has_narr = bool(narration) and _tts(narration, mp3, voice)
+            v = (c.get("voice") or "").strip() or voice   # 每镜音色(角色圣经)优先，否则全集默认
+            has_narr = bool(narration) and _tts(narration, mp3, v)
             ad = _duration(mp3) if has_narr else 0.0
             out_dur = max(vd, ad + 0.3) if has_narr else vd      # 旁白略留尾气口
             freeze = max(0.0, out_dur - vd)

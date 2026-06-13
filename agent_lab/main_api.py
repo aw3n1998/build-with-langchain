@@ -98,6 +98,30 @@ app.add_middleware(
 # ── 注册路由 ─────────────────────────────────────────────────────
 app.include_router(router, prefix="/api")
 
+# ── 对外开放 API(/api/v1)：独立 router + APIKey 鉴权（预留口子，默认放行）──
+try:
+    from agent_lab.app.api.v1_public import router as public_router
+    app.include_router(public_router)        # 自带 /api/v1 前缀
+except Exception as _e:  # noqa: BLE001 - 公开 API 出问题不应拖垮内部面板
+    import logging
+    logging.getLogger("agent_lab").warning("公开 API(/api/v1) 未加载: %s", _e)
+
+# ── serve 前端静态产物（预留口子）：让单端口能跑整套 UI（生产/toC）。──
+# 必须在 include_router 之后挂，确保 /api、/api/v1 优先匹配；目录不存在则自动跳过(开发态用 vite dev)。
+try:
+    import os as _os
+    from agent_lab.app.core.config import settings as _st
+    _dist = _st.FRONTEND_DIST_DIR if _os.path.isabs(_st.FRONTEND_DIST_DIR) \
+        else _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))), _st.FRONTEND_DIST_DIR)
+    if _st.SERVE_FRONTEND and _os.path.isdir(_dist) and _os.path.exists(_os.path.join(_dist, "index.html")):
+        from fastapi.staticfiles import StaticFiles
+        app.mount("/", StaticFiles(directory=_dist, html=True), name="frontend")
+        import logging
+        logging.getLogger("agent_lab").info("已挂载前端静态目录: %s", _dist)
+except Exception as _e:  # noqa: BLE001
+    import logging
+    logging.getLogger("agent_lab").warning("前端静态挂载跳过: %s", _e)
+
 
 # ── 本地直接运行 ─────────────────────────────────────────────────
 if __name__ == "__main__":

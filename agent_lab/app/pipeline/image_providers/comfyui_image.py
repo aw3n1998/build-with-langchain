@@ -32,6 +32,24 @@ if TYPE_CHECKING:
 logger = get_logger("pipeline.image_providers.comfyui_image")
 
 
+def _strip_lora_node(graph: dict) -> dict:
+    """没配 LoRA 时：删掉 t2i 模板里的 LoraLoader(节点"13")，并把所有对它的引用
+    回退到原始底模/CLIP —— ["13",0]→["10",0](model)、["13",1]→["11",1?]。
+    LoraLoader 的 clip 输出对应 DualCLIPLoader 的 clip(["11",0])。"""
+    g = {k: v for k, v in graph.items() if k != "13"}
+
+    def fix(x):
+        if isinstance(x, list) and len(x) == 2 and x[0] == "13":
+            return ["10", 0] if x[1] == 0 else ["11", 0]
+        if isinstance(x, dict):
+            return {k: fix(v) for k, v in x.items()}
+        if isinstance(x, list):
+            return [fix(v) for v in x]
+        return x
+
+    return fix(g)
+
+
 class ComfyUIImageProvider(ImageProvider):
     # 默认元信息仅用于独立测试；正式注册时由 image_providers/__init__ 顶替成公开模型名
     # （如 name="flux", display_name="FLUX (SSH)"），用户因此看不到「ComfyUI」字样。
@@ -92,6 +110,10 @@ class ComfyUIImageProvider(ImageProvider):
         client_id = f"agentlab-img-{os.getpid()}-{int(t0)}"
         local_paths: list[str] = []
         with httpx.Client() as client:
+            # 人物 LoRA：项目/工作目录配了 flux_lora 才注入 %LORA%（只取文件名，匹配 ComfyUI/models/loras/）。
+            # 没配则删掉模板里的 LoraLoader 节点（空 %LORA% 会被 ComfyUI 当成找不到的 lora 直接报错）。
+            lora = (params.get("flux_lora") or "").strip()
+            use_lora = bool(lora) and lora.lower() != "none"
             for i in range(n):
                 seed = (seed0 + i) % 2_000_000_000
                 mapping = {
@@ -100,7 +122,11 @@ class ComfyUIImageProvider(ImageProvider):
                     "%WIDTH%": width, "%HEIGHT%": height,
                     "%STEPS%": steps, "%SEED%": seed,
                 }
+                if use_lora:
+                    mapping["%LORA%"] = os.path.basename(lora)
                 graph = ch.fill_template(template, mapping)
+                if not use_lora:
+                    graph = _strip_lora_node(graph)
                 prompt_id = ch.submit(client, base, graph, client_id)
                 log_bus.emit(f"[出图] 第 {i + 1}/{n} 张已提交（seed={seed}），等待出图…")
                 outputs = ch.wait(client, base, prompt_id, label="出图")

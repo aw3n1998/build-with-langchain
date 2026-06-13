@@ -14,6 +14,15 @@ class Settings(BaseSettings):
     OPENAI_API_BASE: str = "https://api.deepseek.com/v1"
     MODEL_NAME: str = "deepseek-chat"
     EMBEDDING_MODEL_NAME: str = "text-embedding-3-small"
+    # 专用视频 Agent：聊天直达视频 Agent，不再过 supervisor 多路选择（功能专一）。false=恢复多 Agent 路由。
+    VIDEO_AGENT_ONLY: bool = True
+    # ── toC / 对外 API 预留口子（全部默认放行/不启用，不影响现有单用户面板）──
+    # 对外公开 API(/api/v1)的 API-Key 白名单。空=不校验(默认放行，开发/单用户无感)；填了才要求 X-API-Key。
+    PUBLIC_API_KEYS: str = ""           # 逗号分隔多个 key，如 "key1,key2"
+    # 前端静态产物目录(yarn build 输出)。后端按需挂载，让单端口能 serve 整套 UI（生产/toC 用）。
+    FRONTEND_DIST_DIR: str = "agent_lab/static"
+    SERVE_FRONTEND: bool = True         # 目录存在才挂；缺了自动跳过，不报错
+    WEBHOOK_TIMEOUT: int = 15           # 将来 webhook 回调超时(秒)，现仅占位
 
     # 网络高级配置
     SKIP_SSL_VERIFY: bool = True
@@ -51,6 +60,9 @@ class Settings(BaseSettings):
     FLUX_OFFLOAD: str = "model"                      # model=快(压线24G)；sequential=慢但最稳
     # 出图模型解耦：默认用哪个出图 Provider（注册名：flux / comfyui-img）
     IMAGE_PROVIDER_DEFAULT: str = "flux"
+    # 人物 LoRA 训练：门控。空=训练后端未接入(只暂存图片+配置，不真跑)；填了 Colab/服务器训练服务地址才真训。
+    LORA_TRAIN_ENDPOINT: str = ""        # 训练后端接入点(等 Colab 起训练服务后填)
+    LORA_TRAIN_STEPS: int = 1200         # 默认训练步数
     # 出图前把中文 image_prompt 自动翻成英文（FLUX-dev 读不懂中文，会退化成动漫人像）。
     # 仅对 prompt_lang=="en" 的出图模型生效；对用户隐形。要关：.env 里设 IMAGE_PROMPT_AUTOTRANSLATE=false
     IMAGE_PROMPT_AUTOTRANSLATE: bool = True

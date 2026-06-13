@@ -1,22 +1,23 @@
 {
+  "_README": "Wan2.2-I2V-A14B 双专家(高噪+低噪)GGUF 图生视频模板 — API 格式。占位符 %IMAGE% %PROMPT% %NEG_PROMPT% %WIDTH% %HEIGHT% %FRAMES% %FPS% 由 comfy_http.fill_template 填充。A100-40GB:两专家各 Q5_K_M≈10.8GB,串行加载。首跑已去掉 SageAttention 提速补丁(Colab 上 KJNodes/Triton 易编译失败);要提速再装 ComfyUI-KJNodes 并在 37/41 后各插一个 PathchSageAttentionKJ。步数硬编码 20、高低噪 50/50 切于第10步(改 63/64 的 end_at_step/start_at_step 可调)。",
   "37": {
     "class_type": "UnetLoaderGGUF",
-    "_meta": { "title": "模型(UNet·GGUF量化) — 需装 ComfyUI-GGUF；换成你的 .gguf 权重" },
-    "inputs": { "unet_name": "wan2.2-i2v-14B-Q4_K_M.gguf" }
+    "_meta": { "title": "高噪专家(0→10步) — 需装 ComfyUI-GGUF" },
+    "inputs": { "unet_name": "Wan2.2-I2V-A14B-HighNoise-Q5_K_M.gguf" }
   },
-  "60": {
-    "class_type": "PathchSageAttentionKJ",
-    "_meta": { "title": "SageAttention 提速补丁 — 需装 ComfyUI-KJNodes。注意 class_type 是上游本身的拼写错误(Pat-h-ch)，别改成 Patch，否则节点找不到" },
-    "inputs": { "model": ["37", 0], "sage_attention": "auto" }
+  "41": {
+    "class_type": "UnetLoaderGGUF",
+    "_meta": { "title": "低噪专家(10→end步)" },
+    "inputs": { "unet_name": "Wan2.2-I2V-A14B-LowNoise-Q5_K_M.gguf" }
   },
   "38": {
     "class_type": "CLIPLoader",
-    "_meta": { "title": "文本编码器(CLIP/T5·fp8 已够省) — 也可换 CLIPLoaderGGUF" },
+    "_meta": { "title": "文本编码器 umt5(fp8)" },
     "inputs": { "clip_name": "umt5_xxl_fp8_e4m3fn_scaled.safetensors", "type": "wan", "device": "default" }
   },
   "39": {
     "class_type": "VAELoader",
-    "_meta": { "title": "VAE" },
+    "_meta": { "title": "VAE (wan2.2)" },
     "inputs": { "vae_name": "wan2.2_vae.safetensors" }
   },
   "6": {
@@ -36,7 +37,7 @@
   },
   "55": {
     "class_type": "WanImageToVideo",
-    "_meta": { "title": "图生视频 i2v" },
+    "_meta": { "title": "图生视频 i2v(核心自带,无需 WanVideoWrapper)" },
     "inputs": {
       "positive": ["6", 0],
       "negative": ["7", 0],
@@ -48,35 +49,57 @@
       "start_image": ["52", 0]
     }
   },
-  "3": {
-    "class_type": "KSampler",
-    "_meta": { "title": "采样 KSampler — model 接 SageAttention 补丁后的输出(60)" },
+  "63": {
+    "class_type": "KSamplerAdvanced",
+    "_meta": { "title": "高噪采样 0→10(add_noise=enable, 余噪传给低噪段)" },
     "inputs": {
-      "model": ["60", 0],
+      "model": ["37", 0],
       "positive": ["55", 0],
       "negative": ["55", 1],
       "latent_image": ["55", 2],
-      "seed": "%SEED%",
-      "steps": "%STEPS%",
+      "add_noise": "enable",
+      "noise_seed": "%SEED%",
+      "steps": 20,
       "cfg": 5.0,
       "sampler_name": "uni_pc",
       "scheduler": "simple",
-      "denoise": 1.0
+      "start_at_step": 0,
+      "end_at_step": 10,
+      "return_with_leftover_noise": "enable"
+    }
+  },
+  "64": {
+    "class_type": "KSamplerAdvanced",
+    "_meta": { "title": "低噪采样 10→end(add_noise=disable)" },
+    "inputs": {
+      "model": ["41", 0],
+      "positive": ["55", 0],
+      "negative": ["55", 1],
+      "latent_image": ["63", 0],
+      "add_noise": "disable",
+      "noise_seed": "%SEED%",
+      "steps": 20,
+      "cfg": 5.0,
+      "sampler_name": "uni_pc",
+      "scheduler": "simple",
+      "start_at_step": 10,
+      "end_at_step": 10000,
+      "return_with_leftover_noise": "disable"
     }
   },
   "8": {
     "class_type": "VAEDecode",
-    "_meta": { "title": "解码 VAEDecode" },
-    "inputs": { "samples": ["3", 0], "vae": ["39", 0] }
+    "_meta": { "title": "解码" },
+    "inputs": { "samples": ["64", 0], "vae": ["39", 0] }
   },
   "57": {
     "class_type": "VHS_VideoCombine",
-    "_meta": { "title": "合成 mp4 (Video Helper Suite)" },
+    "_meta": { "title": "合成 mp4 (VideoHelperSuite)" },
     "inputs": {
       "images": ["8", 0],
       "frame_rate": "%FPS%",
       "loop_count": 0,
-      "filename_prefix": "agentlab_i2v",
+      "filename_prefix": "agentlab_i2v_a14b",
       "format": "video/h264-mp4",
       "pix_fmt": "yuv420p",
       "crf": 19,

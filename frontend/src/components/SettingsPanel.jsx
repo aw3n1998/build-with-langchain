@@ -43,7 +43,10 @@ function cfgSummary(c, agentId) {
  *         preset chips + Model + API Base URL + API Key
  * 所有配置写 localStorage，下次发消息时即生效（per-request）。
  */
-export default function SettingsPanel({ open, onClose, onSaved }) {
+export default function SettingsPanel({ open, onClose, onSaved, videoOnly = false }) {
+  // 视频专用模式：只暴露 supervisor 这一个 LLM 配置（视频 agent 用它的模型）；
+  // code/file/general/shell/batch 在该模式下永不执行，配了也误导 —— 隐藏但保留状态/链路。
+  const visibleAgents = videoOnly ? AGENTS.filter(a => a.id === 'supervisor') : AGENTS
   const [endpoint, setEndpoint] = useState('')
   // agentCfgs: { supervisor: {model,api_base,api_key}, code: {...}, ... }
   const [agentCfgs, setAgentCfgs] = useState(() =>
@@ -178,18 +181,21 @@ export default function SettingsPanel({ open, onClose, onSaved }) {
             <div style={{ padding: '0 16px 8px' }}>
               <p style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em',
                           color: 'var(--text-dim)', textTransform: 'uppercase' }}>
-                Agent LLM Configuration
+                {videoOnly ? '模型配置' : 'Agent LLM Configuration'}
               </p>
               <p style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 3 }}>
-                Each agent can use a different model. Sub-agents fall back to Supervisor if not set.
+                {videoOnly
+                  ? '短剧的拆分镜 / 旁白 / 对话都用这个模型（留空走 .env 默认）。'
+                  : 'Each agent can use a different model. Sub-agents fall back to Supervisor if not set.'}
               </p>
             </div>
 
-            {AGENTS.map(a => {
+            {visibleAgents.map(a => {
               const cfg = agentCfgs[a.id]
               const isOpen = !!expanded[a.id]
               const isEmpty = cfgIsEmpty(cfg)
               const summary = cfgSummary(cfg, a.id)
+              const label = (videoOnly && a.id === 'supervisor') ? '对话 / 导演模型' : a.label
 
               return (
                 <div key={a.id}>
@@ -217,7 +223,7 @@ export default function SettingsPanel({ open, onClose, onSaved }) {
                     <span style={{ fontSize: 12, fontWeight: 500,
                                    color: isEmpty ? 'var(--text-muted)' : 'rgba(255,255,255,0.82)',
                                    flex: 1, textAlign: 'left' }}>
-                      {a.label}
+                      {label}
                     </span>
 
                     {/* 配置摘要 */}

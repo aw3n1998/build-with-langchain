@@ -9,7 +9,8 @@
  */
 
 function getBase() {
-  return localStorage.getItem('agentlab_endpoint') || '/api'
+  // 三态统一(预留口子)：localStorage 自定义 > 后端 index.html 注入的 window.API_BASE(生产embed) > /api(开发走 Vite proxy)
+  return localStorage.getItem('agentlab_endpoint') || (typeof window !== 'undefined' && window.API_BASE) || '/api'
 }
 
 function getAgentConfigs() {
@@ -282,6 +283,47 @@ export async function deleteEpisode(projectId, workspace = null) {
   })
   if (!r.ok) throw new Error(`status ${r.status}`)
   return r.json()
+}
+
+// 小说 → 自动拆分镜（LLM 当导演一次拆 N 镜入库）
+export async function autoStoryboard(projectId, novelText, scenes, replace, workspace = null) {
+  const r = await fetch(`${getBase()}/pipeline/auto_storyboard`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ project_id: projectId, novel_text: novelText, scenes, replace, workspace }),
+  })
+  if (!r.ok) throw new Error(`status ${r.status}`)
+  return r.json()
+}
+// 角色/声音圣经：action=list/add/update/delete
+export async function characters(projectId, action, fields = {}, workspace = null) {
+  const r = await fetch(`${getBase()}/pipeline/characters`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ project_id: projectId, action, workspace, ...fields }),
+  })
+  if (!r.ok) throw new Error(`status ${r.status}`)
+  return r.json()
+}
+
+// 人物 LoRA 训练（界面框架；实际训练待 Colab 接入）
+export async function loraCreate(projectId, name, triggerWord, charId, workspace = null) {
+  const r = await fetch(`${getBase()}/pipeline/lora_create`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ project_id: projectId, name, trigger_word: triggerWord, char_id: charId, workspace }),
+  })
+  if (!r.ok) throw new Error(`status ${r.status}`); return r.json()
+}
+export async function loraAction(projectId, action, trainingId = null, workspace = null) {
+  const r = await fetch(`${getBase()}/pipeline/lora_trainings`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ project_id: projectId, action, training_id: trainingId, workspace }),
+  })
+  if (!r.ok) throw new Error(`status ${r.status}`); return r.json()
+}
+export async function loraUploadImage(trainingId, file, workspace = null) {
+  const fd = new FormData()
+  fd.append('training_id', trainingId); fd.append('workspace', workspace || ''); fd.append('file', file)
+  const r = await fetch(`${getBase()}/pipeline/lora_upload_image`, { method: 'POST', body: fd })
+  if (!r.ok) throw new Error(`status ${r.status}`); return r.json()
 }
 
 // 更新分镜提示词/旁白（AI 写的提示词可见可改）

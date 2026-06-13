@@ -71,6 +71,7 @@ CREATE TABLE IF NOT EXISTS scenes (
     lipsync       INTEGER NOT NULL DEFAULT 0,
     image_prompt  TEXT NOT NULL DEFAULT '',
     motion_prompt TEXT NOT NULL DEFAULT '',
+    voice         TEXT NOT NULL DEFAULT '',
     state         TEXT NOT NULL DEFAULT 'DRAFT',
     selected_asset_id TEXT,
     video_path    TEXT,
@@ -79,6 +80,32 @@ CREATE TABLE IF NOT EXISTS scenes (
 );
 CREATE INDEX IF NOT EXISTS idx_scenes_project ON scenes(project_id);
 CREATE INDEX IF NOT EXISTS idx_scenes_state   ON scenes(state);
+
+CREATE TABLE IF NOT EXISTS characters (
+    id          TEXT PRIMARY KEY,
+    project_id  TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    name        TEXT NOT NULL DEFAULT '',
+    appearance  TEXT NOT NULL DEFAULT '',
+    voice       TEXT NOT NULL DEFAULT '',
+    created_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_characters_project ON characters(project_id);
+
+CREATE TABLE IF NOT EXISTS lora_trainings (
+    id           TEXT PRIMARY KEY,
+    project_id   TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    name         TEXT NOT NULL DEFAULT '',
+    trigger_word TEXT NOT NULL DEFAULT '',
+    char_id      TEXT,
+    status       TEXT NOT NULL DEFAULT 'DRAFT',   -- DRAFT/PENDING_BACKEND/QUEUED/TRAINING/DONE/FAILED
+    image_count  INTEGER NOT NULL DEFAULT 0,
+    images_dir   TEXT NOT NULL DEFAULT '',
+    output_path  TEXT NOT NULL DEFAULT '',
+    steps        INTEGER NOT NULL DEFAULT 0,
+    message      TEXT NOT NULL DEFAULT '',
+    created_at   TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_lora_project ON lora_trainings(project_id);
 
 CREATE TABLE IF NOT EXISTS assets (
     id            TEXT PRIMARY KEY,
@@ -137,6 +164,9 @@ class PipelineStore:
         if "lipsync" not in cols:    # 对口型(S2V)开关：旧库补这一列
             conn.execute("ALTER TABLE scenes ADD COLUMN lipsync INTEGER NOT NULL DEFAULT 0")
             logger.info("[PipelineStore] 迁移：scenes 补列 lipsync")
+        if "voice" not in cols:      # 每镜 TTS 音色(角色声音圣经)：旧库补这一列
+            conn.execute("ALTER TABLE scenes ADD COLUMN voice TEXT NOT NULL DEFAULT ''")
+            logger.info("[PipelineStore] 迁移：scenes 补列 voice")
         # 项目级风格（每集一种风格）：旧库给 projects 补列
         pcols = {r[1] for r in conn.execute("PRAGMA table_info(projects)").fetchall()}
         for col in ("style_prompt", "trigger_word", "flux_lora", "negative_prompt", "default_size"):
@@ -201,6 +231,102 @@ class PipelineStore:
             with self._lock, self._conn() as conn:
                 conn.execute(f"UPDATE projects SET {', '.join(sets)} WHERE id=?", params)
         return self.get_project_style(project_id)
+
+    def set_project_novel(self, project_id: str, novel_text: str) -> None:
+        """把小说原文存进项目（供重拆/存档）。"""
+        with self._lock, self._conn() as conn:
+            conn.execute("UPDATE projects SET novel_text=? WHERE id=?", (novel_text or "", project_id))
+
+    # ── 角色/声音圣经（每剧角色：名字 + 外貌 + 固定 TTS 音色）──────────
+    def list_characters(self, project_id: str) -> list[dict]:
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM characters WHERE project_id=? ORDER BY created_at", (project_id,)
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def add_character(self, project_id: str, name: str, appearance: str = "", voice: str = "") -> dict:
+        if not self.get_project(project_id):
+            raise ValueError(f"项目不存在: {project_id}")
+        cid = _uid()
+        with self._lock, self._conn() as conn:
+            conn.execute(
+                "INSERT INTO characters(id,project_id,name,appearance,voice,created_at) VALUES(?,?,?,?,?,?)",
+                (cid, project_id, name or "", appearance or "", voice or "", _now()),
+            )
+        return self.get_character(cid)
+
+    def get_character(self, char_id: str) -> Optional[dict]:
+        with self._conn() as conn:
+            row = conn.execute("SELECT * FROM characters WHERE id=?", (char_id,)).fetchone()
+        return dict(row) if row else None
+
+    def update_character(self, char_id: str, *, name: str | None = None,
+                         appearance: str | None = None, voice: str | None = None) -> dict:
+        sets, params = [], []
+        for col, val in (("name", name), ("appearance", appearance), ("voice", voice)):
+            if val is not None:
+                sets.append(f"{col}=?"); params.append(val)
+        if sets:
+            params.append(char_id)
+            with self._lock, self._conn() as conn:
+                conn.execute(f"UPDATE characters SET {', '.join(sets)} WHERE id=?", params)
+        return self.get_character(char_id)
+
+    def delete_character(self, char_id: str) -> bool:
+        with self._lock, self._conn() as conn:
+            cur = conn.execute("DELETE FROM characters WHERE id=?", (char_id,))
+        return cur.rowcount > 0
+
+    def set_scene_voice(self, scene_id: str, voice: str) -> dict:
+        """设这一镜的 TTS 音色（角色圣经路由用；空=用全集默认）。"""
+        with self._lock, self._conn() as conn:
+            conn.execute("UPDATE scenes SET voice=?, updated_at=? WHERE id=?", (voice or "", _now(), scene_id))
+        return self.get_scene(scene_id)
+
+    # ── 人物 LoRA 训练（门控，等 Colab 训练后端接入）──────────────
+    def add_lora_training(self, project_id: str, name: str, trigger_word: str = "",
+                          char_id: str = "", images_dir: str = "", image_count: int = 0,
+                          steps: int = 0, status: str = "DRAFT", message: str = "") -> dict:
+        tid = _uid()
+        with self._lock, self._conn() as conn:
+            conn.execute(
+                """INSERT INTO lora_trainings(id,project_id,name,trigger_word,char_id,status,
+                   image_count,images_dir,output_path,steps,message,created_at)
+                   VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (tid, project_id, name or "", trigger_word or "", char_id or "", status,
+                 int(image_count), images_dir or "", "", int(steps), message or "", _now()),
+            )
+        return self.get_lora_training(tid)
+
+    def get_lora_training(self, tid: str) -> Optional[dict]:
+        with self._conn() as conn:
+            row = conn.execute("SELECT * FROM lora_trainings WHERE id=?", (tid,)).fetchone()
+        return dict(row) if row else None
+
+    def list_lora_trainings(self, project_id: str) -> list[dict]:
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM lora_trainings WHERE project_id=? ORDER BY created_at DESC", (project_id,)
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def update_lora_training(self, tid: str, **fields) -> dict:
+        cols = ("status", "output_path", "message", "image_count", "steps", "trigger_word", "char_id")
+        sets, params = [], []
+        for c in cols:
+            if c in fields and fields[c] is not None:
+                sets.append(f"{c}=?"); params.append(fields[c])
+        if sets:
+            params.append(tid)
+            with self._lock, self._conn() as conn:
+                conn.execute(f"UPDATE lora_trainings SET {', '.join(sets)} WHERE id=?", params)
+        return self.get_lora_training(tid)
+
+    def delete_lora_training(self, tid: str) -> bool:
+        with self._lock, self._conn() as conn:
+            cur = conn.execute("DELETE FROM lora_trainings WHERE id=?", (tid,))
+        return cur.rowcount > 0
 
     # ── 分镜 ──────────────────────────────────────────────────────
     def add_scene(

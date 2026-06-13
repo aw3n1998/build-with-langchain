@@ -279,6 +279,13 @@ class AIService:
         from agent_lab.app.pipeline.runtime import set_workspace
         set_workspace(workspace)
 
+        # 专用视频 Agent 模式：聊天直达视频 Agent，不再过 supervisor 的多路意图选择（功能专一）。
+        # 不删其它 agent 文件/节点(避免 import/历史/interrupt_before 崩)，只是聊天不再路由到它们。
+        from agent_lab.app.core.config import settings as _st
+        if getattr(_st, "VIDEO_AGENT_ONLY", True) and agent == "supervisor":
+            agent = "video"
+            logger.info("[AIService] 专用视频模式：直达 video Agent")
+
         if agent == "supervisor":
             detected_agent = self._detect_agent_intent(content)
             if detected_agent == "supervisor":

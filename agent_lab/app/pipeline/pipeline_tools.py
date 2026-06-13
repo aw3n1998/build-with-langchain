@@ -550,7 +550,7 @@ def _do_render_lipsync_s2v(scene_id, scene, asset, prompt, params) -> str:
     # 旁白(台词) → TTS 本地音频
     from agent_lab.app.pipeline.assembler import _tts
     audio_local = os.path.join(local_dir, f"{scene['scene_number']:02d}_{scene_id}_voice.mp3")
-    voice = settings.COMFYUI_S2V_TTS_VOICE
+    voice = (scene.get("voice") or "").strip() or settings.COMFYUI_S2V_TTS_VOICE   # 角色音色优先
     ok_tts = _tts(line, audio_local, voice)
     if not ok_tts:                       # edge-tts 偶发网络抖动：退避重试一次
         import time as _t; _t.sleep(1.0)
@@ -1015,6 +1015,7 @@ def assemble_episode(project_id: str, voice: str = "", with_subtitles: bool = Tr
         if os.path.isfile(p):
             clips.append({"path": p, "narration": s.get("narration") or "",
                           "subtitle": s.get("subtitle") or "", "title": s.get("title") or "",
+                          "voice": s.get("voice") or "",   # 每镜音色(角色圣经)；空=用全集默认
                           "keep_audio": bool(s.get("lipsync"))})  # 对口型片自带人声，合成时别重配音(否则口型错位)
         else:
             missing.append(f"#{s['scene_number']} {s['title'] or s['id']}（状态 {s['state']}）")
