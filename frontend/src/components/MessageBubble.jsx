@@ -885,7 +885,7 @@ export function ProductionPanel({ message, workspace, sessionId }) {
     try {
       const r = await autoFill(pid, novel, Number(sbN) || 8, afReplace, workspace)
       setProgress(`已自动填充：${r.characters} 角色 · ${r.lora_created} 个新 LoRA · 风格已生成 · ${r.scenes_count} 分镜`)
-      await load()
+      await load(); await loadStyle()   // loadStyle：把 AI 生成的风格刷进「本集风格」编辑器(否则显示滞后)
     } catch (e) { setProgress('一键分析失败：' + String(e.message || e)) }
     finally { setAfBusy(false) }
   }
