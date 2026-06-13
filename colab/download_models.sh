@@ -1,15 +1,22 @@
 #!/usr/bin/env bash
-# Colab 单机：下载出片全套模型到 ComfyUI/models/，幂等(已存在跳过)+ 下载后扁平化(去掉 split_files/HighNoise 等子目录)。
-# FLUX.1-dev / ae 是 gated：先 `huggingface-cli login`(或设 HF_TOKEN 环境变量)。
+# Colab 单机：下载出片全套模型到 ComfyUI/models/，幂等(已存在跳过)+ 下完即时扁平化(去掉 split_files/HighNoise 等子目录)。
+# FLUX.1-dev / ae 是 gated：先 `hf auth login`(或设 HF_TOKEN 环境变量)。huggingface-cli 已废弃。
 set -e
 M=/content/ComfyUI/models
 mkdir -p "$M"/{unet,clip,vae,audio_encoders,loras,pulid,diffusion_models,text_encoders}
 
+# 跳过闸只认扁平路径 $3/$base；hf 会按 repo 子目录(HighNoise/、split_files/..)存，
+# 故下完立刻把文件挪到 $3/$base。即时扁平 = 中途被回收/打断时已下的也已就位，下次必 [skip]。
 get() {  # repo  repo内路径  目标models子目录
   local base; base=$(basename "$2")
   if [ -s "$3/$base" ]; then echo "[skip] $base"; return; fi
   echo "[get ] $base"
   hf download "$1" "$2" --local-dir "$3" >/dev/null   # huggingface-cli 已废弃，用 hf
+  if [ ! -s "$3/$base" ]; then                         # hf 存进了子目录 → 就地挪平
+    local got; got=$(find "$3" -type f -name "$base" 2>/dev/null | head -1)
+    [ -n "$got" ] && mv -f "$got" "$3/$base"
+  fi
+  find "$3" -mindepth 1 -type d -empty -delete 2>/dev/null || true
 }
 
 # ── FLUX 出图(gated，需 HF token)──
@@ -29,12 +36,15 @@ get Comfy-Org/Wan_2.2_ComfyUI_Repackaged split_files/diffusion_models/wan2.2_s2v
 get Comfy-Org/Wan_2.2_ComfyUI_Repackaged split_files/vae/wan_2.1_vae.safetensors "$M/vae"
 get Comfy-Org/Wan_2.2_ComfyUI_Repackaged split_files/audio_encoders/wav2vec2_large_english_fp16.safetensors "$M/audio_encoders"
 
-# ── 扁平化：HF 会保留 repo 子目录(split_files/.. 、HighNoise/..)，挪到 models/<dir> 根，ComfyUI 才列得出 ──
-find "$M" -mindepth 2 -type f \( -name '*.safetensors' -o -name '*.gguf' \) | while read -r f; do
-  top=$(echo "$f" | sed -E "s#($M/[^/]+)/.*#\1#")
-  base=$(basename "$f")
-  [ "$f" != "$top/$base" ] && mv -f "$f" "$top/$base"
-done
-find "$M" -type d -empty -delete 2>/dev/null || true
+# ── 兜底校验：get() 已逐个即时扁平；这里再扫一遍，发现仍埋在子目录的(如旧会话遗留)补挪并报警 ──
+stray=$(find "$M" -mindepth 2 -type f \( -name '*.safetensors' -o -name '*.gguf' \) 2>/dev/null || true)
+if [ -n "$stray" ]; then
+  echo "[warn] 仍有模型在子目录，补一次扁平化："
+  echo "$stray" | while read -r f; do
+    rel=${f#"$M"/}; top="$M/${rel%%/*}"; base=$(basename "$f")
+    [ "$f" != "$top/$base" ] && { echo "  mv  $rel  ->  ${rel%%/*}/$base"; mv -f "$f" "$top/$base"; }
+  done
+  find "$M" -mindepth 1 -type d -empty -delete 2>/dev/null || true
+fi
 echo "[download] 模型就绪 + 已扁平化"
 ls -lh "$M"/unet "$M"/clip "$M"/vae "$M"/audio_encoders 2>/dev/null
