@@ -1,0 +1,587 @@
+
+<helmet>
+<style>
+  @keyframes al-spin { to { transform: rotate(360deg); } }
+  @keyframes al-blink { 0%,49% { opacity: 1; } 50%,100% { opacity: 0; } }
+  @keyframes al-glow { 0%,100% { box-shadow: 0 0 0 0 rgba(52,211,153,0.5); } 50% { box-shadow: 0 0 0 5px rgba(52,211,153,0); } }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #0d0d0d; color: rgba(255,255,255,0.87); color-scheme: dark; font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Segoe UI', sans-serif; -webkit-font-smoothing: antialiased; overflow: hidden; }
+  ::selection { background: rgba(99,102,241,0.35); }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.13); border-radius: 5px; border: 2px solid #0d0d0d; }
+  ::-webkit-scrollbar-track { background: transparent; }
+</style>
+</helmet>
+
+<div style="height:100vh; width:100%; display:flex; background:#0d0d0d; position:relative; overflow:hidden;">
+
+  <!-- ==================== STUDIO MODE ==================== -->
+  <div style="display:{{ studioDisp }}; flex:1; height:100%; min-width:0; overflow:hidden;">
+    <div style="display:flex; height:100%;">
+
+      <!-- ProjectSidebar -->
+      <aside style="width:260px; flex-shrink:0; height:100%; border-right:1px solid rgba(255,255,255,0.07); background:#0d0d0d; display:flex; flex-direction:column;">
+        <div style="padding:16px 16px 14px; display:flex; align-items:center; gap:10px;">
+          <div style="width:22px; height:22px; border-radius:7px; background:linear-gradient(135deg,#6366f1,#4338ca); display:flex; align-items:center; justify-content:center; flex-shrink:0;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20.2 6 3 11l-.9-2.4c-.3-1.1.3-2.2 1.3-2.5l13.5-4c1.1-.3 2.2.3 2.5 1.3Z"></path><path d="M3 11h18v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"></path></svg></div>
+          <span style="font-size:13.5px; font-weight:600;">短剧工作台</span>
+        </div>
+        <div style="padding:0 12px 12px;">
+          <button style="width:100%; height:34px; border-radius:8px; border:1px dashed rgba(255,255,255,0.2); background:transparent; color:rgba(255,255,255,0.52); font-size:12.5px; display:inline-flex; align-items:center; justify-content:center; gap:7px; cursor:pointer; font-family:inherit; transition:all .14s;" style-hover="border-color:rgba(99,102,241,0.6); color:#a5a8ff;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"></path><path d="M12 5v14"></path></svg>新建剧集</button>
+        </div>
+        <div style="flex:1; overflow-y:auto; padding:0 8px;">
+          <div onclick="{{ selEp0 }}" style="position:relative; height:40px; display:flex; align-items:center; padding:0 12px; border-radius:8px; cursor:pointer; background:{{ ep0bg }};"><div style="position:absolute; left:0; top:9px; bottom:9px; width:3px; background:#6366f1; border-radius:0 2px 2px 0; display:{{ ep0bar }};"></div><span style="font-size:13px; font-weight:500; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">暗夜回声</span><span style="margin-left:auto; font-size:11px; color:rgba(255,255,255,0.30); flex-shrink:0;">8 镜</span></div>
+          <div onclick="{{ selEp1 }}" style="position:relative; height:40px; display:flex; align-items:center; padding:0 12px; border-radius:8px; cursor:pointer; background:{{ ep1bg }};"><div style="position:absolute; left:0; top:9px; bottom:9px; width:3px; background:#6366f1; border-radius:0 2px 2px 0; display:{{ ep1bar }};"></div><span style="font-size:13px; font-weight:500; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">第七位证人</span><span style="margin-left:auto; font-size:11px; color:rgba(255,255,255,0.30); flex-shrink:0;">12 镜</span></div>
+          <div onclick="{{ selEp2 }}" style="position:relative; height:40px; display:flex; align-items:center; padding:0 12px; border-radius:8px; cursor:pointer; background:{{ ep2bg }};"><div style="position:absolute; left:0; top:9px; bottom:9px; width:3px; background:#6366f1; border-radius:0 2px 2px 0; display:{{ ep2bar }};"></div><span style="font-size:13px; font-weight:500; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">雾港谜案</span><span style="margin-left:auto; font-size:11px; color:rgba(255,255,255,0.30); flex-shrink:0;">6 镜</span></div>
+          <div onclick="{{ selEp3 }}" style="position:relative; height:40px; display:flex; align-items:center; padding:0 12px; border-radius:8px; cursor:pointer; background:{{ ep3bg }};"><div style="position:absolute; left:0; top:9px; bottom:9px; width:3px; background:#6366f1; border-radius:0 2px 2px 0; display:{{ ep3bar }};"></div><span style="font-size:13px; font-weight:500; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:rgba(255,255,255,0.52);">第十三号档案</span><span style="margin-left:auto; font-size:11px; color:rgba(255,255,255,0.18); flex-shrink:0;">0 镜</span></div>
+        </div>
+        <div style="padding:12px; border-top:1px solid rgba(255,255,255,0.07);">
+          <button onclick="{{ goChat }}" style="width:100%; height:34px; border-radius:8px; border:1px solid rgba(255,255,255,0.13); background:rgba(255,255,255,0.04); color:rgba(255,255,255,0.87); font-size:12.5px; display:inline-flex; align-items:center; justify-content:center; gap:8px; cursor:pointer; font-family:inherit; transition:background .14s;" style-hover="background:rgba(255,255,255,0.08);"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>AI 助手 · 会话历史</button>
+        </div>
+      </aside>
+
+      <!-- studio main -->
+      <main style="flex:1; min-width:0; height:100%; display:flex; flex-direction:column; overflow:hidden;">
+        <!-- studio topbar -->
+        <header style="flex-shrink:0; min-height:56px; padding:0 20px; display:flex; align-items:center; gap:12px; border-bottom:1px solid rgba(255,255,255,0.07); flex-wrap:wrap;">
+          <div style="width:28px; height:28px; border-radius:8px; background:linear-gradient(135deg,#6366f1,#4338ca); display:flex; align-items:center; justify-content:center; flex-shrink:0;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20.2 6 3 11l-.9-2.4c-.3-1.1.3-2.2 1.3-2.5l13.5-4c1.1-.3 2.2.3 2.5 1.3Z"></path><path d="M3 11h18v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"></path></svg></div>
+          <span style="font-size:15px; font-weight:600; max-width:320px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{{ activeEpName }}</span>
+          <button style="width:32px; height:32px; border-radius:8px; border:1px solid rgba(255,255,255,0.13); background:rgba(255,255,255,0.04); color:rgba(255,255,255,0.7); display:inline-flex; align-items:center; justify-content:center; cursor:pointer; font-family:inherit;" style-hover="background:rgba(255,255,255,0.08);"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"></path><path d="m15 5 4 4"></path></svg></button>
+          <button style="width:32px; height:32px; border-radius:8px; border:1px solid rgba(239,68,68,0.3); background:rgba(239,68,68,0.08); color:#f87171; display:inline-flex; align-items:center; justify-content:center; cursor:pointer; font-family:inherit;" style-hover="background:rgba(239,68,68,0.16);"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"></path><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path></svg></button>
+          <button onclick="{{ openFolder }}" style="margin-left:auto; height:32px; padding:0 12px; border-radius:8px; border:1px solid rgba(255,255,255,0.13); background:rgba(255,255,255,0.04); color:rgba(255,255,255,0.87); font-size:12.5px; display:inline-flex; align-items:center; gap:7px; cursor:pointer; font-family:inherit;" style-hover="background:rgba(255,255,255,0.08);"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"></path></svg>工作目录</button>
+          <button onclick="{{ goChat }}" style="height:32px; padding:0 13px; border-radius:8px; border:none; background:#6366f1; color:#fff; font-size:12.5px; font-weight:600; display:inline-flex; align-items:center; gap:7px; cursor:pointer; font-family:inherit; transition:background .14s;" style-hover="background:#5254cc;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>AI 助手</button>
+        </header>
+
+        <!-- ProductionPanel -->
+        <div style="flex:1; min-height:0; display:flex; flex-direction:column; overflow:hidden;">
+          <!-- meta + tabs -->
+          <div style="flex-shrink:0; padding:16px 24px 0;">
+            <div style="display:flex; align-items:center; gap:16px; flex-wrap:wrap; margin-bottom:14px;">
+              <span style="font-size:14px; font-weight:600;">{{ activeEpName }}</span>
+              <div style="display:flex; gap:14px; font-size:12px; color:rgba(255,255,255,0.52);">
+                <span>总数 <span style="color:rgba(255,255,255,0.87); font-weight:600;">8</span></span>
+                <span>已出图 <span style="color:#eab308; font-weight:600;">6</span></span>
+                <span>已选 <span style="color:#c084fc; font-weight:600;">4</span></span>
+                <span>已出片 <span style="color:#34d399; font-weight:600;">2</span></span>
+              </div>
+              <button style="margin-left:auto; width:30px; height:30px; border-radius:7px; border:1px solid rgba(255,255,255,0.13); background:rgba(255,255,255,0.04); color:rgba(255,255,255,0.52); display:inline-flex; align-items:center; justify-content:center; cursor:pointer; font-family:inherit;" style-hover="color:#a5a8ff;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"></path><path d="M21 3v5h-5"></path></svg></button>
+            </div>
+            <div style="display:flex; gap:26px; border-bottom:1px solid rgba(255,255,255,0.07);">
+              <div onclick="{{ tabScript }}" style="padding-bottom:11px; border-bottom:2px solid {{ tScriptB }}; cursor:pointer; display:flex; align-items:center; gap:7px; font-size:13px; font-weight:{{ tScriptW }}; color:{{ tScriptC }}; margin-bottom:-1px; transition:color .14s;"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" style="opacity:{{ tScriptI }};"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><path d="M14 2v6h6"></path><path d="M16 13H8"></path></svg>脚本</div>
+              <div onclick="{{ tabRole }}" style="padding-bottom:11px; border-bottom:2px solid {{ tRoleB }}; cursor:pointer; display:flex; align-items:center; gap:7px; font-size:13px; font-weight:{{ tRoleW }}; color:{{ tRoleC }}; margin-bottom:-1px; transition:color .14s;"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" style="opacity:{{ tRoleI }};"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle></svg>角色&amp;LoRA</div>
+              <div onclick="{{ tabShot }}" style="padding-bottom:11px; border-bottom:2px solid {{ tShotB }}; cursor:pointer; display:flex; align-items:center; gap:7px; font-size:13px; font-weight:{{ tShotW }}; color:{{ tShotC }}; margin-bottom:-1px; transition:color .14s;"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" style="opacity:{{ tShotI }};"><path d="m12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z"></path><path d="m22 12.5-9.17 4.16a2 2 0 0 1-1.66 0L2 12.5"></path></svg>分镜制作</div>
+              <div onclick="{{ tabExport }}" style="padding-bottom:11px; border-bottom:2px solid {{ tExportB }}; cursor:pointer; display:flex; align-items:center; gap:7px; font-size:13px; font-weight:{{ tExportW }}; color:{{ tExportC }}; margin-bottom:-1px; transition:color .14s;"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" style="opacity:{{ tExportI }};"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><path d="M7 10l5 5 5-5"></path><path d="M12 15V3"></path></svg>导出</div>
+            </div>
+          </div>
+
+          <!-- tab content -->
+          <div style="flex:1; min-height:0; overflow-y:auto; padding:20px 24px 16px;">
+
+            <!-- SCRIPT TAB -->
+            <div style="display:{{ dScript }};">
+              <div style="max-width:760px;">
+                <div style="border:1px solid rgba(255,255,255,0.07); border-radius:12px; background:#161616; padding:18px 20px; margin-bottom:16px;">
+                  <div style="font-size:13px; font-weight:600; margin-bottom:6px;">小说自动拆分镜</div>
+                  <div style="font-size:11.5px; color:rgba(255,255,255,0.30); margin-bottom:12px; line-height:1.5;">先在「角色圣经」「本集风格」设好角色和风格，拆出来更统一。镜号由系统按序自动分配。</div>
+                  <textarea style="width:100%; height:96px; padding:10px; border-radius:8px; border:1px solid rgba(255,255,255,0.13); background:rgba(255,255,255,0.04); color:rgba(255,255,255,0.87); font-size:13px; font-family:inherit; outline:none; resize:none; line-height:1.55;" style-focus="border-color:#6366f1;">午夜零点十七分，废弃仓库的后门被人从内侧打开。林警官蹲下身，指尖触到温热的弹壳——凶手还没走远……</textarea>
+                  <div style="display:flex; gap:14px; align-items:center; margin-top:12px; flex-wrap:wrap;">
+                    <div style="display:flex; align-items:center; gap:8px;"><span style="font-size:12px; color:rgba(255,255,255,0.52);">拆成</span><input type="number" value="8" style="width:54px; height:30px; padding:0 8px; border-radius:6px; border:1px solid rgba(255,255,255,0.13); background:rgba(255,255,255,0.04); color:rgba(255,255,255,0.87); font-size:13px; font-family:inherit; outline:none;"><span style="font-size:12px; color:rgba(255,255,255,0.52);">镜</span></div>
+                    <label style="display:inline-flex; align-items:center; gap:7px; font-size:12.5px; cursor:pointer;"><input type="checkbox" style="width:14px; height:14px; accent-color:#6366f1;">替换现有分镜</label>
+                    <button style="margin-left:auto; height:32px; padding:0 14px; border-radius:8px; border:none; background:#6366f1; color:#fff; font-size:12.5px; font-weight:600; display:inline-flex; align-items:center; gap:7px; cursor:pointer; font-family:inherit;" style-hover="background:#5254cc;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M15 4V2"></path><path d="M8 9h2"></path><path d="m3 21 9-9"></path><path d="M12.2 6.2 11 5"></path></svg>开始拆分镜</button>
+                  </div>
+                </div>
+                <div style="border:1px solid rgba(255,255,255,0.07); border-radius:12px; background:#161616; padding:18px 20px;">
+                  <div style="font-size:13px; font-weight:600; margin-bottom:14px;">本集风格</div>
+                  <div style="display:grid; grid-template-columns:1fr 1fr; gap:13px;">
+                    <div style="grid-column:1 / 3;"><label style="font-size:11px; color:rgba(255,255,255,0.52); display:block; margin-bottom:6px;">通用风格词 style_prompt</label><input type="text" value="写实，电影感，冷蓝调，浅景深" style="width:100%; height:30px; padding:0 8px; border-radius:6px; border:1px solid rgba(255,255,255,0.13); background:rgba(255,255,255,0.04); color:rgba(255,255,255,0.87); font-size:12.5px; font-family:inherit; outline:none;" style-focus="border-color:#6366f1;"></div>
+                    <div><label style="font-size:11px; color:rgba(255,255,255,0.52); display:block; margin-bottom:6px;">角色触发词 trigger_word</label><input type="text" placeholder="空则留空" style="width:100%; height:30px; padding:0 8px; border-radius:6px; border:1px solid rgba(255,255,255,0.13); background:rgba(255,255,255,0.04); color:rgba(255,255,255,0.87); font-size:12.5px; font-family:inherit; outline:none;" style-focus="border-color:#6366f1;"></div>
+                    <div><label style="font-size:11px; color:rgba(255,255,255,0.52); display:block; margin-bottom:6px;">FLUX LoRA 路径</label><input type="text" value="none" style="width:100%; height:30px; padding:0 8px; border-radius:6px; border:1px solid rgba(255,255,255,0.13); background:rgba(255,255,255,0.04); color:#86efac; font-size:12px; font-family:'SF Mono',ui-monospace,monospace; outline:none;" style-focus="border-color:#6366f1;"></div>
+                    <div><label style="font-size:11px; color:rgba(255,255,255,0.52); display:block; margin-bottom:6px;">负向词 negative_prompt</label><input type="text" value="低质,模糊,多手指" style="width:100%; height:30px; padding:0 8px; border-radius:6px; border:1px solid rgba(255,255,255,0.13); background:rgba(255,255,255,0.04); color:rgba(255,255,255,0.87); font-size:12.5px; font-family:inherit; outline:none;" style-focus="border-color:#6366f1;"></div>
+                    <div><label style="font-size:11px; color:rgba(255,255,255,0.52); display:block; margin-bottom:6px;">默认出图尺寸</label><input type="text" value="768x1024" style="width:100%; height:30px; padding:0 8px; border-radius:6px; border:1px solid rgba(255,255,255,0.13); background:rgba(255,255,255,0.04); color:rgba(255,255,255,0.87); font-size:12.5px; font-family:'SF Mono',ui-monospace,monospace; outline:none;" style-focus="border-color:#6366f1;"></div>
+                  </div>
+                  <button style="margin-top:14px; height:32px; padding:0 14px; border-radius:8px; border:1px solid rgba(255,255,255,0.13); background:rgba(255,255,255,0.04); color:rgba(255,255,255,0.87); font-size:12.5px; font-weight:500; cursor:pointer; font-family:inherit;" style-hover="background:rgba(255,255,255,0.08);">保存本集风格</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- ROLE TAB -->
+            <div style="display:{{ dRole }};">
+              <div style="max-width:820px; display:grid; grid-template-columns:1fr 1fr; gap:16px; align-items:start;">
+                <div>
+                  <div style="font-size:13px; font-weight:600; margin-bottom:4px;">角色圣经</div>
+                  <div style="font-size:11px; color:rgba(255,255,255,0.30); margin-bottom:13px; line-height:1.5;">每个角色固定外貌+音色，跨镜同一个人；配音用其音色。</div>
+                  <div style="border:1px solid rgba(255,255,255,0.07); border-radius:12px; background:#161616; padding:15px 17px; margin-bottom:12px;">
+                    <input type="text" value="林警官" style="width:100%; height:30px; padding:0 9px; border-radius:6px; border:1px solid rgba(255,255,255,0.13); background:rgba(255,255,255,0.04); color:rgba(255,255,255,0.87); font-size:13px; font-weight:600; font-family:inherit; outline:none; margin-bottom:9px;" style-focus="border-color:#6366f1;">
+                    <textarea style="width:100%; height:46px; padding:8px; border-radius:6px; border:1px solid rgba(255,255,255,0.13); background:rgba(255,255,255,0.04); color:rgba(255,255,255,0.87); font-size:12.5px; font-family:inherit; outline:none; resize:none; line-height:1.5;" style-focus="border-color:#6366f1;">45岁中年男，短寸花白发，左眉旧疤，风衣</textarea>
+                    <div style="display:flex; gap:8px; margin-top:9px;">
+                      <select style="flex:1; height:30px; padding:0 8px; border-radius:6px; border:1px solid rgba(255,255,255,0.13); background:rgba(255,255,255,0.04); color:rgba(255,255,255,0.87); font-size:12px; font-family:inherit; color-scheme:dark;"><option>云扬·男·沉稳</option><option>云健·男·浑厚</option><option>默认音色</option></select>
+                      <button style="width:30px; height:30px; border-radius:6px; border:1px solid rgba(239,68,68,0.3); background:rgba(239,68,68,0.08); color:#f87171; display:inline-flex; align-items:center; justify-content:center; cursor:pointer; font-family:inherit; flex-shrink:0;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"></path><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"></path></svg></button>
+                    </div>
+                  </div>
+                  <div style="border:1px solid rgba(255,255,255,0.07); border-radius:12px; background:#161616; padding:15px 17px; margin-bottom:12px;">
+                    <input type="text" value="苏医生" style="width:100%; height:30px; padding:0 9px; border-radius:6px; border:1px solid rgba(255,255,255,0.13); background:rgba(255,255,255,0.04); color:rgba(255,255,255,0.87); font-size:13px; font-weight:600; font-family:inherit; outline:none; margin-bottom:9px;" style-focus="border-color:#6366f1;">
+                    <textarea style="width:100%; height:46px; padding:8px; border-radius:6px; border:1px solid rgba(255,255,255,0.13); background:rgba(255,255,255,0.04); color:rgba(255,255,255,0.87); font-size:12.5px; font-family:inherit; outline:none; resize:none; line-height:1.5;" style-focus="border-color:#6366f1;">32岁女法医，黑长直，金丝眼镜，白大褂</textarea>
+                    <div style="display:flex; gap:8px; margin-top:9px;">
+                      <select style="flex:1; height:30px; padding:0 8px; border-radius:6px; border:1px solid rgba(255,255,255,0.13); background:rgba(255,255,255,0.04); color:rgba(255,255,255,0.87); font-size:12px; font-family:inherit; color-scheme:dark;"><option>晓涵·女·成熟</option><option>晓晓·女·温柔</option></select>
+                      <button style="width:30px; height:30px; border-radius:6px; border:1px solid rgba(239,68,68,0.3); background:rgba(239,68,68,0.08); color:#f87171; display:inline-flex; align-items:center; justify-content:center; cursor:pointer; font-family:inherit; flex-shrink:0;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"></path><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"></path></svg></button>
+                    </div>
+                  </div>
+                  <button style="height:32px; padding:0 14px; border-radius:8px; border:1px dashed rgba(255,255,255,0.2); background:transparent; color:rgba(255,255,255,0.52); font-size:12.5px; display:inline-flex; align-items:center; gap:7px; cursor:pointer; font-family:inherit;" style-hover="border-color:rgba(99,102,241,0.6); color:#a5a8ff;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"></path><path d="M12 5v14"></path></svg>添加角色</button>
+                </div>
+                <div>
+                  <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;"><span style="font-size:13px; font-weight:600;">人物 LoRA 训练</span><span style="font-size:10px; padding:2px 7px; border-radius:5px; background:rgba(255,180,84,0.12); border:1px solid rgba(255,180,84,0.3); color:#ffb454;">后端待接入 Colab</span></div>
+                  <div style="font-size:11px; color:rgba(255,255,255,0.30); margin-bottom:13px; line-height:1.5;">建议参考图 10–20 张。</div>
+                  <div style="border:1px solid rgba(255,255,255,0.07); border-radius:12px; background:#161616; padding:14px 16px; margin-bottom:12px;">
+                    <div style="display:flex; align-items:center; gap:9px;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.52)" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2"></path><path d="M17 3h2a2 2 0 0 1 2 2v2"></path><path d="M21 17v2a2 2 0 0 1-2 2h-2"></path><path d="M7 21H5a2 2 0 0 1-2-2v-2"></path><path d="M8 14s1.5 2 4 2 4-2 4-2"></path><path d="M9 9h.01"></path><path d="M15 9h.01"></path></svg><strong style="font-size:13px;">林警官_lora</strong><span style="margin-left:auto; font-size:11px; color:#34d399;">18 张图 · COMPLETED</span></div>
+                    <div style="display:flex; gap:8px; margin-top:11px;"><button style="height:28px; padding:0 11px; border-radius:7px; border:1px solid rgba(255,255,255,0.13); background:rgba(255,255,255,0.04); color:rgba(255,255,255,0.87); font-size:11.5px; cursor:pointer; font-family:inherit; display:inline-flex; align-items:center; gap:6px;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M5 12h14"></path><path d="M12 5v14"></path></svg>传参考图</button><button style="height:28px; padding:0 11px; border-radius:7px; border:none; background:rgba(52,211,153,0.14); color:#34d399; font-size:11.5px; font-weight:600; cursor:default; font-family:inherit;">权重就绪</button></div>
+                  </div>
+                  <div style="border:1px solid rgba(255,255,255,0.07); border-radius:12px; background:#161616; padding:14px 16px; margin-bottom:12px;">
+                    <div style="display:flex; align-items:center; gap:9px;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.52)" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2"></path><path d="M17 3h2a2 2 0 0 1 2 2v2"></path><path d="M8 14s1.5 2 4 2 4-2 4-2"></path><path d="M9 9h.01"></path><path d="M15 9h.01"></path></svg><strong style="font-size:13px;">苏医生_lora</strong><span style="margin-left:auto; font-size:11px; color:#eab308;">3 张图 · DRAFT</span></div>
+                    <div style="font-size:11px; color:#ffb454; margin-top:8px;">还需 ≥2 张参考图才可训练</div>
+                    <div style="display:flex; gap:8px; margin-top:11px;"><button style="height:28px; padding:0 11px; border-radius:7px; border:1px solid rgba(255,255,255,0.13); background:rgba(255,255,255,0.04); color:rgba(255,255,255,0.87); font-size:11.5px; cursor:pointer; font-family:inherit; display:inline-flex; align-items:center; gap:6px;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M5 12h14"></path><path d="M12 5v14"></path></svg>传参考图</button><button disabled="true" style="height:28px; padding:0 11px; border-radius:7px; border:1px solid rgba(255,255,255,0.07); background:rgba(255,255,255,0.03); color:rgba(255,255,255,0.18); font-size:11.5px; cursor:not-allowed; font-family:inherit;">开始训练</button></div>
+                  </div>
+                  <button style="height:32px; padding:0 14px; border-radius:8px; border:1px dashed rgba(255,255,255,0.2); background:transparent; color:rgba(255,255,255,0.52); font-size:12.5px; display:inline-flex; align-items:center; gap:7px; cursor:pointer; font-family:inherit;" style-hover="border-color:rgba(99,102,241,0.6); color:#a5a8ff;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M5 12h14"></path><path d="M12 5v14"></path></svg>新建 LoRA 训练</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- SHOT TAB -->
+            <div style="display:{{ dShot }};">
+              <!-- global controls -->
+              <div style="border:1px solid rgba(255,255,255,0.07); border-radius:12px; background:#161616; padding:16px 18px; margin-bottom:16px;">
+                <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
+                  <button style="height:32px; padding:0 14px; border-radius:8px; border:none; background:#6366f1; color:#fff; font-size:12.5px; font-weight:600; cursor:pointer; font-family:inherit;" style-hover="background:#5254cc;">① 一键全部出图</button>
+                  <select style="height:30px; padding:0 8px; border-radius:6px; border:1px solid rgba(255,255,255,0.13); background:rgba(255,255,255,0.04); color:rgba(255,255,255,0.87); font-size:12px; font-family:inherit; color-scheme:dark;"><option>4 张</option><option>2 张</option><option>6 张</option></select>
+                  <select style="height:30px; padding:0 8px; border-radius:6px; border:1px solid rgba(255,255,255,0.13); background:rgba(255,255,255,0.04); color:rgba(255,255,255,0.87); font-size:12px; font-family:inherit; color-scheme:dark;"><option>768×1024 竖屏</option><option>1024×768 横屏</option><option>1024×1024 方形</option></select>
+                  <div style="width:1px; height:24px; background:rgba(255,255,255,0.07);"></div>
+                  <button style="height:32px; padding:0 14px; border-radius:8px; border:none; background:#00bdb0; color:#04201e; font-size:12.5px; font-weight:600; cursor:pointer; font-family:inherit;" style-hover="opacity:0.88;">③ 一键出片并合成 · 已选 4</button>
+                  <select style="height:30px; padding:0 8px; border-radius:6px; border:1px solid rgba(255,255,255,0.13); background:rgba(255,255,255,0.04); color:rgba(255,255,255,0.87); font-size:12px; font-family:inherit; color-scheme:dark;"><option>Wan2.2</option><option>LTX</option></select>
+                  <select style="height:30px; padding:0 8px; border-radius:6px; border:1px solid rgba(255,255,255,0.13); background:rgba(255,255,255,0.04); color:rgba(255,255,255,0.87); font-size:12px; font-family:inherit; color-scheme:dark;"><option>单段</option><option>×2</option><option>×3</option></select>
+                  <span style="font-size:11.5px; color:#5fe8de;">预计 ≈ 18 秒/镜</span>
+                </div>
+                <div onclick="{{ toggleMore }}" style="display:flex; align-items:center; gap:7px; margin-top:13px; cursor:pointer; font-size:12px; color:rgba(255,255,255,0.52); width:fit-content;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="transform:rotate({{ moreRot }}); transition:transform .15s;"><path d="m9 18 6-6-6-6"></path></svg>更多参数（全局默认 genPayload）</div>
+                <div style="display:{{ moreDisp }}; margin-top:12px; padding-top:12px; border-top:1px solid rgba(255,255,255,0.07); grid-template-columns:repeat(4,1fr); gap:11px;">
+                  <div><label style="font-size:10.5px; color:rgba(255,255,255,0.52); display:block; margin-bottom:5px;">步数 steps</label><input type="number" value="20" style="width:100%; height:28px; padding:0 8px; border-radius:6px; border:1px solid rgba(255,255,255,0.13); background:rgba(255,255,255,0.04); color:rgba(255,255,255,0.87); font-size:12px; font-family:inherit; outline:none;"></div>
+                  <div><label style="font-size:10.5px; color:rgba(255,255,255,0.52); display:block; margin-bottom:5px;">guidance</label><input type="number" value="3.5" step="0.1" style="width:100%; height:28px; padding:0 8px; border-radius:6px; border:1px solid rgba(255,255,255,0.13); background:rgba(255,255,255,0.04); color:rgba(255,255,255,0.87); font-size:12px; font-family:inherit; outline:none;"></div>
+                  <div><label style="font-size:10.5px; color:rgba(255,255,255,0.52); display:block; margin-bottom:5px;">seed</label><input type="text" value="随机" style="width:100%; height:28px; padding:0 8px; border-radius:6px; border:1px solid rgba(255,255,255,0.13); background:rgba(255,255,255,0.04); color:rgba(255,255,255,0.87); font-size:12px; font-family:inherit; outline:none;"></div>
+                  <div><label style="font-size:10.5px; color:rgba(255,255,255,0.52); display:block; margin-bottom:5px;">显存策略 offload</label><select style="width:100%; height:28px; padding:0 6px; border-radius:6px; border:1px solid rgba(255,255,255,0.13); background:rgba(255,255,255,0.04); color:rgba(255,255,255,0.87); font-size:12px; font-family:inherit; color-scheme:dark;"><option>auto</option><option>sequential</option><option>none</option></select></div>
+                </div>
+              </div>
+
+              <!-- scene cards -->
+              <div style="display:flex; flex-direction:column; gap:14px; max-width:880px;">
+
+                <!-- #1 COMPLETED -->
+                <div style="border:1px solid rgba(255,255,255,0.07); border-radius:12px; background:#161616; padding:15px 18px;">
+                  <div style="display:flex; align-items:center; gap:11px;"><span style="font-size:13px; font-weight:600; color:rgba(255,255,255,0.52);">#1</span><span style="font-size:13.5px; font-weight:600;">雨夜·废弃仓库</span><span style="display:inline-flex; align-items:center; gap:6px; height:22px; padding:0 9px; border-radius:6px; background:rgba(52,211,153,0.12); border:1px solid rgba(52,211,153,0.35); font-size:11px; color:#34d399;"><span style="width:5px; height:5px; border-radius:50%; background:#34d399;"></span>已出片</span><button style="margin-left:auto; width:26px; height:26px; border-radius:6px; border:1px solid rgba(239,68,68,0.25); background:rgba(239,68,68,0.07); color:#f87171; display:inline-flex; align-items:center; justify-content:center; cursor:pointer; font-family:inherit;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M3 6h18"></path><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"></path></svg></button></div>
+                  <div style="display:flex; gap:13px; margin-top:12px; align-items:flex-start;">
+                    <div style="width:84px; height:112px; border-radius:8px; flex-shrink:0; background:repeating-linear-gradient(135deg,#1c1c20,#1c1c20 8px,#181a20 8px,#181a20 16px); display:flex; align-items:center; justify-content:center; font-size:9px; color:rgba(255,255,255,0.3); font-family:'SF Mono',ui-monospace,monospace;">成片帧</div>
+                    <div style="flex:1; min-width:0;">
+                      <div style="font-size:12px; color:rgba(255,255,255,0.52); line-height:1.55;">旁白：午夜零点十七分，仓库后门被人从内侧打开。</div>
+                      <!-- continuation controls -->
+                      <div style="display:flex; gap:8px; margin-top:11px; flex-wrap:wrap;">
+                        <button style="height:28px; padding:0 11px; border-radius:7px; border:1px solid rgba(99,102,241,0.4); background:rgba(99,102,241,0.12); color:#a5a8ff; font-size:11.5px; display:inline-flex; align-items:center; gap:6px; cursor:pointer; font-family:inherit;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M15 4V2"></path><path d="m3 21 9-9"></path></svg>AI 推荐运镜</button>
+                        <button style="height:28px; padding:0 11px; border-radius:7px; border:none; background:#6366f1; color:#fff; font-size:11.5px; font-weight:600; display:inline-flex; align-items:center; gap:6px; cursor:pointer; font-family:inherit;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M5 12h14"></path><path d="M12 5v14"></path></svg>再续一段</button>
+                        <button style="height:28px; padding:0 11px; border-radius:7px; border:1px solid rgba(168,85,247,0.4); background:rgba(168,85,247,0.12); color:#c084fc; font-size:11.5px; display:inline-flex; align-items:center; gap:6px; cursor:pointer; font-family:inherit;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M3 7v6h6"></path><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"></path></svg>撤销上一段</button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- #2 待选图 with candidate wall -->
+                <div style="border:1px solid rgba(255,255,255,0.07); border-radius:12px; background:#161616; padding:15px 18px;">
+                  <div style="display:flex; align-items:center; gap:11px;"><span style="font-size:13px; font-weight:600; color:rgba(255,255,255,0.52);">#2</span><span style="font-size:13.5px; font-weight:600;">验尸房的低语</span><span style="display:inline-flex; align-items:center; gap:6px; height:22px; padding:0 9px; border-radius:6px; background:rgba(168,85,247,0.12); border:1px solid rgba(168,85,247,0.35); font-size:11px; color:#c084fc;"><span style="width:5px; height:5px; border-radius:50%; background:#c084fc;"></span>待选图</span>
+                    <div style="margin-left:auto; display:flex; gap:8px;"><button style="height:26px; padding:0 10px; border-radius:7px; border:1px solid rgba(255,255,255,0.13); background:rgba(255,255,255,0.04); color:rgba(255,255,255,0.87); font-size:11.5px; cursor:pointer; font-family:inherit; display:inline-flex; align-items:center; gap:6px;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82 2 2 0 1 1-2.83 2.83 1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51 2 2 0 0 1-4 0 1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33 2 2 0 1 1-2.83-2.83 1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1 2 2 0 0 1 0-4 1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82 2 2 0 1 1 2.83-2.83 1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51 2 2 0 0 1 4 0 1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33 2 2 0 1 1 2.83 2.83 1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1 2 2 0 0 1 0 4 1.65 1.65 0 0 0-1.51 1Z"></path></svg>出图参数</button><button style="height:26px; padding:0 10px; border-radius:7px; border:none; background:#6366f1; color:#fff; font-size:11.5px; font-weight:600; cursor:pointer; font-family:inherit;" style-hover="background:#5254cc;">重出图</button><button style="height:26px; padding:0 10px; border-radius:7px; border:1px solid rgba(255,255,255,0.13); background:rgba(255,255,255,0.04); color:rgba(255,255,255,0.87); font-size:11.5px; cursor:pointer; font-family:inherit; display:inline-flex; align-items:center; gap:6px;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><path d="M17 8l-5-5-5 5"></path><path d="M12 3v12"></path></svg>上传</button></div>
+                  </div>
+                  <div style="display:grid; grid-template-columns:repeat(auto-fill,minmax(110px,1fr)); gap:11px; margin-top:13px;">
+                    <div onclick="{{ sceneSel0 }}" style="position:relative; border-radius:9px; overflow:hidden; aspect-ratio:3/4; cursor:pointer; border:{{ sB0 }}; background:repeating-linear-gradient(135deg,#1c1c20,#1c1c20 8px,#181a20 8px,#181a20 16px);"><div style="position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-size:9.5px; color:rgba(255,255,255,0.3); font-family:'SF Mono',ui-monospace,monospace;">FLUX 1</div><div style="position:absolute; left:6px; top:6px; width:20px; height:20px; border-radius:5px; background:rgba(0,0,0,0.55); display:flex; align-items:center; justify-content:center; color:#f87171; font-size:12px;">×</div><div style="position:absolute; right:6px; top:6px;">{{ sTag0 }}</div></div>
+                    <div onclick="{{ sceneSel1 }}" style="position:relative; border-radius:9px; overflow:hidden; aspect-ratio:3/4; cursor:pointer; border:{{ sB1 }}; background:repeating-linear-gradient(135deg,#1c1c20,#1c1c20 8px,#181a20 8px,#181a20 16px);"><div style="position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-size:9.5px; color:rgba(255,255,255,0.3); font-family:'SF Mono',ui-monospace,monospace;">FLUX 2</div><div style="position:absolute; left:6px; top:6px; width:20px; height:20px; border-radius:5px; background:rgba(0,0,0,0.55); display:flex; align-items:center; justify-content:center; color:#f87171; font-size:12px;">×</div><div style="position:absolute; right:6px; top:6px;">{{ sTag1 }}</div></div>
+                    <div onclick="{{ sceneSel2 }}" style="position:relative; border-radius:9px; overflow:hidden; aspect-ratio:3/4; cursor:pointer; border:{{ sB2 }}; background:repeating-linear-gradient(135deg,#1c1c20,#1c1c20 8px,#181a20 8px,#181a20 16px);"><div style="position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-size:9.5px; color:rgba(255,255,255,0.3); font-family:'SF Mono',ui-monospace,monospace;">FLUX 3</div><div style="position:absolute; left:6px; top:6px; width:20px; height:20px; border-radius:5px; background:rgba(0,0,0,0.55); display:flex; align-items:center; justify-content:center; color:#f87171; font-size:12px;">×</div><div style="position:absolute; right:6px; top:6px;">{{ sTag2 }}</div></div>
+                    <div onclick="{{ sceneSel3 }}" style="position:relative; border-radius:9px; overflow:hidden; aspect-ratio:3/4; cursor:pointer; border:{{ sB3 }}; background:repeating-linear-gradient(135deg,#1c1c20,#1c1c20 8px,#181a20 8px,#181a20 16px);"><div style="position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-size:9.5px; color:rgba(255,255,255,0.3); font-family:'SF Mono',ui-monospace,monospace;">上传图</div><div style="position:absolute; left:6px; top:6px; width:20px; height:20px; border-radius:5px; background:rgba(0,0,0,0.55); display:flex; align-items:center; justify-content:center; color:#f87171; font-size:12px;">×</div><div style="position:absolute; left:6px; bottom:6px; padding:2px 6px; border-radius:4px; background:rgba(99,102,241,0.85); font-size:9px; color:#fff; font-weight:600;">上传</div><div style="position:absolute; right:6px; top:6px;">{{ sTag3 }}</div></div>
+                  </div>
+                  <!-- prompt editor collapsible -->
+                  <div onclick="{{ togglePrompt }}" style="display:flex; align-items:center; gap:7px; margin-top:13px; cursor:pointer; font-size:11.5px; color:rgba(255,255,255,0.52); width:fit-content;"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="transform:rotate({{ promptRot }}); transition:transform .15s;"><path d="m9 18 6-6-6-6"></path></svg>分镜提示词编辑器 · 验尸房，冷白无影灯，金属解剖台…</div>
+                  <div style="display:{{ promptDisp }}; margin-top:11px; padding:13px 15px; border-radius:10px; background:rgba(99,102,241,0.06); border:1px solid rgba(99,102,241,0.2);">
+                    <div style="display:grid; grid-template-columns:80px 1fr; gap:11px; align-items:center;">
+                      <span style="font-size:11px; color:rgba(255,255,255,0.52);">镜号</span><input type="number" value="2" style="width:64px; height:28px; padding:0 8px; border-radius:6px; border:1px solid rgba(255,255,255,0.13); background:rgba(255,255,255,0.04); color:rgba(255,255,255,0.87); font-size:12px; font-family:inherit; outline:none;">
+                    </div>
+                    <label style="font-size:11px; color:rgba(255,255,255,0.52); display:block; margin:11px 0 5px;">出图提示词（角色触发词自动注入）</label><textarea style="width:100%; height:48px; padding:8px; border-radius:6px; border:1px solid rgba(255,255,255,0.13); background:rgba(255,255,255,0.04); color:rgba(255,255,255,0.87); font-size:12px; font-family:inherit; outline:none; resize:none; line-height:1.5;">苏医生，验尸房，冷白无影灯，金属解剖台，俯视构图，冷蓝调</textarea>
+                    <div style="display:flex; align-items:center; gap:10px; margin-top:11px; flex-wrap:wrap;">
+                      <div style="display:flex; align-items:center; gap:8px;"><span style="font-size:11px; color:rgba(255,255,255,0.52);">音色覆盖</span><select style="height:28px; padding:0 8px; border-radius:6px; border:1px solid rgba(255,255,255,0.13); background:rgba(255,255,255,0.04); color:rgba(255,255,255,0.87); font-size:12px; font-family:inherit; color-scheme:dark;"><option>继承角色音色（默认）</option><option>晓涵·女·成熟</option><option>晓晓·女·温柔</option></select><span style="font-size:10.5px; color:rgba(255,255,255,0.3);">继承：晓涵·女·成熟</span></div>
+                      <button style="margin-left:auto; height:28px; padding:0 12px; border-radius:7px; border:none; background:#34d399; color:#04201a; font-size:11.5px; font-weight:600; cursor:pointer; font-family:inherit;">保存修改</button>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- #3 出图中 -->
+                <div style="border:1px solid rgba(234,179,8,0.25); border-radius:12px; background:#161616; padding:15px 18px;">
+                  <div style="display:flex; align-items:center; gap:11px;"><span style="font-size:13px; font-weight:600; color:rgba(255,255,255,0.52);">#3</span><span style="font-size:13.5px; font-weight:600;">监控室·零点十七分</span><span style="display:inline-flex; align-items:center; gap:6px; height:22px; padding:0 9px; border-radius:6px; background:rgba(234,179,8,0.12); border:1px solid rgba(234,179,8,0.35); font-size:11px; color:#eab308;"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="animation:al-spin 1s linear infinite;"><path d="M21 12a9 9 0 1 1-6.2-8.5"></path></svg>出图中</span>
+                    <div style="margin-left:auto; display:flex; align-items:center; gap:9px;"><span style="font-size:11px; color:#eab308;">已运行 12s</span><button style="height:26px; padding:0 11px; border-radius:7px; border:1px solid rgba(239,68,68,0.4); background:rgba(239,68,68,0.1); color:#f87171; font-size:11.5px; font-weight:600; cursor:pointer; font-family:inherit;">停止</button></div>
+                  </div>
+                </div>
+
+                <!-- #4 DRAFT -->
+                <div style="border:1px solid rgba(255,255,255,0.07); border-radius:12px; background:#161616; padding:15px 18px;">
+                  <div style="display:flex; align-items:center; gap:11px;"><span style="font-size:13px; font-weight:600; color:rgba(255,255,255,0.52);">#4</span><span style="font-size:13.5px; font-weight:600;">后巷追逐</span><span style="display:inline-flex; align-items:center; gap:6px; height:22px; padding:0 9px; border-radius:6px; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.13); font-size:11px; color:rgba(255,255,255,0.52);"><span style="width:5px; height:5px; border-radius:50%; background:rgba(255,255,255,0.4);"></span>待出图</span>
+                    <div style="margin-left:auto; display:flex; gap:8px;"><label style="display:inline-flex; align-items:center; gap:6px; font-size:11.5px; color:rgba(255,255,255,0.52); cursor:pointer;"><input type="checkbox" style="width:13px; height:13px; accent-color:#00bdb0;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path></svg>对口型</label><button style="height:26px; padding:0 11px; border-radius:7px; border:none; background:#6366f1; color:#fff; font-size:11.5px; font-weight:600; cursor:pointer; font-family:inherit;" style-hover="background:#5254cc;">出图</button></div>
+                  </div>
+                </div>
+
+              </div>
+            </div>
+
+            <!-- EXPORT TAB -->
+            <div style="display:{{ dExport }};">
+              <div style="max-width:640px;">
+                <div style="border:1px solid rgba(255,255,255,0.07); border-radius:12px; background:#161616; padding:18px 20px;">
+                  <div style="width:100%; aspect-ratio:16/10; max-height:380px; border-radius:10px; background:repeating-linear-gradient(135deg,#1c1c20,#1c1c20 10px,#181a20 10px,#181a20 20px); display:flex; align-items:center; justify-content:center; position:relative;">
+                    <div style="width:54px; height:54px; border-radius:50%; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center;"><svg width="22" height="22" viewBox="0 0 24 24" fill="#fff" stroke="none"><path d="M8 5v14l11-7z"></path></svg></div>
+                    <span style="position:absolute; bottom:10px; left:12px; font-size:10px; color:rgba(255,255,255,0.3); font-family:'SF Mono',ui-monospace,monospace;">episode_暗夜回声.mp4 · 02:14 · 1080×1920</span>
+                  </div>
+                  <button style="margin-top:14px; height:34px; padding:0 16px; border-radius:8px; border:none; background:#6366f1; color:#fff; font-size:12.5px; font-weight:600; display:inline-flex; align-items:center; gap:8px; cursor:pointer; font-family:inherit;" style-hover="background:#5254cc;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><path d="M7 10l5 5 5-5"></path><path d="M12 15V3"></path></svg>下载整集 mp4</button>
+                </div>
+                <div style="border:1px solid rgba(255,180,84,0.2); border-radius:12px; background:rgba(255,180,84,0.04); padding:16px 18px; margin-top:14px;">
+                  <div style="font-size:12.5px; color:#ffb454; margin-bottom:11px;">平台导出预设（抖音 1080×1920 等）待补。</div>
+                  <button style="height:30px; padding:0 13px; border-radius:8px; border:1px solid rgba(255,180,84,0.3); background:rgba(255,180,84,0.08); color:#ffb454; font-size:12px; cursor:pointer; font-family:inherit; display:inline-flex; align-items:center; gap:7px;">抖音 1080×1920 竖屏 <span style="font-size:9px; padding:1px 5px; border-radius:4px; background:rgba(255,180,84,0.2);">预留</span></button>
+                </div>
+              </div>
+            </div>
+
+          </div>
+
+          <!-- GPU log -->
+          <div style="flex-shrink:0; border-top:1px solid rgba(255,255,255,0.07); background:#0a0a0a;">
+            <div onclick="{{ toggleLog }}" style="height:30px; padding:0 18px; display:flex; align-items:center; gap:8px; cursor:pointer;"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.52)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="transform:rotate({{ logRot }}); transition:transform .15s;"><path d="m9 18 6-6-6-6"></path></svg><span style="font-size:11px; color:rgba(255,255,255,0.52); font-family:'SF Mono',ui-monospace,monospace;">GPU 实时日志</span><span style="font-size:10.5px; color:#eab308; font-family:'SF Mono',ui-monospace,monospace;">● 出图中 12s</span></div>
+            <div style="display:{{ logDisp }}; height:130px; overflow-y:auto; padding:0 18px 10px; font-size:11px; font-family:'SF Mono','Fira Code',ui-monospace,monospace; line-height:1.7;">
+              <div style="color:#34d399;">[12:04:01] flux_generate scene=2 n=4 size=768x1024</div>
+              <div style="color:#6cb6ff;">[12:04:03] TOOL comfyui.queue prompt#a93f enqueued</div>
+              <div style="color:#f87171;">[12:04:07] ERROR vram offload fallback → sequential</div>
+              <div style="color:#34d399;">[12:04:09] sampling 28/28 steps done</div>
+              <div style="color:#34d399;">[12:04:11] flux_generate scene=3 n=4 ... sampling 14/28</div>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <!-- ==================== CHAT MODE ==================== -->
+  <div style="display:{{ chatDisp }}; flex:1; height:100%; min-width:0; overflow:hidden;">
+    <div style="display:flex; height:100%;">
+
+      <!-- HistorySidebar -->
+      <aside style="width:260px; flex-shrink:0; height:100%; border-right:1px solid rgba(255,255,255,0.07); background:#0d0d0d; display:flex; flex-direction:column;">
+        <div style="padding:16px 16px 14px; display:flex; align-items:center; gap:10px;">
+          <div style="width:22px; height:22px; border-radius:7px; background:linear-gradient(135deg,#6366f1,#4338ca); display:flex; align-items:center; justify-content:center; flex-shrink:0;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20.2 6 3 11l-.9-2.4c-.3-1.1.3-2.2 1.3-2.5l13.5-4c1.1-.3 2.2.3 2.5 1.3Z"></path><path d="M3 11h18v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"></path></svg></div>
+          <span style="font-size:13.5px; font-weight:600;">AgentLab</span>
+        </div>
+        <div style="padding:0 12px 12px;">
+          <button style="width:100%; height:34px; border-radius:8px; border:1px dashed rgba(255,255,255,0.2); background:transparent; color:rgba(255,255,255,0.52); font-size:12.5px; display:inline-flex; align-items:center; justify-content:center; gap:7px; cursor:pointer; font-family:inherit; transition:all .14s;" style-hover="border-color:rgba(99,102,241,0.6); color:#a5a8ff;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M5 12h14"></path><path d="M12 5v14"></path></svg>New Chat</button>
+        </div>
+        <div style="flex:1; overflow-y:auto; padding:0 8px;">
+          <div onclick="{{ selSes0 }}" style="height:48px; display:flex; align-items:center; gap:9px; padding:0 11px; border-radius:8px; cursor:pointer; background:{{ ses0bg }};" style-hover="background:rgba(255,255,255,0.04);"><span style="width:7px; height:7px; border-radius:50%; background:#34d399; flex-shrink:0; animation:al-glow 1.6s ease-in-out infinite;" title="该会话有任务进行中"></span><div style="min-width:0; flex:1;"><div style="font-size:12.5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">续写第 3 镜的运镜方案</div><div style="font-size:10px; color:rgba(255,255,255,0.30);">8 条 · 06/13 14:22</div></div></div>
+          <div onclick="{{ selSes1 }}" style="height:48px; display:flex; align-items:center; gap:9px; padding:0 11px; border-radius:8px; cursor:pointer; background:{{ ses1bg }};" style-hover="background:rgba(255,255,255,0.04);"><div style="min-width:0; flex:1;"><div style="font-size:12.5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">把第一集拆成 8 个分镜</div><div style="font-size:10px; color:rgba(255,255,255,0.30);">23 条 · 06/13 10:08</div></div></div>
+          <div onclick="{{ selSes2 }}" style="height:48px; display:flex; align-items:center; gap:9px; padding:0 11px; border-radius:8px; cursor:pointer; background:{{ ses2bg }};" style-hover="background:rgba(255,255,255,0.04);"><div style="min-width:0; flex:1;"><div style="font-size:12.5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:rgba(255,255,255,0.87);">苏医生 LoRA 训练咨询</div><div style="font-size:10px; color:rgba(255,255,255,0.30);">5 条 · 06/12 21:40</div></div></div>
+        </div>
+      </aside>
+
+      <!-- chat main column -->
+      <div style="flex:1; min-width:0; height:100%; display:flex; flex-direction:column; overflow:hidden;">
+        <!-- TopBar -->
+        <header style="flex-shrink:0; height:44px; padding:0 18px; display:flex; align-items:center; gap:10px; border-bottom:1px solid rgba(255,255,255,0.07); background:rgba(13,13,13,0.82); backdrop-filter:blur(14px);">
+          <div style="width:20px; height:20px; border-radius:6px; background:linear-gradient(135deg,#6366f1,#4338ca); display:flex; align-items:center; justify-content:center;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20.2 6 3 11l-.9-2.4c-.3-1.1.3-2.2 1.3-2.5l13.5-4c1.1-.3 2.2.3 2.5 1.3Z"></path><path d="M3 11h18v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"></path></svg></div>
+          <span style="font-size:13px; font-weight:600;">AgentLab</span>
+          <span style="color:rgba(255,255,255,0.3);">·</span>
+          <span style="font-size:11.5px; color:rgba(255,255,255,0.52); font-family:'SF Mono',ui-monospace,monospace;">deepseek-chat</span>
+          <div style="margin-left:auto; display:flex; gap:8px;">
+            <button style="width:30px; height:30px; border-radius:7px; border:1px solid rgba(255,255,255,0.13); background:rgba(255,255,255,0.04); color:rgba(255,255,255,0.7); display:inline-flex; align-items:center; justify-content:center; cursor:pointer; font-family:inherit;" style-hover="background:rgba(255,255,255,0.08);"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"></path><path d="m15 5 4 4"></path></svg></button>
+            <button onclick="{{ openKb }}" style="height:30px; padding:0 11px; border-radius:7px; border:1px solid {{ kbBorder }}; background:{{ kbBg }}; color:{{ kbColor }}; font-size:11.5px; display:inline-flex; align-items:center; gap:7px; cursor:pointer; font-family:inherit;"><span style="width:5px; height:5px; border-radius:50%; background:#34d399;"></span>Knowledge Base <span style="font-size:9.5px; padding:1px 5px; border-radius:4px; background:rgba(255,255,255,0.1);">142</span></button>
+            <button onclick="{{ openSettings }}" style="width:30px; height:30px; border-radius:7px; border:1px solid {{ setBorder }}; background:{{ setBg }}; color:{{ setColor }}; display:inline-flex; align-items:center; justify-content:center; cursor:pointer; font-family:inherit;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82 2 2 0 1 1-2.83 2.83 1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51 2 2 0 0 1-4 0 1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33 2 2 0 1 1-2.83-2.83 1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1 2 2 0 0 1 0-4 1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82 2 2 0 1 1 2.83-2.83 1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51 2 2 0 0 1 4 0 1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33 2 2 0 1 1 2.83 2.83 1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1 2 2 0 0 1 0 4 1.65 1.65 0 0 0-1.51 1Z"></path></svg></button>
+          </div>
+        </header>
+
+        <!-- ChatWindow -->
+        <div style="flex:1; min-height:0; overflow-y:auto;">
+          <div style="max-width:760px; margin:0 auto; padding:36px 24px 40px; display:flex; flex-direction:column; gap:22px;">
+
+            <!-- user -->
+            <div style="align-self:flex-end; max-width:72%; background:rgba(99,102,241,0.14); border:1px solid rgba(99,102,241,0.25); border-radius:14px 14px 4px 14px; padding:11px 15px; font-size:13.5px; line-height:1.55;">把「暗夜回声」第一集拆成 8 个分镜，冷蓝悬疑调，然后第 2 镜先出 4 张候选。</div>
+
+            <!-- assistant -->
+            <div>
+              <div style="font-size:10px; font-weight:700; letter-spacing:1px; color:#6366f1; font-family:'SF Mono',ui-monospace,monospace; margin-bottom:9px;">AGENTLAB</div>
+              <div style="font-size:13.5px; line-height:1.65; color:rgba(255,255,255,0.87);">已完成拆分镜并按序分配 scene_number。第 2 镜「验尸房的低语」已出 4 张 FLUX 候选，请选 1 张进入出片。</div>
+              <!-- tool steps -->
+              <div style="border:1px solid rgba(99,102,241,0.2); border-radius:10px; background:rgba(99,102,241,0.06); padding:12px 14px; margin-top:12px;">
+                <div style="display:flex; flex-direction:column; gap:7px; font-size:12px;">
+                  <div style="display:flex; align-items:center; gap:8px; color:rgba(255,255,255,0.52);"><span style="color:#34d399;">✓</span>auto_storyboard(n=8) → 8 镜</div>
+                  <div style="display:flex; align-items:center; gap:8px; color:rgba(255,255,255,0.52);"><span style="color:#34d399;">✓</span>set_episode_style(冷蓝,电影感)</div>
+                  <div style="display:flex; align-items:center; gap:8px; color:rgba(255,255,255,0.52);"><span style="color:#34d399;">✓</span>flux_generate(scene=2, n=4)</div>
+                </div>
+              </div>
+              <!-- candidate wall -->
+              <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-top:12px;">
+                <div onclick="{{ chatSel0 }}" style="position:relative; border-radius:9px; overflow:hidden; aspect-ratio:3/4; cursor:pointer; border:{{ cB0 }}; background:repeating-linear-gradient(135deg,#1c1c20,#1c1c20 8px,#181a20 8px,#181a20 16px);"><div style="position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-size:9.5px; color:rgba(255,255,255,0.3); font-family:'SF Mono',ui-monospace,monospace;">候选 1</div><div style="position:absolute; right:6px; top:6px;">{{ cTag0 }}</div></div>
+                <div onclick="{{ chatSel1 }}" style="position:relative; border-radius:9px; overflow:hidden; aspect-ratio:3/4; cursor:pointer; border:{{ cB1 }}; background:repeating-linear-gradient(135deg,#1c1c20,#1c1c20 8px,#181a20 8px,#181a20 16px);"><div style="position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-size:9.5px; color:rgba(255,255,255,0.3); font-family:'SF Mono',ui-monospace,monospace;">候选 2</div><div style="position:absolute; right:6px; top:6px;">{{ cTag1 }}</div></div>
+                <div onclick="{{ chatSel2 }}" style="position:relative; border-radius:9px; overflow:hidden; aspect-ratio:3/4; cursor:pointer; border:{{ cB2 }}; background:repeating-linear-gradient(135deg,#1c1c20,#1c1c20 8px,#181a20 8px,#181a20 16px);"><div style="position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-size:9.5px; color:rgba(255,255,255,0.3); font-family:'SF Mono',ui-monospace,monospace;">候选 3</div><div style="position:absolute; right:6px; top:6px;">{{ cTag2 }}</div></div>
+                <div onclick="{{ chatSel3 }}" style="position:relative; border-radius:9px; overflow:hidden; aspect-ratio:3/4; cursor:pointer; border:{{ cB3 }}; background:repeating-linear-gradient(135deg,#1c1c20,#1c1c20 8px,#181a20 8px,#181a20 16px);"><div style="position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-size:9.5px; color:rgba(255,255,255,0.3); font-family:'SF Mono',ui-monospace,monospace;">候选 4</div><div style="position:absolute; right:6px; top:6px;">{{ cTag3 }}</div></div>
+              </div>
+              <!-- RAG sources -->
+              <div style="display:flex; gap:6px; margin-top:11px; flex-wrap:wrap;"><span style="font-size:10.5px; padding:3px 8px; border-radius:5px; background:rgba(99,102,241,0.1); border:1px solid rgba(99,102,241,0.25); color:#a5a8ff; font-family:'SF Mono',ui-monospace,monospace;">#01 character_bible.md</span><span style="font-size:10.5px; padding:3px 8px; border-radius:5px; background:rgba(99,102,241,0.1); border:1px solid rgba(99,102,241,0.25); color:#a5a8ff; font-family:'SF Mono',ui-monospace,monospace;">#02 style.json</span></div>
+              <!-- quick replies -->
+              <div style="display:flex; gap:8px; margin-top:13px; flex-wrap:wrap;"><button style="height:28px; padding:0 12px; border-radius:8px; border:1px solid rgba(255,255,255,0.13); background:rgba(255,255,255,0.04); color:rgba(255,255,255,0.87); font-size:12px; cursor:pointer; font-family:inherit;" style-hover="background:rgba(255,255,255,0.08);">选候选 2 出片</button><button style="height:28px; padding:0 12px; border-radius:8px; border:1px solid rgba(255,255,255,0.13); background:rgba(255,255,255,0.04); color:rgba(255,255,255,0.87); font-size:12px; cursor:pointer; font-family:inherit;" style-hover="background:rgba(255,255,255,0.08);">重出这一镜</button><button style="height:28px; padding:0 12px; border-radius:8px; border:1px solid rgba(255,255,255,0.13); background:rgba(255,255,255,0.04); color:rgba(255,255,255,0.87); font-size:12px; cursor:pointer; font-family:inherit;" style-hover="background:rgba(255,255,255,0.08);">继续第 3 镜</button></div>
+            </div>
+
+            <!-- param_form (cyan) -->
+            <div style="border:1px solid rgba(0,189,176,0.3); border-radius:12px; background:rgba(0,189,176,0.05); padding:15px 17px;">
+              <div style="display:flex; align-items:center; gap:8px; margin-bottom:12px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#00bdb0" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M15 4V2"></path><path d="M8 9h2"></path><path d="m3 21 9-9"></path></svg><span style="font-size:12.5px; font-weight:600; color:#5fe8de;">出图参数卡 param_form</span></div>
+              <textarea style="width:100%; height:46px; padding:8px; border-radius:6px; border:1px solid rgba(0,189,176,0.25); background:rgba(255,255,255,0.04); color:rgba(255,255,255,0.87); font-size:12.5px; font-family:inherit; outline:none; resize:none; line-height:1.5;">苏医生，验尸房，冷白无影灯，俯视，冷蓝调</textarea>
+              <div style="display:flex; gap:10px; align-items:center; margin-top:11px; flex-wrap:wrap;">
+                <div style="display:flex; align-items:center; gap:7px;"><span style="font-size:11.5px; color:rgba(255,255,255,0.52);">张数</span><input type="number" value="4" style="width:48px; height:30px; padding:0 8px; border-radius:6px; border:1px solid rgba(0,189,176,0.25); background:rgba(255,255,255,0.04); color:rgba(255,255,255,0.87); font-size:12.5px; font-family:inherit; outline:none;"></div>
+                <select style="height:30px; padding:0 8px; border-radius:6px; border:1px solid rgba(0,189,176,0.25); background:rgba(255,255,255,0.04); color:rgba(255,255,255,0.87); font-size:12px; font-family:inherit; color-scheme:dark;"><option>768×1024 竖屏</option><option>1024×768 横屏</option><option>1024×1024 方形</option></select>
+                <button style="margin-left:auto; height:30px; padding:0 14px; border-radius:8px; border:none; background:#00bdb0; color:#04201e; font-size:12px; font-weight:600; cursor:pointer; font-family:inherit;" style-hover="opacity:0.88;">出图</button>
+              </div>
+            </div>
+
+            <!-- video_param_form (cyan) -->
+            <div style="border:1px solid rgba(0,189,176,0.3); border-radius:12px; background:rgba(0,189,176,0.05); padding:15px 17px;">
+              <div style="display:flex; align-items:center; gap:8px; margin-bottom:12px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#00bdb0" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="m12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z"></path></svg><span style="font-size:12.5px; font-weight:600; color:#5fe8de;">出视频参数卡 video_param_form</span><span style="margin-left:auto; font-size:11px; color:#5fe8de;">预计 ≈ 18s</span></div>
+              <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-bottom:11px;">
+                <select style="height:30px; padding:0 8px; border-radius:6px; border:1px solid rgba(0,189,176,0.25); background:rgba(255,255,255,0.04); color:rgba(255,255,255,0.87); font-size:12px; font-family:inherit; color-scheme:dark;"><option>Wan2.2</option><option>LTX</option></select>
+              </div>
+              <textarea style="width:100%; height:40px; padding:8px; border-radius:6px; border:1px solid rgba(0,189,176,0.25); background:rgba(255,255,255,0.04); color:rgba(255,255,255,0.87); font-size:12.5px; font-family:inherit; outline:none; resize:none; line-height:1.5;">缓慢推近，无影灯微微晃动</textarea>
+              <div style="display:flex; gap:10px; align-items:flex-end; margin-top:11px; flex-wrap:wrap;">
+                <div><label style="font-size:10.5px; color:rgba(255,255,255,0.52); display:flex; align-items:center; gap:4px; margin-bottom:5px;">size <span style="width:13px; height:13px; border-radius:50%; border:1px solid rgba(255,255,255,0.3); display:inline-flex; align-items:center; justify-content:center; font-size:9px; color:rgba(255,255,255,0.52);">?</span></label><select style="height:28px; padding:0 6px; border-radius:6px; border:1px solid rgba(0,189,176,0.25); background:rgba(255,255,255,0.04); color:rgba(255,255,255,0.87); font-size:12px; font-family:inherit; color-scheme:dark;"><option>704×1280</option><option>1280×704</option></select></div>
+                <div><label style="font-size:10.5px; color:rgba(255,255,255,0.52); display:block; margin-bottom:5px;">frame_num</label><input type="number" value="81" style="width:64px; height:28px; padding:0 8px; border-radius:6px; border:1px solid rgba(0,189,176,0.25); background:rgba(255,255,255,0.04); color:rgba(255,255,255,0.87); font-size:12px; font-family:inherit; outline:none;"></div>
+                <div><label style="font-size:10.5px; color:rgba(255,255,255,0.52); display:block; margin-bottom:5px;">sample_steps</label><input type="number" value="30" style="width:64px; height:28px; padding:0 8px; border-radius:6px; border:1px solid rgba(0,189,176,0.25); background:rgba(255,255,255,0.04); color:rgba(255,255,255,0.87); font-size:12px; font-family:inherit; outline:none;"></div>
+                <button style="margin-left:auto; height:30px; padding:0 14px; border-radius:8px; border:none; background:#00bdb0; color:#04201e; font-size:12px; font-weight:600; cursor:pointer; font-family:inherit;" style-hover="opacity:0.88;">出视频</button>
+              </div>
+            </div>
+
+            <!-- interrupt HITL -->
+            <div style="border:1px solid rgba(255,255,255,0.13); border-radius:12px; background:#161616; padding:15px 17px;">
+              <div style="font-size:12.5px; line-height:1.6; margin-bottom:13px;">即将对 4 个已选分镜执行「一键出片并合成」，预计 ≈ 18 秒/镜，是否继续？</div>
+              <div style="display:flex; gap:10px;"><button style="height:32px; padding:0 16px; border-radius:8px; border:none; background:#34d399; color:#04201a; font-size:12.5px; font-weight:600; cursor:pointer; font-family:inherit;">确认执行</button><button style="height:32px; padding:0 16px; border-radius:8px; border:1px solid rgba(239,68,68,0.4); background:rgba(239,68,68,0.1); color:#f87171; font-size:12.5px; font-weight:600; cursor:pointer; font-family:inherit;">取消</button></div>
+            </div>
+
+          </div>
+        </div>
+
+        <!-- InputBar -->
+        <div style="flex-shrink:0; padding:0 24px;">
+          <div style="max-width:760px; margin:0 auto;">
+            <div style="border:1px solid rgba(255,255,255,0.13); border-radius:12px; background:#161616; padding:12px 14px;">
+              <div style="font-size:10.5px; color:rgba(255,255,255,0.3); margin-bottom:8px; font-family:'SF Mono',ui-monospace,monospace;">/ 唤起命令 · /new /clear /workspace /compact /agent /think /help</div>
+              <textarea placeholder="给 AgentLab 发消息…  Enter 发送 · Shift+Enter 换行" style="width:100%; min-height:24px; max-height:160px; border:none; background:transparent; color:rgba(255,255,255,0.87); font-size:13.5px; font-family:inherit; outline:none; resize:none; line-height:1.5;"></textarea>
+              <div style="display:flex; align-items:center; gap:8px; margin-top:10px; flex-wrap:wrap;">
+                <div style="display:flex; gap:5px; flex-wrap:wrap;">
+                  <button onclick="{{ setAgentSup }}" style="height:25px; padding:0 9px; border-radius:13px; border:1px solid {{ agSupB }}; background:{{ agSupBg }}; color:{{ agSupC }}; font-size:11px; cursor:pointer; font-family:inherit;">Supervisor</button>
+                  <button onclick="{{ setAgentGen }}" style="height:25px; padding:0 9px; border-radius:13px; border:1px solid {{ agGenB }}; background:{{ agGenBg }}; color:{{ agGenC }}; font-size:11px; cursor:pointer; font-family:inherit;">General</button>
+                  <button onclick="{{ setAgentCode }}" style="height:25px; padding:0 9px; border-radius:13px; border:1px solid {{ agCodeB }}; background:{{ agCodeBg }}; color:{{ agCodeC }}; font-size:11px; cursor:pointer; font-family:inherit;">Code</button>
+                  <button onclick="{{ setAgentBatch }}" style="height:25px; padding:0 9px; border-radius:13px; border:1px solid {{ agBatchB }}; background:{{ agBatchBg }}; color:{{ agBatchC }}; font-size:11px; cursor:pointer; font-family:inherit;">Batch</button>
+                </div>
+                <div style="width:1px; height:18px; background:rgba(255,255,255,0.1);"></div>
+                <div style="display:flex; gap:5px;">
+                  <button onclick="{{ setThinkStd }}" style="height:25px; padding:0 9px; border-radius:7px; border:1px solid {{ thStdB }}; background:{{ thStdBg }}; color:{{ thStdC }}; font-size:11px; cursor:pointer; font-family:inherit;">标准</button>
+                  <button onclick="{{ setThinkDeep }}" style="height:25px; padding:0 9px; border-radius:7px; border:1px solid {{ thDeepB }}; background:{{ thDeepBg }}; color:{{ thDeepC }}; font-size:11px; cursor:pointer; font-family:inherit;">深度思考</button>
+                </div>
+                <button style="margin-left:auto; height:30px; padding:0 18px; border-radius:8px; border:none; background:#6366f1; color:#fff; font-size:12.5px; font-weight:600; cursor:pointer; font-family:inherit; flex-shrink:0; white-space:nowrap;" style-hover="background:#5254cc;">发送</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ContextBar -->
+        <div style="flex-shrink:0; height:44px; padding:0 18px; display:flex; align-items:center; gap:14px; border-top:1px solid rgba(255,255,255,0.07); margin-top:12px;">
+          <button onclick="{{ goStudio }}" style="height:30px; padding:0 12px; border-radius:8px; border:1px solid rgba(255,255,255,0.13); background:rgba(255,255,255,0.04); color:rgba(255,255,255,0.87); font-size:12px; display:inline-flex; align-items:center; gap:7px; cursor:pointer; font-family:inherit;" style-hover="background:rgba(255,255,255,0.08);"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20.2 6 3 11l-.9-2.4c-.3-1.1.3-2.2 1.3-2.5l13.5-4c1.1-.3 2.2.3 2.5 1.3Z"></path><path d="M3 11h18v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"></path></svg>工作台</button>
+          <div style="display:flex; align-items:center; gap:7px; min-width:0;"><span style="font-size:11.5px; color:rgba(255,255,255,0.52);">工作目录：</span><span style="font-size:11.5px; color:rgba(134,239,172,0.9); font-family:'SF Mono',ui-monospace,monospace; max-width:340px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">~/agent_workspace/暗夜回声</span></div>
+          <div style="margin-left:auto; display:flex; align-items:center; gap:10px;">
+            <button onclick="{{ openFolder }}" style="height:28px; padding:0 11px; border-radius:7px; border:1px solid rgba(255,255,255,0.13); background:rgba(255,255,255,0.04); color:rgba(255,255,255,0.87); font-size:11.5px; cursor:pointer; font-family:inherit;" style-hover="background:rgba(255,255,255,0.08);">更改</button>
+            <button onclick="{{ openDrawer }}" style="height:28px; padding:0 11px; border-radius:7px; border:none; background:#6366f1; color:#fff; font-size:11.5px; font-weight:600; cursor:pointer; font-family:inherit;" style-hover="background:#5254cc;">制作面板</button>
+            <div style="display:flex; align-items:center; gap:7px;"><div style="width:90px; height:5px; border-radius:3px; background:rgba(255,255,255,0.06); overflow:hidden;"><div style="height:100%; width:42%; background:#6366f1; border-radius:3px;"></div></div><span style="font-size:10.5px; color:rgba(255,255,255,0.52); font-family:'SF Mono',ui-monospace,monospace;">42%</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== DRAWER: production panel ==================== -->
+  <div style="display:{{ drawerDisp }}; position:absolute; inset:0; z-index:60;">
+    <div onclick="{{ closeDrawer }}" style="position:absolute; inset:0; background:rgba(0,0,0,0.5); backdrop-filter:blur(2px);"></div>
+    <div style="position:absolute; top:0; right:0; bottom:0; width:min(720px,92vw); background:#0d0d0d; border-left:1px solid rgba(255,255,255,0.13); box-shadow:-12px 0 40px rgba(0,0,0,0.5); display:flex; flex-direction:column;">
+      <div style="flex-shrink:0; padding:16px 20px; display:flex; align-items:center; gap:11px; border-bottom:1px solid rgba(255,255,255,0.07);">
+        <div style="width:24px; height:24px; border-radius:7px; background:linear-gradient(135deg,#6366f1,#4338ca); display:flex; align-items:center; justify-content:center;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20.2 6 3 11l-.9-2.4c-.3-1.1.3-2.2 1.3-2.5l13.5-4c1.1-.3 2.2.3 2.5 1.3Z"></path><path d="M3 11h18v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"></path></svg></div>
+        <span style="font-size:14px; font-weight:600;">短剧制作面板</span>
+        <button onclick="{{ goStudio }}" style="font-size:11.5px; color:#a5a8ff; background:none; border:none; cursor:pointer; font-family:inherit;">去工作台管理剧集 →</button>
+        <button onclick="{{ closeDrawer }}" style="margin-left:auto; width:28px; height:28px; border-radius:7px; border:1px solid rgba(255,255,255,0.13); background:rgba(255,255,255,0.04); color:rgba(255,255,255,0.7); display:inline-flex; align-items:center; justify-content:center; cursor:pointer; font-family:inherit; font-size:15px;">×</button>
+      </div>
+      <div style="flex:1; overflow-y:auto; padding:18px 20px;">
+        <div style="display:flex; align-items:center; gap:14px; margin-bottom:14px; flex-wrap:wrap;"><span style="font-size:14px; font-weight:600;">暗夜回声</span><div style="display:flex; gap:12px; font-size:11.5px; color:rgba(255,255,255,0.52);"><span>总数 <span style="color:rgba(255,255,255,0.87);">8</span></span><span>已选 <span style="color:#c084fc;">4</span></span><span>已出片 <span style="color:#34d399;">2</span></span></div></div>
+        <div style="display:flex; gap:22px; border-bottom:1px solid rgba(255,255,255,0.07); margin-bottom:16px;"><div style="padding-bottom:10px; border-bottom:2px solid #6366f1; font-size:12.5px; font-weight:650; color:rgba(255,255,255,0.87); margin-bottom:-1px;">分镜制作</div><div style="padding-bottom:10px; font-size:12.5px; color:rgba(255,255,255,0.52);">脚本</div><div style="padding-bottom:10px; font-size:12.5px; color:rgba(255,255,255,0.52);">角色&amp;LoRA</div><div style="padding-bottom:10px; font-size:12.5px; color:rgba(255,255,255,0.52);">导出</div></div>
+        <div style="display:flex; flex-direction:column; gap:11px;">
+          <div style="border:1px solid rgba(255,255,255,0.07); border-radius:10px; background:#161616; padding:13px 15px; display:flex; align-items:center; gap:10px;"><span style="font-size:12px; color:rgba(255,255,255,0.52);">#1</span><span style="font-size:13px; font-weight:600;">雨夜·废弃仓库</span><span style="margin-left:auto; font-size:11px; color:#34d399; white-space:nowrap; flex-shrink:0;">● 已出片</span></div>
+          <div style="border:1px solid rgba(255,255,255,0.07); border-radius:10px; background:#161616; padding:13px 15px; display:flex; align-items:center; gap:10px;"><span style="font-size:12px; color:rgba(255,255,255,0.52);">#2</span><span style="font-size:13px; font-weight:600;">验尸房的低语</span><span style="margin-left:auto; font-size:11px; color:#c084fc; white-space:nowrap; flex-shrink:0;">● 待选图</span></div>
+          <div style="border:1px solid rgba(234,179,8,0.25); border-radius:10px; background:#161616; padding:13px 15px; display:flex; align-items:center; gap:10px;"><span style="font-size:12px; color:rgba(255,255,255,0.52);">#3</span><span style="font-size:13px; font-weight:600;">监控室·零点十七分</span><span style="margin-left:auto; font-size:11px; color:#eab308; white-space:nowrap; flex-shrink:0;">● 出图中 12s</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== DRAWER: settings ==================== -->
+  <div style="display:{{ settingsDisp }}; position:absolute; inset:0; z-index:60;">
+    <div onclick="{{ closePanels }}" style="position:absolute; inset:0; background:rgba(0,0,0,0.5); backdrop-filter:blur(2px);"></div>
+    <div style="position:absolute; top:0; right:0; bottom:0; width:min(420px,92vw); background:#0d0d0d; border-left:1px solid rgba(255,255,255,0.13); box-shadow:-12px 0 40px rgba(0,0,0,0.5); display:flex; flex-direction:column;">
+      <div style="flex-shrink:0; padding:16px 20px; display:flex; align-items:center; gap:10px; border-bottom:1px solid rgba(255,255,255,0.07);"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.7)" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82 2 2 0 1 1-2.83 2.83 1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51 2 2 0 0 1-4 0 1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33 2 2 0 1 1-2.83-2.83 1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1 2 2 0 0 1 0-4 1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82 2 2 0 1 1 2.83-2.83 1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51 2 2 0 0 1 4 0 1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33 2 2 0 1 1 2.83 2.83 1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1 2 2 0 0 1 0 4 1.65 1.65 0 0 0-1.51 1Z"></path></svg><span style="font-size:14px; font-weight:600;">Settings</span><button onclick="{{ closePanels }}" style="margin-left:auto; width:28px; height:28px; border-radius:7px; border:1px solid rgba(255,255,255,0.13); background:rgba(255,255,255,0.04); color:rgba(255,255,255,0.7); display:inline-flex; align-items:center; justify-content:center; cursor:pointer; font-family:inherit; font-size:15px;">×</button></div>
+      <div style="flex:1; overflow-y:auto; padding:18px 20px;">
+        <label style="font-size:11px; color:rgba(255,255,255,0.52); display:block; margin-bottom:7px;">Backend Endpoint</label>
+        <input type="text" value="http://localhost:8000/api" style="width:100%; height:32px; padding:0 9px; border-radius:7px; border:1px solid rgba(255,255,255,0.13); background:rgba(255,255,255,0.04); color:#86efac; font-size:12px; font-family:'SF Mono',ui-monospace,monospace; outline:none; margin-bottom:18px;" style-focus="border-color:#6366f1;">
+        <div style="border:1px solid rgba(255,255,255,0.07); border-radius:10px; background:rgba(255,255,255,0.02); padding:14px 16px;">
+          <div style="font-size:12.5px; font-weight:600; margin-bottom:12px;">Supervisor · 对话/导演模型</div>
+          <div style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:13px;"><button style="height:24px; padding:0 9px; border-radius:6px; border:1px solid rgba(99,102,241,0.4); background:rgba(99,102,241,0.12); color:#a5a8ff; font-size:11px; cursor:pointer; font-family:inherit;">DS Chat</button><button style="height:24px; padding:0 9px; border-radius:6px; border:1px solid rgba(255,255,255,0.13); background:rgba(255,255,255,0.04); color:rgba(255,255,255,0.52); font-size:11px; cursor:pointer; font-family:inherit;">DS R1</button><button style="height:24px; padding:0 9px; border-radius:6px; border:1px solid rgba(255,255,255,0.13); background:rgba(255,255,255,0.04); color:rgba(255,255,255,0.52); font-size:11px; cursor:pointer; font-family:inherit;">GPT mini</button><button style="height:24px; padding:0 9px; border-radius:6px; border:1px solid rgba(255,255,255,0.13); background:rgba(255,255,255,0.04); color:rgba(255,255,255,0.52); font-size:11px; cursor:pointer; font-family:inherit;">GPT-4o</button></div>
+          <label style="font-size:11px; color:rgba(255,255,255,0.52); display:block; margin-bottom:6px;">Model Name</label><input type="text" value="deepseek-chat" style="width:100%; height:30px; padding:0 9px; border-radius:6px; border:1px solid rgba(255,255,255,0.13); background:rgba(255,255,255,0.04); color:rgba(255,255,255,0.87); font-size:12px; font-family:'SF Mono',ui-monospace,monospace; outline:none; margin-bottom:11px;" style-focus="border-color:#6366f1;">
+          <label style="font-size:11px; color:rgba(255,255,255,0.52); display:block; margin-bottom:6px;">API Base URL</label><input type="text" value="https://api.deepseek.com" style="width:100%; height:30px; padding:0 9px; border-radius:6px; border:1px solid rgba(255,255,255,0.13); background:rgba(255,255,255,0.04); color:rgba(255,255,255,0.87); font-size:12px; font-family:'SF Mono',ui-monospace,monospace; outline:none; margin-bottom:11px;" style-focus="border-color:#6366f1;">
+          <label style="font-size:11px; color:rgba(255,255,255,0.52); display:block; margin-bottom:6px;">API Key</label>
+          <div style="display:flex; gap:7px;"><input type="password" value="sk-xxxxxxxxxxxx" style="flex:1; height:30px; padding:0 9px; border-radius:6px; border:1px solid rgba(255,255,255,0.13); background:rgba(255,255,255,0.04); color:rgba(255,255,255,0.87); font-size:12px; font-family:'SF Mono',ui-monospace,monospace; outline:none;"><button style="width:32px; height:30px; border-radius:6px; border:1px solid rgba(255,255,255,0.13); background:rgba(255,255,255,0.04); color:rgba(255,255,255,0.52); display:inline-flex; align-items:center; justify-content:center; cursor:pointer; font-family:inherit;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"></path><circle cx="12" cy="12" r="3"></circle></svg></button></div>
+        </div>
+        <div style="display:flex; gap:10px; margin-top:18px;"><button style="flex:1; height:34px; border-radius:8px; border:1px solid rgba(255,255,255,0.13); background:rgba(255,255,255,0.04); color:rgba(255,255,255,0.87); font-size:12.5px; cursor:pointer; font-family:inherit;">Reset all</button><button style="flex:1; height:34px; border-radius:8px; border:none; background:#6366f1; color:#fff; font-size:12.5px; font-weight:600; cursor:pointer; font-family:inherit;" style-hover="background:#5254cc;">Save changes</button></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== DRAWER: knowledge base ==================== -->
+  <div style="display:{{ kbDisp }}; position:absolute; inset:0; z-index:60;">
+    <div onclick="{{ closePanels }}" style="position:absolute; inset:0; background:rgba(0,0,0,0.5); backdrop-filter:blur(2px);"></div>
+    <div style="position:absolute; top:0; right:0; bottom:0; width:min(320px,92vw); background:#0d0d0d; border-left:1px solid rgba(255,255,255,0.13); box-shadow:-12px 0 40px rgba(0,0,0,0.5); display:flex; flex-direction:column;">
+      <div style="flex-shrink:0; padding:16px 18px; display:flex; align-items:center; gap:9px; border-bottom:1px solid rgba(255,255,255,0.07);"><span style="font-size:14px; font-weight:600;">Knowledge Base</span><span style="width:5px; height:5px; border-radius:50%; background:#34d399;"></span><button onclick="{{ closePanels }}" style="margin-left:auto; width:28px; height:28px; border-radius:7px; border:1px solid rgba(255,255,255,0.13); background:rgba(255,255,255,0.04); color:rgba(255,255,255,0.7); display:inline-flex; align-items:center; justify-content:center; cursor:pointer; font-family:inherit; font-size:15px;">×</button></div>
+      <div style="flex:1; overflow-y:auto; padding:16px 18px;">
+        <div style="display:flex; gap:6px; margin-bottom:16px; background:rgba(255,255,255,0.04); border-radius:8px; padding:3px;"><button style="flex:1; height:28px; border-radius:6px; border:none; background:#6366f1; color:#fff; font-size:11.5px; font-weight:600; cursor:pointer; font-family:inherit;">Upload File</button><button style="flex:1; height:28px; border-radius:6px; border:none; background:transparent; color:rgba(255,255,255,0.52); font-size:11.5px; cursor:pointer; font-family:inherit;">Paste Text</button></div>
+        <label style="font-size:11px; color:rgba(255,255,255,0.52); display:block; margin-bottom:6px;">Project ID</label><input type="text" value="default" style="width:100%; height:30px; padding:0 9px; border-radius:6px; border:1px solid rgba(255,255,255,0.13); background:rgba(255,255,255,0.04); color:rgba(255,255,255,0.87); font-size:12px; font-family:inherit; outline:none; margin-bottom:14px;">
+        <div style="border:1.5px dashed rgba(255,255,255,0.18); border-radius:10px; padding:32px 16px; text-align:center;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.3)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="margin-bottom:10px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><path d="M17 8l-5-5-5 5"></path><path d="M12 3v12"></path></svg><div style="font-size:12px; color:rgba(255,255,255,0.52);">拖拽上传 PDF / TXT / DOCX</div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== MODAL: folder picker ==================== -->
+  <div style="display:{{ folderDisp }}; position:absolute; inset:0; z-index:70; align-items:center; justify-content:center;">
+    <div onclick="{{ closeFolder }}" style="position:absolute; inset:0; background:rgba(0,0,0,0.55); backdrop-filter:blur(2px);"></div>
+    <div style="position:relative; width:560px; max-width:92vw; background:#161616; border:1px solid rgba(255,255,255,0.13); border-radius:14px; box-shadow:0 20px 60px rgba(0,0,0,0.6); overflow:hidden;">
+      <div style="padding:16px 20px; display:flex; align-items:center; border-bottom:1px solid rgba(255,255,255,0.07);"><span style="font-size:14px; font-weight:600;">选择工作目录</span><button onclick="{{ closeFolder }}" style="margin-left:auto; width:28px; height:28px; border-radius:7px; border:1px solid rgba(255,255,255,0.13); background:rgba(255,255,255,0.04); color:rgba(255,255,255,0.7); display:inline-flex; align-items:center; justify-content:center; cursor:pointer; font-family:inherit; font-size:15px;">×</button></div>
+      <div style="padding:18px 20px;">
+        <input type="text" value="/Users/lab/agent_workspace" style="width:100%; height:32px; padding:0 10px; border-radius:7px; border:1px solid rgba(255,255,255,0.13); background:rgba(255,255,255,0.04); color:rgba(255,255,255,0.87); font-size:12.5px; font-family:'SF Mono',ui-monospace,monospace; outline:none; margin-bottom:14px;" style-focus="border-color:#6366f1;">
+        <div style="border:1px solid rgba(255,255,255,0.07); border-radius:10px; background:#0d0d0d; min-height:200px; max-height:320px; overflow-y:auto;">
+          <div style="height:38px; display:flex; align-items:center; padding:0 14px; border-bottom:1px solid rgba(255,255,255,0.05); cursor:pointer; font-size:12.5px; color:rgba(255,255,255,0.52);" style-hover="background:rgba(255,255,255,0.03);">.. 返回上级</div>
+          <div style="height:38px; display:flex; align-items:center; gap:8px; padding:0 14px; border-bottom:1px solid rgba(255,255,255,0.05); cursor:pointer; font-size:12.5px;" style-hover="background:rgba(255,255,255,0.03);"><span style="color:rgba(255,255,255,0.3); font-family:'SF Mono',ui-monospace,monospace;">/</span>暗夜回声</div>
+          <div style="height:38px; display:flex; align-items:center; gap:8px; padding:0 14px; border-bottom:1px solid rgba(255,255,255,0.05); cursor:pointer; font-size:12.5px;" style-hover="background:rgba(255,255,255,0.03);"><span style="color:rgba(255,255,255,0.3); font-family:'SF Mono',ui-monospace,monospace;">/</span>第七位证人</div>
+          <div style="height:38px; display:flex; align-items:center; gap:8px; padding:0 14px; cursor:pointer; font-size:12.5px;" style-hover="background:rgba(255,255,255,0.03);"><span style="color:rgba(255,255,255,0.3); font-family:'SF Mono',ui-monospace,monospace;">/</span>雾港谜案</div>
+        </div>
+        <div style="display:flex; gap:10px; margin-top:16px; justify-content:flex-end;"><button onclick="{{ closeFolder }}" style="height:34px; padding:0 14px; border-radius:8px; border:1px solid rgba(255,255,255,0.13); background:rgba(255,255,255,0.04); color:rgba(255,255,255,0.87); font-size:12.5px; cursor:pointer; font-family:inherit;">用默认目录</button><button onclick="{{ closeFolder }}" style="height:34px; padding:0 16px; border-radius:8px; border:none; background:#6366f1; color:#fff; font-size:12.5px; font-weight:600; cursor:pointer; font-family:inherit;" style-hover="background:#5254cc;">选定此目录</button></div>
+      </div>
+    </div>
+  </div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script="">
+class Component extends DCLogic {
+  state = {
+    viewMode: 'studio', activeTab: '分镜制作', selEp: 0,
+    sceneSel: 1, chatSel: 1, selSes: 0,
+    moreOpen: false, promptOpen: true, logOpen: true,
+    drawer: false, panel: null, folder: false,
+    agent: 'Supervisor', think: '标准',
+  };
+  tab(name) {
+    const a = this.state.activeTab === name;
+    return { b: a ? '#6366f1' : 'transparent', w: a ? 650 : 500, c: a ? 'rgba(255,255,255,0.87)' : 'rgba(255,255,255,0.52)', i: a ? 1 : 0.7 };
+  }
+  imgBorder(cur, i) { return cur === i ? '2px solid #34d399' : '1px solid rgba(255,255,255,0.1)'; }
+  imgTag(cur, i) {
+    if (cur !== i) return null;
+    return React.createElement('div', { style: { padding: '2px 7px', borderRadius: '5px', background: '#34d399', color: '#04201a', fontSize: '9.5px', fontWeight: 700 } }, '选中');
+  }
+  pill(active, base) {
+    return active
+      ? { b: 'rgba(99,102,241,0.5)', bg: 'rgba(99,102,241,0.15)', c: '#a5a8ff' }
+      : { b: 'rgba(255,255,255,0.13)', bg: 'rgba(255,255,255,0.04)', c: 'rgba(255,255,255,0.52)' };
+  }
+  epBg(i) { return this.state.selEp === i ? 'rgba(255,255,255,0.05)' : 'transparent'; }
+  epBar(i) { return this.state.selEp === i ? 'block' : 'none'; }
+  sesBg(i) { return this.state.selSes === i ? 'rgba(255,255,255,0.05)' : 'transparent'; }
+
+  renderVals() {
+    const s = this.state;
+    const epNames = ['暗夜回声', '第七位证人', '雾港谜案', '第十三号档案'];
+    const tS = this.tab('脚本'), tR = this.tab('角色&LoRA'), tH = this.tab('分镜制作'), tE = this.tab('导出');
+    const agSup = this.pill(s.agent === 'Supervisor'), agGen = this.pill(s.agent === 'General'), agCode = this.pill(s.agent === 'Code'), agBatch = this.pill(s.agent === 'Batch');
+    const thStd = this.pill(s.think === '标准'), thDeep = this.pill(s.think === '深度思考');
+    const kbActive = s.panel === 'kb', setActive = s.panel === 'settings';
+    return {
+      // mode
+      studioDisp: s.viewMode === 'studio' ? 'block' : 'none',
+      chatDisp: s.viewMode === 'chat' ? 'block' : 'none',
+      goStudio: () => this.setState({ viewMode: 'studio', drawer: false, panel: null }),
+      goChat: () => this.setState({ viewMode: 'chat' }),
+      activeEpName: epNames[s.selEp],
+      // episodes
+      selEp0: () => this.setState({ selEp: 0 }), selEp1: () => this.setState({ selEp: 1 }), selEp2: () => this.setState({ selEp: 2 }), selEp3: () => this.setState({ selEp: 3 }),
+      ep0bg: this.epBg(0), ep1bg: this.epBg(1), ep2bg: this.epBg(2), ep3bg: this.epBg(3),
+      ep0bar: this.epBar(0), ep1bar: this.epBar(1), ep2bar: this.epBar(2), ep3bar: this.epBar(3),
+      // tabs
+      tabScript: () => this.setState({ activeTab: '脚本' }), tabRole: () => this.setState({ activeTab: '角色&LoRA' }), tabShot: () => this.setState({ activeTab: '分镜制作' }), tabExport: () => this.setState({ activeTab: '导出' }),
+      tScriptB: tS.b, tScriptW: tS.w, tScriptC: tS.c, tScriptI: tS.i,
+      tRoleB: tR.b, tRoleW: tR.w, tRoleC: tR.c, tRoleI: tR.i,
+      tShotB: tH.b, tShotW: tH.w, tShotC: tH.c, tShotI: tH.i,
+      tExportB: tE.b, tExportW: tE.w, tExportC: tE.c, tExportI: tE.i,
+      dScript: s.activeTab === '脚本' ? 'block' : 'none',
+      dRole: s.activeTab === '角色&LoRA' ? 'block' : 'none',
+      dShot: s.activeTab === '分镜制作' ? 'block' : 'none',
+      dExport: s.activeTab === '导出' ? 'block' : 'none',
+      // more params
+      toggleMore: () => this.setState(x => ({ moreOpen: !x.moreOpen })),
+      moreDisp: s.moreOpen ? 'grid' : 'none', moreRot: s.moreOpen ? '90deg' : '0deg',
+      // prompt editor
+      togglePrompt: () => this.setState(x => ({ promptOpen: !x.promptOpen })),
+      promptDisp: s.promptOpen ? 'block' : 'none', promptRot: s.promptOpen ? '90deg' : '0deg',
+      // log
+      toggleLog: () => this.setState(x => ({ logOpen: !x.logOpen })),
+      logDisp: s.logOpen ? 'block' : 'none', logRot: s.logOpen ? '90deg' : '0deg',
+      // scene candidate wall
+      sceneSel0: () => this.setState({ sceneSel: 0 }), sceneSel1: () => this.setState({ sceneSel: 1 }), sceneSel2: () => this.setState({ sceneSel: 2 }), sceneSel3: () => this.setState({ sceneSel: 3 }),
+      sB0: this.imgBorder(s.sceneSel, 0), sB1: this.imgBorder(s.sceneSel, 1), sB2: this.imgBorder(s.sceneSel, 2), sB3: this.imgBorder(s.sceneSel, 3),
+      sTag0: this.imgTag(s.sceneSel, 0), sTag1: this.imgTag(s.sceneSel, 1), sTag2: this.imgTag(s.sceneSel, 2), sTag3: this.imgTag(s.sceneSel, 3),
+      // chat candidate wall
+      chatSel0: () => this.setState({ chatSel: 0 }), chatSel1: () => this.setState({ chatSel: 1 }), chatSel2: () => this.setState({ chatSel: 2 }), chatSel3: () => this.setState({ chatSel: 3 }),
+      cB0: this.imgBorder(s.chatSel, 0), cB1: this.imgBorder(s.chatSel, 1), cB2: this.imgBorder(s.chatSel, 2), cB3: this.imgBorder(s.chatSel, 3),
+      cTag0: this.imgTag(s.chatSel, 0), cTag1: this.imgTag(s.chatSel, 1), cTag2: this.imgTag(s.chatSel, 2), cTag3: this.imgTag(s.chatSel, 3),
+      // sessions
+      selSes0: () => this.setState({ selSes: 0 }), selSes1: () => this.setState({ selSes: 1 }), selSes2: () => this.setState({ selSes: 2 }),
+      ses0bg: this.sesBg(0), ses1bg: this.sesBg(1), ses2bg: this.sesBg(2),
+      // agent pills
+      setAgentSup: () => this.setState({ agent: 'Supervisor' }), setAgentGen: () => this.setState({ agent: 'General' }), setAgentCode: () => this.setState({ agent: 'Code' }), setAgentBatch: () => this.setState({ agent: 'Batch' }),
+      agSupB: agSup.b, agSupBg: agSup.bg, agSupC: agSup.c,
+      agGenB: agGen.b, agGenBg: agGen.bg, agGenC: agGen.c,
+      agCodeB: agCode.b, agCodeBg: agCode.bg, agCodeC: agCode.c,
+      agBatchB: agBatch.b, agBatchBg: agBatch.bg, agBatchC: agBatch.c,
+      setThinkStd: () => this.setState({ think: '标准' }), setThinkDeep: () => this.setState({ think: '深度思考' }),
+      thStdB: thStd.b, thStdBg: thStd.bg, thStdC: thStd.c,
+      thDeepB: thDeep.b, thDeepBg: thDeep.bg, thDeepC: thDeep.c,
+      // drawer / panels / folder
+      openDrawer: () => this.setState({ drawer: true }), closeDrawer: () => this.setState({ drawer: false }),
+      drawerDisp: s.drawer ? 'block' : 'none',
+      openSettings: () => this.setState(x => ({ panel: x.panel === 'settings' ? null : 'settings' })),
+      openKb: () => this.setState(x => ({ panel: x.panel === 'kb' ? null : 'kb' })),
+      closePanels: () => this.setState({ panel: null }),
+      settingsDisp: setActive ? 'block' : 'none', kbDisp: kbActive ? 'block' : 'none',
+      kbBorder: kbActive ? 'rgba(99,102,241,0.5)' : 'rgba(255,255,255,0.13)', kbBg: kbActive ? 'rgba(99,102,241,0.15)' : 'rgba(255,255,255,0.04)', kbColor: kbActive ? '#a5a8ff' : 'rgba(255,255,255,0.7)',
+      setBorder: setActive ? 'rgba(99,102,241,0.5)' : 'rgba(255,255,255,0.13)', setBg: setActive ? 'rgba(99,102,241,0.15)' : 'rgba(255,255,255,0.04)', setColor: setActive ? '#a5a8ff' : 'rgba(255,255,255,0.7)',
+      openFolder: () => this.setState({ folder: true }), closeFolder: () => this.setState({ folder: false }),
+      folderDisp: s.folder ? 'flex' : 'none',
+    };
+  }
+}
+</script>
+
+
+</body></html>"
+  </script>
+</body>
+</html>
