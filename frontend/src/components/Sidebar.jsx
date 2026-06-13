@@ -57,8 +57,8 @@ export default function Sidebar({ ragStatus, onStatusChange }) {
       <div className="px-5 py-5 border-b border-slate-700">
         <div className="flex items-center gap-2">
           <div>
-            <h1 className="text-base font-bold text-white leading-tight">AgentLab</h1>
-            <p className="text-xs text-slate-500">AI Agent + RAG 开源项目</p>
+            <h1 className="text-base font-bold text-white leading-tight">Mirage</h1>
+            <p className="text-xs text-slate-500">蜃景 · AI 小说转短剧引擎</p>
           </div>
         </div>
       </div>

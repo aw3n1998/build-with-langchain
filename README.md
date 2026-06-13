@@ -1,4 +1,6 @@
-# AgentLab —— AI Agent 工程化实战
+# Mirage 蜃景 —— AI 小说转短剧生成引擎
+
+> 原名 AgentLab。从一个多 Agent + RAG 工程实战项目，演进为「把小说自动改编成欧美 AI 短剧并出片」的生产引擎。
 
 > 从 LangChain 新手到具备工程化思维的 AI 开发者，完整记录每一步踩坑与突破。
 > 技术栈：Python · LangChain · LangGraph · FastAPI · React · Pydantic V2 · aiosqlite · Milvus · FastEmbed
@@ -7,7 +9,7 @@
 
 ## 项目概览
 
-AgentLab 是一套**完整的 AI Agent 工程实战项目**，从零搭建多 Agent 协作系统，并最终交付一个真实可用的全栈 Web 应用。
+Mirage 是一套**完整的 AI Agent 工程实战项目**，从零搭建多 Agent 协作系统，并最终交付一个真实可用的全栈 Web 应用。
 
 **学习目标**：理解并实现企业级 AI Agent 系统的每一个核心模块，不停留在调用 API，而是理解底层机制。
 

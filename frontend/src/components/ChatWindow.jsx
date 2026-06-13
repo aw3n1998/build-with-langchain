@@ -71,7 +71,7 @@ function EmptyState() {
         letterSpacing: '-0.01em',
         marginBottom: 8,
       }}>
-        AgentLab
+        Mirage
       </h2>
 
       <p style={{

@@ -1,7 +1,7 @@
 /**
  * TopBar — 顶部导航栏
  *
- * 左：Logo 方块 + "AgentLab" + 分隔点 + 模型名
+ * 左：Logo 方块 + "Mirage" + 分隔点 + 模型名
  * 右：新建对话图标 / Knowledge Base 按钮 / 设置图标
  */
 export default function TopBar({ model, ragStatus, onKnowledgeClick, showKnowledge, onNewChat, onSettingsClick }) {
@@ -33,7 +33,7 @@ export default function TopBar({ model, ragStatus, onKnowledgeClick, showKnowled
         </div>
 
         <span style={{ fontSize: 14, fontWeight: 600, letterSpacing: '-0.01em', color: 'rgba(255,255,255,0.9)' }}>
-          AgentLab
+          Mirage
         </span>
 
         <span style={{ color: 'var(--text-dim)', fontSize: 12 }}>·</span>

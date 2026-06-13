@@ -49,7 +49,7 @@ export default function HistorySidebar({
             }} />
           </div>
           <span style={{ fontSize: 14, fontWeight: 600, letterSpacing: '-0.01em', color: 'rgba(255,255,255,0.9)' }}>
-            AgentLab
+            Mirage
           </span>
         </div>
         
