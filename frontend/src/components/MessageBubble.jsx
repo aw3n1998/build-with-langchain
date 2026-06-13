@@ -19,7 +19,7 @@ import ReactMarkdown from 'react-markdown'
 import { fileUrl, getVideoProviders, getImageProviders, getProject, batchGenerate, batchFinish,
          pipelineSelect, streamJobEvents, uploadCandidate, updateScenePrompts,
          deleteCandidate, deleteSceneVideo, sceneUndoAppend, deleteEpisode, suggestSegmentPrompts,
-         autoStoryboard, autoFill, characters as charactersApi,
+         autoStoryboard, autoFill, characters as charactersApi, templatesApi,
          loraCreate, loraAction, loraUploadImage,
          suggestContinuation, sceneGenerate, sceneRender, sceneAppend,
          cancelJob, listActiveJobs,
@@ -1215,9 +1215,14 @@ export function ProductionPanel({ message, workspace, sessionId }) {
           {styleField('FLUX LoRA 路径', 'flux_lora', 'GPU 上 LoRA 路径；none=不加载任何 LoRA')}
           {styleField('负向词', 'negative_prompt', '不想要的元素（ComfyUI 出图用）')}
           {styleField('默认出图尺寸', 'default_size', '如 768x1024（留空用面板尺寸）')}
-          <button onClick={saveStyle} disabled={styleBusy} style={panelBtn(styleBusy)}>
-            {styleBusy ? '保存中…' : '保存本集风格'}
-          </button>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            <button onClick={saveStyle} disabled={styleBusy} style={panelBtn(styleBusy)}>
+              {styleBusy ? '保存中…' : '保存本集风格'}
+            </button>
+            <TemplateBar kind="style" label="风格" workspace={workspace}
+              getContent={() => JSON.stringify(style || {})}
+              onApply={c => { try { setStyle({ ...(style || {}), ...JSON.parse(c) }) } catch { /* ignore */ } }} />
+          </div>
         </div>
       )}
 
@@ -1738,7 +1743,13 @@ function ScenePrompts({ scene, workspace, onSaved }) {
             </label>
           </div>
           {ta('出图提示词（image_prompt，角色触发词自动注入）', img, setImg, 3)}
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', margin: '0 0 6px' }}>
+            <TemplateBar kind="prompt" label="提示词" workspace={workspace} getContent={() => img} onApply={c => setImg(c)} />
+          </div>
           {ta('运镜/动态提示词（motion_prompt，出视频用）', mot, setMot)}
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', margin: '0 0 6px' }}>
+            <TemplateBar kind="motion" label="运镜" workspace={workspace} getContent={() => mot} onApply={c => setMot(c)} />
+          </div>
           {ta('旁白（narration，转 TTS 配音）', nar, setNar)}
           {ta('字幕（subtitle，屏幕文字；留空=同旁白）', sub, setSub)}
           <div>
@@ -1845,6 +1856,54 @@ const inputStyle = {
   height: 30, padding: '0 8px', borderRadius: 6, border: '1px solid var(--border)',
   background: 'rgba(255,255,255,0.04)', color: 'rgba(255,255,255,0.85)', fontSize: 12,
   width: '100%', colorScheme: 'dark',
+}
+
+/* ── 可复用模板库小条：存当前值为模板 + 套用/删除已存模板（风格/运镜/提示词复用）── */
+function TemplateBar({ kind, label, getContent, onApply, workspace }) {
+  const dialog = useDialog()
+  const [list, setList] = useState([])
+  const [open, setOpen] = useState(false)
+  const load = async () => {
+    try { const r = await templatesApi('list', { kind }, workspace); setList(r.templates || []) }
+    catch { /* ignore */ }
+  }
+  useEffect(() => { load() }, [])  // eslint-disable-line react-hooks/exhaustive-deps
+  const save = async () => {
+    const content = getContent()
+    const empty = !content || (typeof content === 'string' && !content.trim())
+    if (empty) { return }
+    const name = await dialog.prompt(`存为${label}模板`, '', { title: `${label}模板命名`, placeholder: '给这个模板起个名' })
+    if (name == null) return
+    try {
+      await templatesApi('add', { kind, name: name || label, content: typeof content === 'string' ? content : JSON.stringify(content) }, workspace)
+      load()
+    } catch { /* ignore */ }
+  }
+  const del = async (id) => { try { await templatesApi('delete', { kind, template_id: id }, workspace); load() } catch { /* ignore */ } }
+  return (
+    <div style={{ display: 'inline-flex', gap: 6, alignItems: 'center', position: 'relative' }}>
+      <button onClick={save} style={miniBtn2} title={`把当前${label}存成可复用模板`}>存{label}模板</button>
+      <button onClick={() => { if (!open) load(); setOpen(v => !v) }} style={miniBtn2} title="套用已存模板">套用 ({list.length})</button>
+      {open && (
+        <div style={{ position: 'absolute', top: 30, left: 0, zIndex: 20, width: 240, maxHeight: 220, overflowY: 'auto',
+                      background: '#0d0d0d', border: '1px solid var(--border-strong)', borderRadius: 8, padding: 6,
+                      boxShadow: '0 12px 30px rgba(0,0,0,0.5)' }}>
+          {list.length === 0 && <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: 6 }}>还没有{label}模板</div>}
+          {list.map(t => (
+            <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 6px', borderRadius: 6 }}
+              onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.05)'}
+              onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+              <span onClick={() => { onApply(t.content); setOpen(false) }} title="点击套用"
+                style={{ flex: 1, fontSize: 12, cursor: 'pointer', overflow: 'hidden', textOverflow: 'ellipsis',
+                         whiteSpace: 'nowrap', color: 'rgba(255,255,255,0.85)' }}>{t.name}</span>
+              <button onClick={() => del(t.id)} title="删除模板"
+                style={{ ...miniBtn, width: 20, height: 20, color: '#fca5a5', borderColor: 'rgba(239,68,68,0.4)' }}>×</button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
 }
 
 /* ── 工具调用链渲染 ─────────────────────────────────── */

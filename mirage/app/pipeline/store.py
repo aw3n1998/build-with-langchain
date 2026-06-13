@@ -119,6 +119,15 @@ CREATE TABLE IF NOT EXISTS assets (
     created_at    TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_assets_scene ON assets(scene_id);
+
+CREATE TABLE IF NOT EXISTS templates (
+    id          TEXT PRIMARY KEY,
+    kind        TEXT NOT NULL,        -- style / motion / prompt
+    name        TEXT NOT NULL DEFAULT '',
+    content     TEXT NOT NULL DEFAULT '',   -- style=风格 dict 的 JSON；motion/prompt=文本
+    created_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_templates_kind ON templates(kind);
 """
 
 
@@ -326,6 +335,32 @@ class PipelineStore:
     def delete_lora_training(self, tid: str) -> bool:
         with self._lock, self._conn() as conn:
             cur = conn.execute("DELETE FROM lora_trainings WHERE id=?", (tid,))
+        return cur.rowcount > 0
+
+    # ── 可复用模板库（per-workspace；风格/运镜/提示词，跨剧集复用）──────
+    def add_template(self, kind: str, name: str, content: str) -> dict:
+        tid = _uid()
+        with self._lock, self._conn() as conn:
+            conn.execute("INSERT INTO templates(id,kind,name,content,created_at) VALUES(?,?,?,?,?)",
+                         (tid, kind, name, content, _now()))
+        return self.get_template(tid)
+
+    def get_template(self, tid: str) -> Optional[dict]:
+        with self._conn() as conn:
+            row = conn.execute("SELECT * FROM templates WHERE id=?", (tid,)).fetchone()
+        return dict(row) if row else None
+
+    def list_templates(self, kind: str = "") -> list[dict]:
+        with self._conn() as conn:
+            if kind:
+                rows = conn.execute("SELECT * FROM templates WHERE kind=? ORDER BY created_at DESC", (kind,)).fetchall()
+            else:
+                rows = conn.execute("SELECT * FROM templates ORDER BY created_at DESC").fetchall()
+        return [dict(r) for r in rows]
+
+    def delete_template(self, tid: str) -> bool:
+        with self._lock, self._conn() as conn:
+            cur = conn.execute("DELETE FROM templates WHERE id=?", (tid,))
         return cur.rowcount > 0
 
     # ── 分镜 ──────────────────────────────────────────────────────

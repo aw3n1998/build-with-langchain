@@ -285,6 +285,15 @@ export async function autoFill(projectId, novelText, scenes, replace, workspace 
   if (!r.ok) throw new Error(`status ${r.status}`)
   return r.json()
 }
+// 可复用模板库（per-workspace）：action=list/add/delete；kind=style/motion/prompt
+export async function templatesApi(action, fields = {}, workspace = null) {
+  const r = await fetch(`${getBase()}/pipeline/templates`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action, workspace, ...fields }),
+  })
+  if (!r.ok) throw new Error(`status ${r.status}`)
+  return r.json()
+}
 // 角色/声音圣经：action=list/add/update/delete
 export async function characters(projectId, action, fields = {}, workspace = null) {
   const r = await fetch(`${getBase()}/pipeline/characters`, {

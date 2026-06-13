@@ -1264,8 +1264,15 @@ async def pipeline_auto_fill(req: AutoFillRequest):
             except Exception:  # noqa: BLE001
                 pass
 
-    # 2) 风格
-    style = await generate_style(novel)
+    # 2) 风格（喂入模板库里存过的偏好风格，让 AI 贴近你的口味）
+    import json as _json
+    style_refs = []
+    for t in store.list_templates("style"):
+        try:
+            style_refs.append((_json.loads(t.get("content") or "{}") or {}).get("style_prompt") or "")
+        except Exception:  # noqa: BLE001
+            pass
+    style = await generate_style(novel, style_refs=[s for s in style_refs if s])
     try:
         store.update_project_style(pid, **style)
     except Exception:  # noqa: BLE001
@@ -1299,6 +1306,27 @@ async def pipeline_auto_fill(req: AutoFillRequest):
 
     return {"project_id": pid, "characters": len(char_rows), "lora_created": lora_created,
             "style": style, "scenes_count": len(created)}
+
+
+class TemplateRequest(BaseModel):
+    workspace: str | None = None
+    action: str = "list"          # list / add / delete
+    kind: str | None = None       # style / motion / prompt（list 可按 kind 过滤；add 必填）
+    name: str | None = None
+    content: str | None = None
+    template_id: str | None = None
+
+
+@router.post("/pipeline/templates")
+async def pipeline_templates(req: TemplateRequest):
+    """可复用模板库（per-workspace）：风格/运镜/提示词存取，跨剧集复用。"""
+    store = _ws_store(req.workspace)
+    act = (req.action or "list").lower()
+    if act == "add" and req.kind:
+        store.add_template(req.kind, (req.name or "未命名")[:40], req.content or "")
+    elif act == "delete" and req.template_id:
+        store.delete_template(req.template_id)
+    return {"templates": store.list_templates(req.kind or "")}
 
 
 class CharacterRequest(BaseModel):

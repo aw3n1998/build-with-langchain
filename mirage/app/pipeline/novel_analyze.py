@@ -116,8 +116,11 @@ async def extract_characters(novel_text: str, max_n: int = 6) -> list[dict]:
         return []
 
 
-async def generate_style(novel_text: str) -> dict:
-    """据小说题材/氛围生成本集统一画风，返回 {style_prompt, negative_prompt, default_size}。"""
+async def generate_style(novel_text: str, style_refs: list[str] | None = None) -> dict:
+    """据小说题材/氛围生成本集统一画风，返回 {style_prompt, negative_prompt, default_size}。
+
+    style_refs: 用户在模板库里存过的偏好风格词；传入则让 AI 尽量贴近这些口味（F→E 的「下次自动」）。
+    """
     from mirage.app.services.ai_service import ai_service
     from langchain_core.messages import SystemMessage, HumanMessage
 
@@ -129,7 +132,12 @@ async def generate_style(novel_text: str) -> dict:
         "  - default_size: 出图尺寸，竖屏短剧默认 768x1024（横屏题材可 1024x768）\n"
         "只输出这个 JSON 对象，不要解释/代码块标记。"
     )
-    human = f"小说/剧情文本：\n{(novel_text or '').strip()[:4000]}"
+    ref_block = ""
+    if style_refs:
+        refs = "；".join(s for s in style_refs if s)[:600]
+        if refs:
+            ref_block = f"用户偏好的画风参考（尽量贴近这些口味，可融合）：{refs}\n"
+    human = f"{ref_block}小说/剧情文本：\n{(novel_text or '').strip()[:4000]}"
     try:
         resp = await ai_service._llm.ainvoke([
             SystemMessage(content=system), HumanMessage(content=human),
