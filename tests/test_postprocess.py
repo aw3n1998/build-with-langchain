@@ -78,8 +78,8 @@ def _mk_video(tmp, content=b"ORIGINAL"):
 
 
 def main() -> int:
-    import agent_lab.app.pipeline.postprocess as pp
-    from agent_lab.app.core.config import settings
+    import mirage.app.pipeline.postprocess as pp
+    from mirage.app.core.config import settings
 
     tmp = tempfile.mkdtemp(prefix="post_test_")
     # 一份带占位符的临时后处理 workflow

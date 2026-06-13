@@ -44,9 +44,9 @@ print()
 
 from langchain_community.embeddings.fastembed import FastEmbedEmbeddings
 from langchain_core.documents import Document
-from agent_lab.app.rag.chunker import split_documents
-from agent_lab.app.rag.store import MilvusStore
-from agent_lab.app.rag.retriever import HybridRetriever, BM25Retriever, rrf_fuse
+from mirage.app.rag.chunker import split_documents
+from mirage.app.rag.store import MilvusStore
+from mirage.app.rag.retriever import HybridRetriever, BM25Retriever, rrf_fuse
 
 # ── 初始化 ────────────────────────────────────────────────────────
 print("正在加载 Embedding 模型...")

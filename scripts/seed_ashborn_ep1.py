@@ -13,13 +13,13 @@
 import os
 import sys
 
-# 让脚本能 import agent_lab.*（仓库根加进 sys.path）
+# 让脚本能 import mirage.*（仓库根加进 sys.path）
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
-from agent_lab.app.pipeline import runtime          # noqa: E402
-from agent_lab.app.pipeline.store import PipelineStore  # noqa: E402
+from mirage.app.pipeline import runtime          # noqa: E402
+from mirage.app.pipeline.store import PipelineStore  # noqa: E402
 
 WORKSPACE = sys.argv[1] if len(sys.argv) > 1 else os.getcwd()
 

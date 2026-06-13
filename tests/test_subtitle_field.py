@@ -17,7 +17,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 def main() -> int:
-    from agent_lab.app.pipeline.store import PipelineStore
+    from mirage.app.pipeline.store import PipelineStore
 
     tmp = tempfile.mkdtemp(prefix="subtitle_test_")
 

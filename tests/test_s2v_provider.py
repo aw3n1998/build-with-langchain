@@ -60,8 +60,8 @@ class FakeClient:
 
 
 def main() -> int:
-    import agent_lab.app.pipeline.providers.comfyui_s2v as s2v_mod
-    from agent_lab.app.core.config import settings
+    import mirage.app.pipeline.providers.comfyui_s2v as s2v_mod
+    from mirage.app.core.config import settings
 
     settings.COMFYUI_BASE_URL = "http://fake:8188"
     s2v_mod.httpx.Client = FakeClient

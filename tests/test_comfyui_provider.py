@@ -76,8 +76,8 @@ class FakeClient:
 
 
 def main() -> int:
-    import agent_lab.app.pipeline.providers.comfyui as cu
-    from agent_lab.app.core.config import settings
+    import mirage.app.pipeline.providers.comfyui as cu
+    from mirage.app.core.config import settings
 
     # 配端点 + 让 Provider 用假 httpx
     settings.COMFYUI_BASE_URL = "http://fake-comfyui:8188"

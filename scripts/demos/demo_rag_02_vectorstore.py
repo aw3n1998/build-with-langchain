@@ -44,9 +44,9 @@ except Exception as e:
     sys.exit(1)
 
 from langchain_community.embeddings.fastembed import FastEmbedEmbeddings
-from agent_lab.app.rag.chunker import split_documents
-from agent_lab.app.rag.loader import load_txt
-from agent_lab.app.rag.store import MilvusStore
+from mirage.app.rag.chunker import split_documents
+from mirage.app.rag.loader import load_txt
+from mirage.app.rag.store import MilvusStore
 from langchain_core.documents import Document
 
 # ── 准备 Embedder ────────────────────────────────────────────────

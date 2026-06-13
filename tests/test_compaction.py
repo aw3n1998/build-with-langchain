@@ -21,7 +21,7 @@ logging.basicConfig(
 )
 
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
-from agent_lab.app.core.config import settings
+from mirage.app.core.config import settings
 from langchain_openai import ChatOpenAI
 import httpx
 

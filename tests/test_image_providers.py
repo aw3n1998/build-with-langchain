@@ -37,8 +37,8 @@ def _tool_params(*, n=0, steps=0, guidance=-1.0, width=0, height=0, seed=-1,
 
 
 def main() -> int:
-    from agent_lab.app.pipeline.image_providers import image_provider_registry
-    from agent_lab.app.pipeline.image_providers.flux_ssh import FluxSshImageProvider
+    from mirage.app.pipeline.image_providers import image_provider_registry
+    from mirage.app.pipeline.image_providers.flux_ssh import FluxSshImageProvider
 
     # 1) 注册表：默认是 flux，空名/未知名都回退到 flux
     assert image_provider_registry.default_name == "flux", \

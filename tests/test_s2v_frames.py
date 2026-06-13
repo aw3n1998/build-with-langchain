@@ -3,7 +3,7 @@
 import os, sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from agent_lab.app.pipeline.pipeline_tools import _s2v_frames_for_audio
+from mirage.app.pipeline.pipeline_tools import _s2v_frames_for_audio
 
 FPS = 16
 

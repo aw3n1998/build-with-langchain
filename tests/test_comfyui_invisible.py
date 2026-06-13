@@ -23,8 +23,8 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # 在子进程里拉起注册表并把「用户可见信息」打成 JSON 回传
 _PROBE = r"""
 import json
-from agent_lab.app.pipeline.providers import video_provider_registry as V
-from agent_lab.app.pipeline.image_providers import image_provider_registry as I
+from mirage.app.pipeline.providers import video_provider_registry as V
+from mirage.app.pipeline.image_providers import image_provider_registry as I
 def dump(reg):
     return {"default": reg.default_name,
             "providers": [{"name": p.name, "display": p.display_name,

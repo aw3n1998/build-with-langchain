@@ -46,7 +46,7 @@ agent_workspace/
 fastembed_cache/
 
 # 前端构建产物（npm run build 生成，可从源码重建）
-agent_lab/static/
+mirage/static/
 
 # 前端依赖（npm install 生成）
 frontend/node_modules/

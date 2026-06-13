@@ -4,7 +4,7 @@ import os, sys, subprocess, tempfile
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.chdir(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from agent_lab.app.pipeline import assembler
+from mirage.app.pipeline import assembler
 
 FF = assembler._ffmpeg()
 

@@ -19,9 +19,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 def main() -> int:
-    import agent_lab.app.services.vision as vision
-    from agent_lab.app.pipeline import prompt_gen
-    from agent_lab.app.core.config import settings
+    import mirage.app.services.vision as vision
+    from mirage.app.pipeline import prompt_gen
+    from mirage.app.core.config import settings
 
     scene = {"image_prompt": "她站在窗前", "narration": "夜色渐深",
              "title": "窗前", "motion_prompt": "缓慢推近"}
@@ -47,7 +47,7 @@ def main() -> int:
 
     # 4) 没配视觉 → 回退纯文本 LLM（mock ai_service._llm）→ saw_frame=False
     settings.VISION_BASE_URL = ""   # 关掉视觉
-    from agent_lab.app.services import ai_service as ai_mod
+    from mirage.app.services import ai_service as ai_mod
 
     class _Resp:
         content = "缓慢拉远，光影在墙上流动"

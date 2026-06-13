@@ -71,8 +71,8 @@ class FakeClient:
 
 
 def main() -> int:
-    import agent_lab.app.pipeline.image_providers.comfyui_image as cu_img
-    from agent_lab.app.core.config import settings
+    import mirage.app.pipeline.image_providers.comfyui_image as cu_img
+    from mirage.app.core.config import settings
 
     settings.COMFYUI_BASE_URL = "http://fake-comfyui:8188"
     cu_img.httpx.Client = FakeClient

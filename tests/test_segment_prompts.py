@@ -13,7 +13,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 def _install_fake_ai_service(content: str):
     """在 import prompt_gen 前，把 ai_service 换成返回固定 content 的假实现。"""
-    mod = types.ModuleType("agent_lab.app.services.ai_service")
+    mod = types.ModuleType("mirage.app.services.ai_service")
 
     class _Resp:
         def __init__(self, c):
@@ -32,11 +32,11 @@ def _install_fake_ai_service(content: str):
     ai = _FakeAI()
     ai._llm = _FakeLLM(content)
     mod.ai_service = ai
-    sys.modules["agent_lab.app.services.ai_service"] = mod
+    sys.modules["mirage.app.services.ai_service"] = mod
 
 
 def test_coerce():
-    from agent_lab.app.pipeline.prompt_gen import _coerce
+    from mirage.app.pipeline.prompt_gen import _coerce
 
     # 1) 干净 JSON 数组，长度正好
     assert _coerce('["a","b","c"]', 3) == ["a", "b", "c"]
@@ -59,8 +59,8 @@ def test_suggest_aligns_length():
     # LLM 只给 1 条，但要 3 段 → 对齐成 3
     _install_fake_ai_service('["slow push-in on the face"]')
     # 确保拿到的是套了假 ai_service 的新模块
-    sys.modules.pop("agent_lab.app.pipeline.prompt_gen", None)
-    from agent_lab.app.pipeline.prompt_gen import suggest_segment_prompts
+    sys.modules.pop("mirage.app.pipeline.prompt_gen", None)
+    from mirage.app.pipeline.prompt_gen import suggest_segment_prompts
 
     out = asyncio.run(suggest_segment_prompts("a woman by the window", "镜头慢慢推近", 3))
     assert isinstance(out, list) and len(out) == 3, out
@@ -71,8 +71,8 @@ def test_suggest_aligns_length():
 def test_suggest_handles_garbage():
     # LLM 返回一堆散文 → 仍能切出 >=1 段并对齐到 N
     _install_fake_ai_service("Here you go:\nFirst, slowly push in.\nThen pull back wide.")
-    sys.modules.pop("agent_lab.app.pipeline.prompt_gen", None)
-    from agent_lab.app.pipeline.prompt_gen import suggest_segment_prompts
+    sys.modules.pop("mirage.app.pipeline.prompt_gen", None)
+    from mirage.app.pipeline.prompt_gen import suggest_segment_prompts
 
     out = asyncio.run(suggest_segment_prompts("street scene", "", 2))
     assert len(out) == 2 and all(out), out

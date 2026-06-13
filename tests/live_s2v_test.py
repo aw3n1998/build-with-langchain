@@ -24,7 +24,7 @@ except Exception as e:
         "0000000000000000c0b700010000018f5b8d2c0000000049454e44ae426082"))
 
 # 2) TTS 生成测试音频
-from agent_lab.app.pipeline.assembler import _tts
+from mirage.app.pipeline.assembler import _tts
 aud = os.path.join(OUT, "s2v_voice.mp3")
 ok = _tts("你好，这是一段对口型测试。", aud, "zh-CN-YunxiNeural")
 print("tts ok=", ok, "size=", os.path.getsize(aud) if os.path.exists(aud) else 0)
@@ -32,8 +32,8 @@ if not ok:
     print("TTS 失败，无法继续 S2V 测试"); sys.exit(1)
 
 # 3) 跑 S2V（低参数求快；这是 14B，首次还要载模型，耐心几分钟）
-from agent_lab.app.pipeline.providers.comfyui_s2v import ComfyUIS2VProvider
-from agent_lab.app.core.config import settings
+from mirage.app.pipeline.providers.comfyui_s2v import ComfyUIS2VProvider
+from mirage.app.core.config import settings
 print("endpoint:", settings.COMFYUI_BASE_URL[:55])
 prov = ComfyUIS2VProvider()
 outp = os.path.join(OUT, "s2v_out.mp4")

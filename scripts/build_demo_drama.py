@@ -5,13 +5,13 @@ from __future__ import annotations
 import importlib, os, sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from agent_lab.app.pipeline import runtime
+from mirage.app.pipeline import runtime
 # 工作目录：命令行第1参数指定（要和前端「工作目录」一致）；缺省用仓库 agent_workspace
 WS = sys.argv[1] if len(sys.argv) > 1 else os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "agent_workspace")
 runtime.set_workspace(WS)
-pt = importlib.import_module("agent_lab.app.pipeline.pipeline_tools")
-from agent_lab.app.pipeline.store import get_store
+pt = importlib.import_module("mirage.app.pipeline.pipeline_tools")
+from mirage.app.pipeline.store import get_store
 
 # 主角统一外貌(没 LoRA 时靠描述压一压漂移)：中年硬朗、短寸花白发、左眉旧疤
 CM = "中年硬朗男人，短寸花白头发，左眉一道旧疤，深邃沉稳的眼神"
