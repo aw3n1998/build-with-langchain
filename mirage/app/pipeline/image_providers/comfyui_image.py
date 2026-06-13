@@ -107,7 +107,7 @@ class ComfyUIImageProvider(ImageProvider):
         template = ch.load_workflow(settings.COMFYUI_WORKFLOW_T2I, "t2i_template.json", "t2i")
         os.makedirs(out_dir, exist_ok=True)
         t0 = time.time()
-        client_id = f"agentlab-img-{os.getpid()}-{int(t0)}"
+        client_id = f"mirage-img-{os.getpid()}-{int(t0)}"
         local_paths: list[str] = []
         with httpx.Client() as client:
             # 人物 LoRA：项目/工作目录配了 flux_lora 才注入 %LORA%（只取文件名，匹配 ComfyUI/models/loras/）。

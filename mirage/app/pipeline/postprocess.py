@@ -55,7 +55,7 @@ def maybe_postprocess(video_path: str, *, fps: int = 0) -> dict:
     try:
         template = ch.load_workflow(wf, "", "post")
         t0 = time.time()
-        client_id = f"agentlab-post-{os.getpid()}-{int(t0)}"
+        client_id = f"mirage-post-{os.getpid()}-{int(t0)}"
         with httpx.Client() as client:
             vid_name = ch.upload_media(client, base, video_path, "video/mp4")
             mapping = {

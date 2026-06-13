@@ -76,7 +76,7 @@ class ComfyUIS2VProvider(VideoProvider):
         }
         template = ch.load_workflow(settings.COMFYUI_WORKFLOW_S2V, "s2v_template.json", "s2v")
         t0 = time.time()
-        client_id = f"agentlab-s2v-{os.getpid()}-{int(t0)}"
+        client_id = f"mirage-s2v-{os.getpid()}-{int(t0)}"
         with httpx.Client() as client:
             mapping["%IMAGE%"] = ch.upload_media(client, base, image_path, "image/png")
             mapping["%AUDIO%"] = ch.upload_media(client, base, audio_path, "audio/mpeg")

@@ -96,7 +96,7 @@ class ComfyUIProvider(VideoProvider):
         }
         template = ch.load_workflow(settings.COMFYUI_WORKFLOW_I2V, "i2v_template.json", "i2v")
         t0 = time.time()
-        client_id = f"agentlab-{os.getpid()}-{int(t0)}"
+        client_id = f"mirage-{os.getpid()}-{int(t0)}"
         with httpx.Client() as client:
             mapping["%IMAGE%"] = ch.upload_image(client, base, image_path)
             graph = ch.fill_template(template, mapping)

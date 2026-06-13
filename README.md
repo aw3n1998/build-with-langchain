@@ -1,4 +1,4 @@
-# AgentLab —— AI Agent 工程化实战
+# 蜃景 Mirage —— AI Agent 工程化实战
 
 > 从 LangChain 新手到具备工程化思维的 AI 开发者，完整记录每一步踩坑与突破。
 > 技术栈：Python · LangChain · LangGraph · FastAPI · React · Pydantic V2 · aiosqlite · Milvus · FastEmbed
@@ -7,7 +7,7 @@
 
 ## 项目概览
 
-AgentLab 是一套**完整的 AI Agent 工程实战项目**，从零搭建多 Agent 协作系统，并最终交付一个真实可用的全栈 Web 应用。
+蜃景 是一套**完整的 AI Agent 工程实战项目**，从零搭建多 Agent 协作系统，并最终交付一个真实可用的全栈 Web 应用。
 
 **学习目标**：理解并实现企业级 AI Agent 系统的每一个核心模块，不停留在调用 API，而是理解底层机制。
 
@@ -32,7 +32,7 @@ AgentLab 是一套**完整的 AI Agent 工程实战项目**，从零搭建多 Ag
 └──────────────────────┬──────────────────────────────────┘
                        │ HTTP / SSE
 ┌──────────────────────▼──────────────────────────────────┐
-│              FastAPI 后端（agent_lab/）                  │
+│              FastAPI 后端（mirage/）                  │
 │                                                         │
 │  POST /api/chat        ← SSE 流式对话                   │
 │  POST /api/rag/ingest  ← 文件/文本导入知识库             │
@@ -103,7 +103,7 @@ docker compose up -d
 ### 3. 启动后端
 
 ```bash
-python agent_lab/main_api.py
+python mirage/main_api.py
 # 监听 http://localhost:8000
 # Swagger UI: http://localhost:8000/docs
 ```
@@ -122,14 +122,14 @@ npm run dev
 ```bash
 cd frontend
 npm run build
-# 构建产物输出到 agent_lab/static/
+# 构建产物输出到 mirage/static/
 # 之后访问 http://localhost:8000 即可（后端托管前端）
 ```
 
 ### 6. CLI 模式（无前端，终端对话）
 
 ```bash
-python agent_lab/main.py
+python mirage/main.py
 ```
 
 ### 7. LangGraph Studio 可视化调试
@@ -389,7 +389,7 @@ g.add_conditional_edges("router", fan_out, ["code_agent", "file_agent", "general
 {
   "dependencies": ["."],
   "graphs": {
-    "supervisor": "./agent_lab/app/agents/supervisor.py:graph"
+    "supervisor": "./mirage/app/agents/supervisor.py:graph"
   },
   "env": ".env"
 }
@@ -1079,7 +1079,7 @@ Phase 1-5         Human-in-loop   微服务化       Docker        K8S 生产
 
 ```
 build-with-langchain/
-├── agent_lab/
+├── mirage/
 │   ├── app/
 │   │   ├── agents/
 │   │   │   ├── supervisor.py      # 主路由图（Compaction + 并行扇出 + 聚合）
