@@ -52,6 +52,11 @@ class Settings(BaseSettings):
     GPU_FLUX_BASE: str = "/root/autodl-tmp/models/flux-dev"
     GPU_FLUX_LORA: str = "/root/autodl-tmp/output/cael_flux_lora_v1/cael_flux_lora_v1.safetensors"
     GPU_FLUX_OUT_ROOT: str = "/root/autodl-tmp/flux_candidates_out"
+    # NSFW Master FLUX：可配置的无审查底模检查点。留空=不注册该出图模型（下拉不出现）。
+    # A100 推荐 lodestones/Chroma（开放无审查 FLUX 系）；要让现有 FLUX-dev 人物 LoRA 直接生效，
+    # 则指向 FLUX.1-dev 系无审查合并检查点。GPU 上的本地路径或 HF repo id 均可（远程脚本 --base）。
+    GPU_FLUX_NSFW_BASE: str = ""
+    GPU_FLUX_NSFW_LORA: str = ""                     # 可选：该底模专用 LoRA（空=用每镜/工作目录的 flux_lora）
     FLUX_N: int = 4
     FLUX_STEPS: int = 28
     FLUX_GUIDANCE: float = 3.5

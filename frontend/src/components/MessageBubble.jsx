@@ -884,9 +884,9 @@ export function ProductionPanel({ message, workspace, sessionId }) {
     catch (e) { setProgress('新建 LoRA 失败：' + String(e.message || e)) }
     finally { setLoraBusy(false) }
   }
-  const loraOp = async (action, tid) => {
+  const loraOp = async (action, tid, extra = {}) => {
     setLoraBusy(true)
-    try { const r = await loraAction(pid, action, tid, workspace); await load()
+    try { const r = await loraAction(pid, action, tid, workspace, extra); await load()
       const t = (r.trainings || []).find(x => x.id === tid)
       if (action === 'train' && t && t.message) setProgress(t.message)
     } catch (e) { setProgress('LoRA 操作失败：' + String(e.message || e)) }
@@ -1144,11 +1144,16 @@ export function ProductionPanel({ message, workspace, sessionId }) {
           {(proj?.lora_trainings || []).map(t => (
             <div key={t.id} style={{ border: '1px solid var(--border)', borderRadius: 6, padding: 8, marginBottom: 6 }}>
               <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 4 }}>
-                <strong style={{ fontSize: 12 }}>{t.name}</strong>
-                <span style={{ fontSize: 10.5, color: 'var(--text-muted)' }}>{t.image_count} 张图 · {t.status}</span>
-                <button onClick={() => loraOp('delete', t.id)} disabled={loraBusy}
-                  style={{ ...miniBtn2, marginLeft: 'auto', color: '#fca5a5', borderColor: 'rgba(239,68,68,0.4)' }}>删除</button>
+                <input defaultValue={t.name} placeholder="LoRA / 角色名称"
+                  onBlur={e => { const v = e.target.value.trim(); if (v && v !== t.name) loraOp('update', t.id, { name: v }) }}
+                  style={{ ...inputStyle, height: 26, flex: 1, fontWeight: 600 }} />
+                <span style={{ fontSize: 10.5, color: 'var(--text-muted)', whiteSpace: 'nowrap', flexShrink: 0 }}>{t.image_count} 张图 · {t.status}</span>
+                <button onClick={async () => { if (await dialog.confirm('删除这个 LoRA 训练？', { message: '参考图也会一并删除，不可恢复。', danger: true, confirmText: '删除' })) loraOp('delete', t.id) }} disabled={loraBusy}
+                  style={{ ...miniBtn2, color: '#fca5a5', borderColor: 'rgba(239,68,68,0.4)', flexShrink: 0 }}>删除</button>
               </div>
+              <input defaultValue={t.trigger_word || ''} placeholder="触发词 trigger_word（出图自动注入；没有可留空）"
+                onBlur={e => { if (e.target.value !== (t.trigger_word || '')) loraOp('update', t.id, { trigger_word: e.target.value }) }}
+                style={{ ...inputStyle, height: 26, width: '100%', boxSizing: 'border-box', marginBottom: 4 }} />
               {t.message && <div style={{ fontSize: 10.5, color: '#ffb454', marginBottom: 4 }}>{t.message}</div>}
               <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                 <label style={{ ...miniBtn2, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 5 }}>

@@ -1309,7 +1309,9 @@ class LoraActionRequest(BaseModel):
     workspace: str | None = None
     project_id: str
     training_id: str | None = None
-    action: str = "list"          # list / train / delete
+    action: str = "list"          # list / train / delete / update
+    name: str | None = None       # update 用：改名
+    trigger_word: str | None = None  # update 用：改触发词
 
 
 @router.post("/pipeline/lora_trainings")
@@ -1321,6 +1323,12 @@ async def pipeline_lora_trainings(req: LoraActionRequest):
     act = (req.action or "list").lower()
     if act == "delete" and req.training_id:
         store.delete_lora_training(req.training_id)
+        # 连磁盘参考图一起清，别残留（之前只删了 DB 行 → 像"没删干净"）
+        import shutil
+        from mirage.app.pipeline.runtime import agent_dir
+        shutil.rmtree(os.path.join(agent_dir(), "lora_train", req.training_id), ignore_errors=True)
+    elif act == "update" and req.training_id:
+        store.update_lora_training(req.training_id, name=req.name, trigger_word=req.trigger_word)
     elif act == "train" and req.training_id:
         t = store.get_lora_training(req.training_id)
         if not t:

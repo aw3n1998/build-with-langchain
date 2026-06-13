@@ -294,10 +294,10 @@ export async function loraCreate(projectId, name, triggerWord, charId, workspace
   })
   if (!r.ok) throw new Error(`status ${r.status}`); return r.json()
 }
-export async function loraAction(projectId, action, trainingId = null, workspace = null) {
+export async function loraAction(projectId, action, trainingId = null, workspace = null, extra = {}) {
   const r = await fetch(`${getBase()}/pipeline/lora_trainings`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ project_id: projectId, action, training_id: trainingId, workspace }),
+    body: JSON.stringify({ project_id: projectId, action, training_id: trainingId, workspace, ...extra }),
   })
   if (!r.ok) throw new Error(`status ${r.status}`); return r.json()
 }

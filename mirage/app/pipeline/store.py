@@ -312,7 +312,7 @@ class PipelineStore:
         return [dict(r) for r in rows]
 
     def update_lora_training(self, tid: str, **fields) -> dict:
-        cols = ("status", "output_path", "message", "image_count", "steps", "trigger_word", "char_id")
+        cols = ("name", "status", "output_path", "message", "image_count", "steps", "trigger_word", "char_id")
         sets, params = [], []
         for c in cols:
             if c in fields and fields[c] is not None:

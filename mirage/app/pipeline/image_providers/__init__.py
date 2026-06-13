@@ -14,6 +14,10 @@ from mirage.app.pipeline.image_providers.flux_ssh import FluxSshImageProvider
 
 # 注册内置出图模型。默认由 .env 的 IMAGE_PROVIDER_DEFAULT 决定（缺省 flux）。
 image_provider_registry.register(FluxSshImageProvider())
+# NSFW Master FLUX：仅当配了无审查底模（GPU_FLUX_NSFW_BASE）才注册，否则下拉不出现。
+if settings.GPU_FLUX_NSFW_BASE:
+    from mirage.app.pipeline.image_providers.nsfw_flux import NsfwFluxImageProvider
+    image_provider_registry.register(NsfwFluxImageProvider())
 # ComfyUI 文生图：对用户完全隐形。不新增条目，而是**顶替** COMFYUI_IMAGE_AS 指定的公开模型名
 # （默认空=出图仍走 FLUX-SSH；设 "flux" 才让出图透明走 ComfyUI）。用户看不到「ComfyUI」字样。
 if settings.COMFYUI_BASE_URL and settings.COMFYUI_IMAGE_AS:
