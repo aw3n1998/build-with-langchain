@@ -53,6 +53,11 @@ CREATE TABLE IF NOT EXISTS projects (
     title       TEXT NOT NULL,
     novel_text  TEXT NOT NULL DEFAULT '',
     status      TEXT NOT NULL DEFAULT 'IN_PROGRESS',
+    style_prompt    TEXT NOT NULL DEFAULT '',
+    trigger_word    TEXT NOT NULL DEFAULT '',
+    flux_lora       TEXT NOT NULL DEFAULT '',
+    negative_prompt TEXT NOT NULL DEFAULT '',
+    default_size    TEXT NOT NULL DEFAULT '',
     created_at  TEXT NOT NULL
 );
 
@@ -132,6 +137,12 @@ class PipelineStore:
         if "lipsync" not in cols:    # 对口型(S2V)开关：旧库补这一列
             conn.execute("ALTER TABLE scenes ADD COLUMN lipsync INTEGER NOT NULL DEFAULT 0")
             logger.info("[PipelineStore] 迁移：scenes 补列 lipsync")
+        # 项目级风格（每集一种风格）：旧库给 projects 补列
+        pcols = {r[1] for r in conn.execute("PRAGMA table_info(projects)").fetchall()}
+        for col in ("style_prompt", "trigger_word", "flux_lora", "negative_prompt", "default_size"):
+            if col not in pcols:
+                conn.execute(f"ALTER TABLE projects ADD COLUMN {col} TEXT NOT NULL DEFAULT ''")
+                logger.info("[PipelineStore] 迁移：projects 补列 %s", col)
 
     # ── 项目 ──────────────────────────────────────────────────────
     def create_project(self, title: str, novel_text: str = "") -> dict:
@@ -154,6 +165,42 @@ class PipelineStore:
         with self._conn() as conn:
             rows = conn.execute("SELECT * FROM projects ORDER BY created_at DESC").fetchall()
         return [dict(r) for r in rows]
+
+    def rename_project(self, project_id: str, title: str) -> dict:
+        if not self.get_project(project_id):
+            raise ValueError(f"项目不存在: {project_id}")
+        with self._lock, self._conn() as conn:
+            conn.execute("UPDATE projects SET title=? WHERE id=?", (title, project_id))
+        return self.get_project(project_id)
+
+    def delete_project(self, project_id: str) -> bool:
+        """删除项目及其全部分镜/候选（外键 ON DELETE CASCADE）。返回是否删到。"""
+        with self._lock, self._conn() as conn:
+            cur = conn.execute("DELETE FROM projects WHERE id=?", (project_id,))
+        logger.info("[PipelineStore] 删除项目 %s（删到 %d 行）", project_id, cur.rowcount)
+        return cur.rowcount > 0
+
+    _STYLE_COLS = ("style_prompt", "trigger_word", "flux_lora", "negative_prompt", "default_size")
+
+    def get_project_style(self, project_id: str) -> dict:
+        """项目级风格（每集一种风格）：通用风格词/触发词/LoRA/负向词/默认尺寸。缺失返回空串。"""
+        p = self.get_project(project_id) or {}
+        return {k: (p.get(k) or "") for k in self._STYLE_COLS}
+
+    def update_project_style(self, project_id: str, **fields) -> dict:
+        """只更新传入的风格字段（None 跳过）。返回最新风格 dict。"""
+        if not self.get_project(project_id):
+            raise ValueError(f"项目不存在: {project_id}")
+        sets, params = [], []
+        for col in self._STYLE_COLS:
+            val = fields.get(col)
+            if val is not None:
+                sets.append(f"{col}=?"); params.append(str(val))
+        if sets:
+            params.append(project_id)
+            with self._lock, self._conn() as conn:
+                conn.execute(f"UPDATE projects SET {', '.join(sets)} WHERE id=?", params)
+        return self.get_project_style(project_id)
 
     # ── 分镜 ──────────────────────────────────────────────────────
     def add_scene(
@@ -212,16 +259,22 @@ class PipelineStore:
                              image_prompt: str | None = None,
                              motion_prompt: str | None = None,
                              narration: str | None = None,
-                             subtitle: str | None = None) -> dict:
-        """更新分镜的提示词/旁白/字幕（只改传入的非 None 字段）。字幕独立于旁白：旁白配音、字幕上屏。"""
+                             subtitle: str | None = None,
+                             title: str | None = None,
+                             scene_number: int | None = None) -> dict:
+        """更新分镜的提示词/旁白/字幕/标题/镜号（只改传入的非 None 字段）。字幕独立于旁白：旁白配音、字幕上屏。"""
         sets, params = [], []
         for col, val in (("image_prompt", image_prompt),
                          ("motion_prompt", motion_prompt),
                          ("narration", narration),
-                         ("subtitle", subtitle)):
+                         ("subtitle", subtitle),
+                         ("title", title)):
             if val is not None:
                 sets.append(f"{col}=?")
                 params.append(val)
+        if scene_number is not None:
+            sets.append("scene_number=?")
+            params.append(int(scene_number))
         if sets:
             from datetime import datetime
             sets.append("updated_at=?")
@@ -230,6 +283,13 @@ class PipelineStore:
             with self._lock, self._conn() as conn:
                 conn.execute(f"UPDATE scenes SET {', '.join(sets)} WHERE id=?", params)
         return self.get_scene(scene_id)
+
+    def delete_scene(self, scene_id: str) -> bool:
+        """删除分镜及其候选图（assets 外键 CASCADE）。返回是否删到。"""
+        with self._lock, self._conn() as conn:
+            cur = conn.execute("DELETE FROM scenes WHERE id=?", (scene_id,))
+        logger.info("[PipelineStore] 删除分镜 %s（删到 %d 行）", scene_id, cur.rowcount)
+        return cur.rowcount > 0
 
     def set_scene_lipsync(self, scene_id: str, on: bool) -> dict:
         """设置某镜是否「对口型」(走 Wan2.2-S2V 语音驱动出片)。"""

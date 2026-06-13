@@ -102,6 +102,9 @@ _TRANSLATE_SYSTEM = (
     "Preserve every visual detail: subject, scene, composition, lighting, color tone, lens/camera, style and mood; "
     "keep quality/style words (photorealistic, cinematic, 8k, shallow depth of field, etc.). "
     "Do NOT invent a person or character that isn't described. "
+    "When the source names a school stage or age group (小学生/初中生/高中生/大学生/青少年/儿童 etc.), "
+    "add an explicit approximate age in years so the model renders the right age — "
+    "e.g. 高中生 -> 'teenage high-school student, about 16-17 years old', 大学生 -> 'young adult, about 20'. "
     "Leave untouched any token that looks like a LoRA trigger word (an alphanumeric id such as ch4r_cael) — copy it verbatim. "
     "Output ONLY the English prompt: no quotes, no notes, no numbering, under 75 words."
 )

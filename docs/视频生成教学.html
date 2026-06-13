@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AgentLab 视频生成教学 · 小说→短剧</title>
+<style>
+  :root{
+    --bg:#0f1216; --panel:#171b22; --panel2:#1d222b; --line:#2a313c;
+    --txt:#e6e9ee; --mut:#9aa4b2; --acc:#5b9dff; --acc2:#7c6cff;
+    --ok:#3ecf8e; --warn:#ffb454; --bad:#ff6b6b; --chip:#222a36;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:linear-gradient(180deg,#0c0f13,#0f1216 240px);color:var(--txt);
+    font:15px/1.7 -apple-system,"Segoe UI","Microsoft YaHei",Roboto,Helvetica,Arial,sans-serif;}
+  a{color:var(--acc);text-decoration:none}
+  .wrap{max-width:1080px;margin:0 auto;padding:0 20px 80px}
+  header{padding:48px 0 24px;text-align:center}
+  header h1{margin:0 0 8px;font-size:30px;letter-spacing:.5px}
+  header .sub{color:var(--mut);font-size:15px}
+  header .badge{display:inline-block;margin-top:14px;padding:5px 12px;border:1px solid var(--line);
+    border-radius:999px;color:var(--mut);font-size:12.5px;background:var(--panel)}
+
+  /* 流程条 */
+  .flow{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;align-items:center;
+    margin:8px 0 32px;padding:18px;background:var(--panel);border:1px solid var(--line);border-radius:14px}
+  .flow .node{padding:8px 14px;background:var(--panel2);border:1px solid var(--line);border-radius:10px;
+    font-weight:600;font-size:13.5px;white-space:nowrap}
+  .flow .arr{color:var(--acc);font-weight:700}
+  .flow .branch{color:var(--mut);font-size:12px;flex-basis:100%;text-align:center;margin-top:4px}
+
+  /* 目录 */
+  nav.toc{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin:0 0 34px}
+  nav.toc a{padding:6px 12px;background:var(--chip);border:1px solid var(--line);border-radius:8px;
+    color:var(--txt);font-size:13px}
+  nav.toc a:hover{border-color:var(--acc);color:var(--acc)}
+
+  section{margin:0 0 30px}
+  h2.sec{font-size:13px;letter-spacing:2px;text-transform:uppercase;color:var(--mut);
+    border-bottom:1px solid var(--line);padding-bottom:8px;margin:38px 0 18px}
+
+  /* 步骤卡 */
+  .step{display:flex;gap:16px;background:var(--panel);border:1px solid var(--line);
+    border-radius:14px;padding:18px 20px;margin:14px 0;position:relative}
+  .step .num{flex:0 0 42px;height:42px;border-radius:12px;display:grid;place-items:center;
+    font-weight:800;font-size:18px;color:#0b0e12;
+    background:linear-gradient(135deg,var(--acc),var(--acc2))}
+  .step .body{flex:1;min-width:0}
+  .step h3{margin:2px 0 8px;font-size:17px}
+  .step .meta{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 10px}
+  .kv{font-size:12.5px;padding:3px 9px;border-radius:7px;background:var(--chip);border:1px solid var(--line);color:var(--mut)}
+  .kv b{color:var(--txt);font-weight:600}
+  .step p{margin:6px 0}
+
+  /* 提示框 */
+  .note{border-left:3px solid var(--acc);background:#141b26;border-radius:0 10px 10px 0;
+    padding:10px 14px;margin:10px 0;font-size:13.5px}
+  .note.key{border-color:var(--acc);} .note.key::before{content:"🔑 原理 · "; color:var(--acc);font-weight:700}
+  .note.tip{border-color:var(--ok);background:#10211a} .note.tip::before{content:"💡 提示 · ";color:var(--ok);font-weight:700}
+  .note.warn{border-color:var(--warn);background:#241d12} .note.warn::before{content:"⚠️ 避坑 · ";color:var(--warn);font-weight:700}
+
+  table{width:100%;border-collapse:collapse;margin:12px 0;font-size:13.5px;
+    background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+  th,td{padding:10px 12px;text-align:left;border-bottom:1px solid var(--line);vertical-align:top}
+  th{background:var(--panel2);color:var(--mut);font-weight:600;font-size:12.5px;letter-spacing:.5px}
+  tr:last-child td{border-bottom:none}
+  code{background:#0c1117;border:1px solid var(--line);border-radius:6px;padding:1px 6px;
+    font:13px/1.5 "Cascadia Code",Consolas,monospace;color:#ffd479}
+  .tag{display:inline-block;padding:1px 8px;border-radius:6px;font-size:12px;font-weight:600}
+  .tag.normal{background:#16314a;color:#8fc0ff} .tag.lip{background:#3a2350;color:#cba6ff}
+
+  .two{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px}
+  .card h4{margin:0 0 8px;font-size:15px} .card.normal h4{color:#8fc0ff} .card.lip h4{color:#cba6ff}
+  .card ul{margin:6px 0 0;padding-left:18px} .card li{margin:5px 0;font-size:13.5px}
+
+  .mock{width:100%;max-width:680px;height:auto;display:block;margin:14px auto 4px;
+    border-radius:12px;background:var(--panel2)}
+  .mockcap{text-align:center;color:var(--mut);font-size:12px;margin:0 0 6px}
+  footer{text-align:center;color:var(--mut);font-size:13px;margin-top:40px;
+    border-top:1px solid var(--line);padding-top:20px}
+  .speak{background:var(--panel);border:1px solid var(--acc);border-radius:12px;padding:16px 20px;
+    text-align:center;font-size:15px;line-height:1.9}
+  @media(max-width:720px){.two{grid-template-columns:1fr}.step{flex-direction:column;gap:10px}}
+  @media print{body{background:#fff;color:#111}.step,.card,table,.flow{break-inside:avoid}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>🎬 AgentLab 视频生成教学</h1>
+  <div class="sub">从一句剧情 → 一条完整短剧 mp4　·　每步：做什么 / 在哪点 / 填什么 / 原理 / 避坑</div>
+  <div class="badge">小说 → 分镜 → 出图 → 选图 → 出片 → 合成</div>
+</header>
+
+<div class="flow">
+  <span class="node">建项目</span><span class="arr">→</span>
+  <span class="node">配角色<small>(可选)</small></span><span class="arr">→</span>
+  <span class="node">加分镜</span><span class="arr">→</span>
+  <span class="node">出图</span><span class="arr">→</span>
+  <span class="node">选图</span><span class="arr">→</span>
+  <span class="node">出片</span><span class="arr">→</span>
+  <span class="node">合成整集</span>
+  <div class="branch">出片分两路：普通镜头 = Wan 图生视频(段数) ｜ 说话镜头 = Wan2.2-S2V 对口型(台词→口型)</div>
+</div>
+
+<nav class="toc">
+  <a href="#env">0 环境</a>
+  <a href="#steps">1 七步操作</a>
+  <a href="#concept">2 关键概念</a>
+  <a href="#gpu">3 GPU 须知</a>
+  <a href="#time">4 时长规划</a>
+  <a href="#trap">5 避坑表</a>
+</nav>
+
+<!-- 环境 -->
+<section id="env">
+  <h2 class="sec">0 · 开工前 · 环境三件套</h2>
+  <table>
+    <tr><th>组件</th><th>启动</th><th>说明</th></tr>
+    <tr><td><b>远程 GPU(4090)</b></td><td>AutoDL 实例开机</td><td>出图(FLUX)、普通出片(Wan/LTX) 走 SSH 打这张卡</td></tr>
+    <tr><td><b>ComfyUI</b><br><small>对口型用</small></td><td><code>tmux new-session -d -s comfy "...main.py --listen 0.0.0.0 --port 6006"</code></td><td><b>只有对口型镜头要它</b>；普通出图/出片不用</td></tr>
+    <tr><td><b>后端</b></td><td><code>uvicorn agent_lab.main_api:app --port 8000</code></td><td>改过 <code>.env</code> <b>必须重启</b>才生效</td></tr>
+    <tr><td><b>前端</b></td><td><code>npm --prefix frontend run dev</code></td><td>默认 5173</td></tr>
+  </table>
+  <div class="note warn">实例每次开关，<b>SSH 端口和 ComfyUI 公网地址都会变</b> → 改 <code>.env</code> 的 <code>GPU_SSH_PORT</code> 和 <code>COMFYUI_BASE_URL</code>，然后<b>重启后端</b>。</div>
+</section>
+
+<!-- 七步 -->
+<section id="steps">
+  <h2 class="sec">1 · 七步操作</h2>
+
+  <div class="step"><div class="num">1</div><div class="body">
+    <h3>建项目</h3>
+    <div class="meta"><span class="kv"><b>在哪</b> 面板入口 / 对 Agent 说</span><span class="kv"><b>工具</b> create_video_project</span></div>
+    <p>「建一个短剧项目，叫《xxx》」→ 进<b>制作面板</b>，后续全在面板点按钮。</p>
+  </div></div>
+
+  <div class="step"><div class="num">2</div><div class="body">
+    <h3>配角色 <small style="color:var(--mut)">(可选，建议)</small></h3>
+    <div class="meta"><span class="kv"><b>工具</b> configure_character</span><span class="kv"><b>存</b> .agent/config.json</span></div>
+    <p>有人物 LoRA 就配触发词+LoRA 路径，出图自动注入，主角脸稳。<b>没 LoRA 就留空</b>(<code>trigger_word:""</code>、<code>flux_lora:"none"</code>)，靠描述压一致性。</p>
+    <div class="note warn">别套别人的 LoRA：config 里残留别的角色触发词/LoRA，会把每张图强行带成那个角色，跟你提示词无关。</div>
+  </div></div>
+
+  <div class="step"><div class="num">3</div><div class="body">
+    <h3>加分镜 · 6 个字段</h3>
+    <table>
+      <tr><th>字段</th><th>含义</th><th>喂给谁</th></tr>
+      <tr><td><code>image_prompt</code></td><td>画面长什么样</td><td>FLUX 出图</td></tr>
+      <tr><td><code>motion_prompt</code></td><td>镜头怎么动</td><td>Wan 出片</td></tr>
+      <tr><td><code>narration</code></td><td>旁白/台词</td><td>普通镜头=画外音；对口型=人物台词</td></tr>
+      <tr><td><code>subtitle</code></td><td>屏幕字幕</td><td>烧屏(留空=沿用旁白)</td></tr>
+      <tr><td><code>对口型</code></td><td>人物开不开口</td><td>开=S2V，关=普通运镜</td></tr>
+    </table>
+  </div></div>
+
+  <div class="step"><div class="num">4</div><div class="body">
+    <h3>出图(FLUX)</h3>
+    <div class="meta"><span class="kv"><b>点</b> 每镜「出图」→参数卡</span><span class="kv"><b>防抽卡</b> 一次 4 张挑一张</span><span class="kv"><b>竖屏</b> 768×1024</span></div>
+    <div class="note key">FLUX-dev <b>读不懂中文</b>。你写中文 image_prompt，系统<b>出图前自动翻成英文</b>再下发(对你隐形，<code>IMAGE_PROMPT_AUTOTRANSLATE</code> 默认开)。</div>
+    <div class="note warn">出图吃满显存(FLUX 压线 24G) → <b>先停掉 ComfyUI</b> 独占整卡。</div>
+    <svg class="mock" viewBox="0 0 680 252" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="出图参数卡示意">
+      <rect x="1" y="1" width="678" height="250" rx="12" fill="#1d222b" stroke="#2a313c"/>
+      <text x="20" y="30" fill="#9aa4b2" font-size="13" font-family="sans-serif">出图参数（点「出图」弹出，改好再确认）</text>
+      <g font-family="sans-serif">
+        <text x="20" y="58" fill="#9aa4b2" font-size="11">张数</text>
+        <rect x="20" y="64" width="84" height="30" rx="6" fill="#0c1117" stroke="#2a313c"/><text x="33" y="84" fill="#e6e9ee" font-size="14">4</text>
+        <text x="120" y="58" fill="#9aa4b2" font-size="11">步数</text>
+        <rect x="120" y="64" width="84" height="30" rx="6" fill="#0c1117" stroke="#2a313c"/><text x="133" y="84" fill="#e6e9ee" font-size="14">28</text>
+        <text x="220" y="58" fill="#9aa4b2" font-size="11">尺寸（竖屏）</text>
+        <rect x="220" y="64" width="128" height="30" rx="6" fill="#0c1117" stroke="#2a313c"/><text x="233" y="84" fill="#e6e9ee" font-size="14">768×1024</text>
+        <text x="364" y="58" fill="#9aa4b2" font-size="11">seed</text>
+        <rect x="364" y="64" width="84" height="30" rx="6" fill="#0c1117" stroke="#2a313c"/><text x="377" y="84" fill="#e6e9ee" font-size="14">-1</text>
+      </g>
+      <text x="20" y="124" fill="#9aa4b2" font-size="11" font-family="sans-serif">出图提示词（写中文就行）</text>
+      <rect x="20" y="130" width="510" height="68" rx="8" fill="#0c1117" stroke="#2a313c"/>
+      <text x="34" y="158" fill="#e6e9ee" font-size="13" font-family="sans-serif">暴雨夜，霓虹灯下贵族学校大门金属校徽特写，</text>
+      <text x="34" y="180" fill="#e6e9ee" font-size="13" font-family="sans-serif">反光，冷色调，电影质感，写实</text>
+      <rect x="20" y="212" width="290" height="26" rx="13" fill="#141b26" stroke="#5b9dff"/>
+      <text x="33" y="229" fill="#5b9dff" font-size="12" font-family="sans-serif">原理：出图前自动翻成英文（对你隐形）</text>
+      <rect x="556" y="158" width="104" height="40" rx="9" fill="#5b9dff"/>
+      <text x="589" y="184" fill="#0b0e12" font-size="15" font-weight="700" font-family="sans-serif">出图</text>
+    </svg>
+    <p class="mockcap">▲ 出图参数卡：张数填 4 防抽卡，提示词写中文，点「出图」</p>
+  </div></div>
+
+  <div class="step"><div class="num">5</div><div class="body">
+    <h3>选图</h3>
+    <p>每镜出 N 张 → 点最满意那张的 <b>✓</b>。不满意：<b>重出图</b>换种子；或<b>上传图片</b>用自己的图。</p>
+  </div></div>
+
+  <div class="step"><div class="num">6</div><div class="body">
+    <h3>出片 · 按镜头类型分两路</h3>
+    <div class="two">
+      <div class="card normal"><h4><span class="tag normal">普通镜头</span> Wan 图生视频</h4>
+        <ul>
+          <li>选好图 → 行上<b>段数</b>填 N → 点「出视频」</li>
+          <li><b>段数=尾帧接续</b>：单段 ≈ <b>2 秒</b>，N 段拼 ≈2N 秒</li>
+          <li>不够长 → 「➕ 再续一段」反复加</li>
+          <li>不会写运镜 → 「✨AI 推荐」据末帧给一句</li>
+        </ul>
+      </div>
+      <div class="card lip"><h4><span class="tag lip">对口型镜头</span> Wan2.2-S2V</h4>
+        <ul>
+          <li>确认 <code>narration</code> 写的是<b>台词</b></li>
+          <li>勾「🗣 对口型」→「对口型出片」</li>
+          <li>台词 → TTS → S2V → <b>口型同步</b>(自带人声)</li>
+          <li><b>时长跟台词走、不截断</b>(帧数按音频算)</li>
+        </ul>
+      </div>
+    </div>
+    <svg class="mock" viewBox="0 0 680 150" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="普通分镜行示意">
+      <rect x="1" y="1" width="678" height="148" rx="12" fill="#1d222b" stroke="#2a313c"/>
+      <text x="20" y="28" fill="#8fc0ff" font-size="13" font-weight="700" font-family="sans-serif">#3 擦咖啡·军牌</text>
+      <rect x="20" y="42" width="64" height="86" rx="6" fill="#2b3340" stroke="#2a313c"/>
+      <rect x="92" y="42" width="64" height="86" rx="6" fill="#2b3340" stroke="#3ecf8e" stroke-width="2"/>
+      <rect x="164" y="42" width="64" height="86" rx="6" fill="#2b3340" stroke="#2a313c"/>
+      <circle cx="148" cy="50" r="10" fill="#3ecf8e"/>
+      <path d="M143 50 l3.5 3.5 l6 -7" fill="none" stroke="#0b0e12" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+      <text x="262" y="82" fill="#9aa4b2" font-size="12" font-family="sans-serif">段</text>
+      <rect x="284" y="68" width="54" height="34" rx="7" fill="#0c1117" stroke="#2a313c"/>
+      <text x="306" y="91" fill="#e6e9ee" font-size="15" font-family="sans-serif">3</text>
+      <rect x="358" y="66" width="120" height="38" rx="9" fill="#5b9dff"/>
+      <text x="392" y="91" fill="#0b0e12" font-size="15" font-weight="700" font-family="sans-serif">出视频</text>
+      <rect x="500" y="66" width="120" height="38" rx="9" fill="#1d222b" stroke="#7c6cff"/>
+      <text x="520" y="91" fill="#cba6ff" font-size="13" font-family="sans-serif">➕ 再续一段</text>
+      <text x="20" y="142" fill="#9aa4b2" font-size="11.5" font-family="sans-serif">选中一张图(绿勾) → 段数填 3(每段≈2s→约6s) → 点「出视频」；不够再「再续一段」</text>
+    </svg>
+    <p class="mockcap">▲ 普通镜头：选图 ✓ → 填段数 → 出视频</p>
+
+    <svg class="mock" viewBox="0 0 680 172" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="对口型分镜行示意">
+      <rect x="1" y="1" width="678" height="170" rx="12" fill="#1d222b" stroke="#2a313c"/>
+      <text x="20" y="28" fill="#cba6ff" font-size="13" font-weight="700" font-family="sans-serif">#2 泼咖啡羞辱</text>
+      <rect x="20" y="42" width="64" height="86" rx="6" fill="#2b3340" stroke="#3ecf8e" stroke-width="2"/>
+      <circle cx="76" cy="50" r="10" fill="#3ecf8e"/>
+      <path d="M71 50 l3.5 3.5 l6 -7" fill="none" stroke="#0b0e12" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+      <text x="110" y="74" fill="#9aa4b2" font-size="12.5" font-family="sans-serif">对口型</text>
+      <rect x="174" y="62" width="50" height="26" rx="13" fill="#7c6cff"/>
+      <circle cx="211" cy="75" r="10" fill="#ffffff"/>
+      <text x="234" y="80" fill="#cba6ff" font-size="11" font-family="sans-serif">开</text>
+      <rect x="270" y="58" width="140" height="38" rx="9" fill="#7c6cff"/>
+      <text x="294" y="83" fill="#ffffff" font-size="14" font-weight="700" font-family="sans-serif">对口型出片</text>
+      <text x="20" y="148" fill="#9aa4b2" font-size="11.5" font-family="sans-serif">旁白(=台词)：就是你？把校门口扫干净点，别让我再看见垃圾——包括你。</text>
+      <text x="20" y="164" fill="#7c6cff" font-size="11.5" font-family="sans-serif">勾「对口型」→ 台词自动 TTS→S2V 口型同步，时长跟台词走（需先开 ComfyUI）</text>
+    </svg>
+    <p class="mockcap">▲ 对口型镜头：勾 🗣 对口型 → 按钮变「对口型出片」</p>
+
+    <div class="note key">S2V <b>一口气整段生成</b>(非接续)，长度由音频定；帧数=⌈台词秒数×fps⌉ 取 Wan 合法 4n+1，口型对到最后一字。</div>
+    <div class="note warn">对口型<b>必须先启动 ComfyUI</b>，否则报 <code>404 /upload/image</code>。单段一口气上限 ~5–7 秒，更长的台词拆句/分镜。</div>
+  </div></div>
+
+  <div class="step"><div class="num">7</div><div class="body">
+    <h3>合成整集</h3>
+    <div class="meta"><span class="kv"><b>点</b> 「③ 出片并合成」</span><span class="kv"><b>工具</b> assemble_episode</span></div>
+    <p>已出片的镜头<b>自动跳过不重出</b>，直接合成：<b>按镜号拼接 + 普通镜头叠旁白 TTS + 烧字幕 + 对口型保留自带人声</b> → 一条完整 mp4，落 <code>.agent/video_out/</code>。</p>
+    <div class="note tip">合成是<b>纯 ffmpeg(CPU)</b>，不吃 GPU，跟 ComfyUI 开不开无关 → 可以和 GPU 渲染并行做。</div>
+    <svg class="mock" viewBox="0 0 680 130" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="出片并合成示意">
+      <rect x="1" y="1" width="678" height="128" rx="12" fill="#1d222b" stroke="#2a313c"/>
+      <rect x="20" y="22" width="190" height="42" rx="10" fill="#5b9dff"/>
+      <text x="40" y="49" fill="#0b0e12" font-size="15" font-weight="700" font-family="sans-serif">③ 出片并合成</text>
+      <text x="226" y="48" fill="#9aa4b2" font-size="12" font-family="sans-serif">已出片的镜头自动跳过、不重出 → 直接合成</text>
+      <rect x="20" y="82" width="640" height="14" rx="7" fill="#0c1117" stroke="#2a313c"/>
+      <rect x="20" y="82" width="430" height="14" rx="7" fill="#3ecf8e"/>
+      <text x="20" y="118" fill="#9aa4b2" font-size="11.5" font-family="sans-serif">合成整集（按镜号拼接 + 普通镜头叠旁白TTS + 烧字幕 + 对口型保留自带人声）→ 一条 mp4</text>
+    </svg>
+    <p class="mockcap">▲ 全部出完片 → 点「③ 出片并合成」一键成片</p>
+  </div></div>
+</section>
+
+<!-- 概念 -->
+<section id="concept">
+  <h2 class="sec">2 · 关键概念</h2>
+  <table>
+    <tr><th>概念</th><th>说明</th></tr>
+    <tr><td><b>旁白 vs 字幕</b></td><td>旁白=声音(画外音/台词)；字幕=屏幕上的字。两者独立，可不一样(片头旁白讲故事、字幕打片名)。</td></tr>
+    <tr><td><b>尾帧接续</b></td><td>一个分镜拆 N 段连续生成再拼，每段从上段末帧继续 → 做长镜头。可事后「再续一段」。</td></tr>
+    <tr><td><b>对口型(S2V)</b></td><td>图+语音 → Wav2Vec 对齐口型 + 文本引导运动，一口气整段生成，长度由音频定。</td></tr>
+    <tr><td><b>中文自动翻译</b></td><td>只翻 FLUX 的 image_prompt；运镜词给 Wan(支持中文)、旁白给 TTS，都不翻。</td></tr>
+  </table>
+</section>
+
+<!-- GPU -->
+<section id="gpu">
+  <h2 class="sec">3 · GPU 使用须知(单卡 24G)</h2>
+  <div class="note key">出图(FLUX)/普通出片(Wan)/对口型(S2V) <b>都打同一张卡</b>。后端有<b>单飞队列</b>：同时点会自动<b>排队串行</b>，不会两个挤一张卡 OOM。</div>
+  <div class="note tip">能并行的是 <b>GPU 渲染时你做不吃卡的事</b>：选图、改词、调段数、合成(CPU)。同一时刻只跑一个 GPU 任务，同时点不会更快、但安全。</div>
+  <div class="note warn"><b>错峰用卡</b>：① 出图阶段停 ComfyUI(FLUX 独占)；② 对口型阶段开 ComfyUI(它缓存住 ~14G)；普通 Wan 与对口型尽量分开，避免同时占卡 OOM。<br><b>别绕过面板</b>在 AutoDL 网页另起任务/另开 SSH 出图 → 队列管不到，会抢卡。</div>
+</section>
+
+<!-- 时长 -->
+<section id="time">
+  <h2 class="sec">4 · 时长规划(2 分钟版参考)</h2>
+  <table>
+    <tr><th>镜头类型</th><th>怎么定时长</th></tr>
+    <tr><td><span class="tag lip">对口型</span></td><td><b>不填段数</b>，时长由台词配音自动决定(一般 4–7s/句)。</td></tr>
+    <tr><td><span class="tag normal">普通</span></td><td>用段数，<b>段数 ≈ 想要的秒数 ÷ 2</b>(每段≈2s)。重点镜头(打斗/钩子)多给段。</td></tr>
+  </table>
+  <div class="note tip">先按计划出，<b>不够再「再续一段」补</b>，比一开始堆太多省返工。16 镜台词自然配音约 1:20，凑 ≥2 分钟靠普通镜头适当加长。</div>
+</section>
+
+<!-- 避坑 -->
+<section id="trap">
+  <h2 class="sec">5 · 常见坑 &amp; 排查(实战踩过的)</h2>
+  <table>
+    <tr><th>现象</th><th>根因</th><th>解决</th></tr>
+    <tr><td>出图牛头不对马嘴 / 全是动漫人像</td><td>FLUX 读不懂中文</td><td>已自动翻英文；确认 <code>IMAGE_PROMPT_AUTOTRANSLATE</code> 开着</td></tr>
+    <tr><td>出图全是同一个古装角色</td><td>套了别人的 LoRA/触发词</td><td><code>.agent/config.json</code> 设 <code>trigger_word:""</code>、<code>flux_lora:"none"</code></td></tr>
+    <tr><td>视频只有 2 秒</td><td>单段 Wan ≈2s</td><td>段数填 3-4，或「再续一段」</td></tr>
+    <tr><td>对口型台词说不完/被截</td><td>旧版写死 81 帧≈5s</td><td>已修：帧数跟音频走；超 ~7s 的句子拆短</td></tr>
+    <tr><td>对口型失败 <code>404 /upload/image</code></td><td>ComfyUI 没启动 / 地址失效</td><td>tmux 起 ComfyUI；地址变了改 <code>COMFYUI_BASE_URL</code> 后<b>重启后端</b></td></tr>
+    <tr><td>改了配置不生效</td><td>后端启动时才加载 .env</td><td>改 <code>.env</code> 要<b>重启后端</b>；改分镜词/config.json 不用(现读)</td></tr>
+    <tr><td>一边出图一边出片会卡崩吗</td><td>单飞队列已串行</td><td>不会 OOM，会排队；只是不会更快</td></tr>
+  </table>
+</section>
+
+<div class="speak">
+  <b>一句话速记</b><br>
+  写中文 → 出图(自动翻英文)选图 → 普通镜头用段数、说话镜头勾对口型 → 一键合成。<br>
+  出图阶段停 ComfyUI，对口型阶段开 ComfyUI；一张卡，任务会自动排队。
+</div>
+
+<footer>AgentLab · 小说转短剧视频流水线 · 视频生成教学</footer>
+</div>
+</body>
+</html>

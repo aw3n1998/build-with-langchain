@@ -267,6 +267,14 @@ export async function deleteSceneVideo(sceneId, workspace = null) {
   if (!r.ok) throw new Error(`status ${r.status}`)
   return r.json()
 }
+export async function sceneUndoAppend(sceneId, workspace = null) {
+  const r = await fetch(`${getBase()}/pipeline/scene_undo_append`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ scene_id: sceneId, workspace }),
+  })
+  if (!r.ok) throw new Error(`status ${r.status}`)
+  return r.json()
+}
 export async function deleteEpisode(projectId, workspace = null) {
   const r = await fetch(`${getBase()}/pipeline/delete_episode`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -323,6 +331,23 @@ export async function listProjects(workspace = null) {
   if (!r.ok) throw new Error(`status ${r.status}`)
   return r.json()
 }
+
+// ── 剧集（项目）管理 + 每集风格 + 分镜 增/删（面板自助，不绕 agent）──
+async function _post(path, body) {
+  const r = await fetch(`${getBase()}${path}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  if (!r.ok) throw new Error(`status ${r.status}`)
+  return r.json()
+}
+export const projectCreate = (title, workspace = null) => _post('/pipeline/project_create', { title, workspace })
+export const projectRename = (projectId, title, workspace = null) => _post('/pipeline/project_rename', { project_id: projectId, title, workspace })
+export const projectDelete = (projectId, workspace = null) => _post('/pipeline/project_delete', { project_id: projectId, workspace })
+// fields 全空=只读返回风格；带字段=写入。返回 { project_id, style:{...} }
+export const projectStyle = (projectId, fields = {}, workspace = null) => _post('/pipeline/project_style', { project_id: projectId, workspace, ...fields })
+export const sceneAdd = (projectId, fields = {}, workspace = null) => _post('/pipeline/scene_add', { project_id: projectId, workspace, ...fields })
+export const sceneDelete = (sceneId, workspace = null) => _post('/pipeline/scene_delete', { scene_id: sceneId, workspace })
 
 // ── 可用视频模型 + 各自参数 schema（注册即出现）──────────────
 export async function getVideoProviders() {

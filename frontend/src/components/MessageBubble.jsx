@@ -16,9 +16,10 @@ function usePersistedState(key, initial) {
 import ReactMarkdown from 'react-markdown'
 import { fileUrl, getVideoProviders, getImageProviders, getProject, batchGenerate, batchFinish,
          pipelineSelect, streamJobEvents, uploadCandidate, updateScenePrompts,
-         deleteCandidate, deleteSceneVideo, deleteEpisode, suggestSegmentPrompts,
+         deleteCandidate, deleteSceneVideo, sceneUndoAppend, deleteEpisode, suggestSegmentPrompts,
          suggestContinuation, sceneGenerate, sceneRender, sceneAppend,
-         cancelJob, listActiveJobs } from '../api'
+         cancelJob, listActiveJobs,
+         projectStyle, sceneAdd, sceneDelete } from '../api'
 
 /**
  * MessageBubble — 消息渲染
@@ -665,6 +666,13 @@ export function ProductionPanel({ message, workspace, sessionId }) {
   const [appendLang, setAppendLang] = useState({})      // {sceneId: 'zh'|'en'} 推荐语言
   const [appendSugBusy, setAppendSugBusy] = useState({})// {sceneId: AI 推荐请求中}
   const [sceneLipsync, setSceneLipsync] = useState({})  // {sceneId: 对口型开关(本地态，叠加 scene.lipsync)}
+  // 剧集级风格（每集一种风格）+ 自助新增分镜
+  const [showStyle, setShowStyle] = useState(false)
+  const [style, setStyle] = useState(null)              // {style_prompt,trigger_word,flux_lora,negative_prompt,default_size}
+  const [styleBusy, setStyleBusy] = useState(false)
+  const [showAddScene, setShowAddScene] = useState(false)
+  const [newScene, setNewScene] = useState({ title: '', narration: '', image_prompt: '', motion_prompt: '', subtitle: '', lipsync: false })
+  const [addBusy, setAddBusy] = useState(false)
   const [logs, setLogs] = useState([])             // GPU 实时日志行（尾部 N 条）
   const [showLogs, setShowLogs] = useState(true)
   const logEndRef = useRef(null)
@@ -788,12 +796,21 @@ export function ProductionPanel({ message, workspace, sessionId }) {
     if (jid) { try { await cancelJob(jid) } catch { /* ignore */ } }
   }
 
-  // 切换视频模型时，按该模型 schema 重置专业参数（排除主行已有的 size）
+  // 按所选模型 schema 整理专业参数（排除主行已有的 size）
   const curFields = (models.find(m => m.name === model)?.fields || []).filter(f => f.key !== 'size')
+  const prevModel = useRef(null)
   useEffect(() => {
-    const init = {}
-    for (const f of curFields) init[f.key] = f.default
-    setVidParams(init)
+    if (!curFields.length) return
+    const switched = prevModel.current !== null && prevModel.current !== model
+    setVidParams(prev => {
+      const out = {}
+      for (const f of curFields) {
+        // 真切模型 → 用新模型默认值；初次/同模型 → 保留本地持久化的值（没有才用默认）→ 修复"刷新后参数被重置"
+        out[f.key] = (!switched && prev && prev[f.key] !== undefined) ? prev[f.key] : f.default
+      }
+      return out
+    })
+    prevModel.current = model
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [model, models.length])
 
@@ -801,6 +818,48 @@ export function ProductionPanel({ message, workspace, sessionId }) {
     try { setProj(await getProject(pid, workspace)); setErr('') }
     catch (e) { setErr(String(e.message || e)) }
   }
+  // 剧集级风格：读/存
+  const loadStyle = async () => {
+    try { const r = await projectStyle(pid, {}, workspace); setStyle(r.style || {}) } catch { /* 忽略 */ }
+  }
+  const saveStyle = async () => {
+    setStyleBusy(true)
+    try { const r = await projectStyle(pid, style || {}, workspace); setStyle(r.style); setProgress('本集风格已保存（下次出图自动套用）') }
+    catch (e) { setProgress('保存风格失败：' + String(e.message || e)) }
+    finally { setStyleBusy(false) }
+  }
+  // 自助新增 / 删除分镜（不绕 agent）
+  const addScene = async () => {
+    if (!newScene.image_prompt && !newScene.title) { setProgress('至少填个标题或出图提示词'); return }
+    setAddBusy(true)
+    try {
+      await sceneAdd(pid, newScene, workspace)
+      setNewScene({ title: '', narration: '', image_prompt: '', motion_prompt: '', subtitle: '', lipsync: false })
+      setShowAddScene(false); await load()
+    } catch (e) { setProgress('新增分镜失败：' + String(e.message || e)) }
+    finally { setAddBusy(false) }
+  }
+  const removeScene = async (sceneId) => {
+    if (!window.confirm('删除这个分镜？（含它的候选图，不可恢复）')) return
+    try { await sceneDelete(sceneId, workspace); await load() }
+    catch (e) { setProgress('删除分镜失败：' + String(e.message || e)) }
+  }
+  const styleField = (label, key, ph = '') => (
+    <div style={{ marginBottom: 6 }}>
+      <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 2 }}>{label}</div>
+      <input value={(style && style[key]) || ''} placeholder={ph}
+        onChange={e => setStyle(s => ({ ...(s || {}), [key]: e.target.value }))}
+        style={{ ...inputStyle, width: '100%', height: 30, boxSizing: 'border-box' }} />
+    </div>
+  )
+  const addField = (label, key) => (
+    <div style={{ marginBottom: 6 }}>
+      <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 2 }}>{label}</div>
+      <input value={newScene[key] || ''} onChange={e => setNewScene(s => ({ ...s, [key]: e.target.value }))}
+        style={{ ...inputStyle, width: '100%', height: 30, boxSizing: 'border-box' }} />
+    </div>
+  )
+  const subBox = { background: 'rgba(99,102,241,0.06)', border: '1px solid rgba(99,102,241,0.2)', borderRadius: 10, padding: '12px 14px', marginBottom: 10 }
   useEffect(() => { cancelled.current = false; load(); return () => { cancelled.current = true } }, [pid])  // eslint-disable-line
   useEffect(() => {
     getVideoProviders().then(d => {
@@ -906,7 +965,17 @@ export function ProductionPanel({ message, workspace, sessionId }) {
   }
   const delSceneVideo = async (sceneId) => {
     if (!window.confirm('删除这个分镜的成片？删除后可重新出片（图还在）。')) return
-    try { await deleteSceneVideo(sceneId, workspace); load() } catch { /* ignore */ }
+    try { await deleteSceneVideo(sceneId, workspace); load() }
+    catch (e) { alert('删除成片失败：' + (e.message || e)) }   // 别再静默吞错
+  }
+  const undoAppend = async (sceneId) => {
+    setSceneBusy(b => ({ ...b, [sceneId]: 'undo' }))
+    try {
+      const r = await sceneUndoAppend(sceneId, workspace)
+      if (r && r.ok === false && r.message) alert(r.message)   // 没得回退/文件被占用 → 提示
+      load()
+    } catch (e) { alert('撤销失败：' + (e.message || e)) }
+    finally { setSceneBusy(b => { const n = { ...b }; delete n[sceneId]; return n }) }
   }
   const delEpisode = async () => {
     if (!window.confirm('删除整集成片？各分镜不受影响，可重新合成。')) return
@@ -930,7 +999,45 @@ export function ProductionPanel({ message, workspace, sessionId }) {
           {c.total} 分镜 · 已出图 {c.with_candidates} · 已选 {c.selected} · 已出片 {c.done}
         </div>
         <button onClick={load} title="刷新" style={miniBtn}>↻</button>
+        <button onClick={() => { const v = !showStyle; setShowStyle(v); if (v && !style) loadStyle() }}
+          title="本集统一风格" style={miniBtn2}>🎨 本集风格</button>
+        <button onClick={() => setShowAddScene(v => !v)} title="自己加一个分镜" style={miniBtn2}>➕ 新增分镜</button>
       </div>
+
+      {showStyle && (
+        <div style={subBox}>
+          <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 8 }}>
+            本集统一风格 —— 出图自动套用到每个分镜，全集一个调性（这就是「一集一种风格」）。
+          </div>
+          {styleField('通用风格词', 'style_prompt', '如：写实，电影感，冷蓝调，浅景深（自动拼到每镜出图词后）')}
+          {styleField('角色触发词', 'trigger_word', '人物 LoRA 触发词；没有就留空')}
+          {styleField('FLUX LoRA 路径', 'flux_lora', 'GPU 上 LoRA 路径；none=不加载任何 LoRA')}
+          {styleField('负向词', 'negative_prompt', '不想要的元素（ComfyUI 出图用）')}
+          {styleField('默认出图尺寸', 'default_size', '如 768x1024（留空用面板尺寸）')}
+          <button onClick={saveStyle} disabled={styleBusy} style={panelBtn(styleBusy)}>
+            {styleBusy ? '保存中…' : '保存本集风格'}
+          </button>
+        </div>
+      )}
+
+      {showAddScene && (
+        <div style={subBox}>
+          <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 8 }}>新增一个分镜（接在本集末尾，之后可出图/出片）。</div>
+          {addField('标题', 'title')}
+          {addField('出图提示词（写中文就行）', 'image_prompt')}
+          {addField('运镜提示词', 'motion_prompt')}
+          {addField('旁白 / 台词', 'narration')}
+          {addField('字幕（可空，留空=用旁白）', 'subtitle')}
+          <label style={{ fontSize: 12, display: 'flex', gap: 6, alignItems: 'center', margin: '4px 0 8px' }}>
+            <input type="checkbox" checked={newScene.lipsync}
+              onChange={e => setNewScene(s => ({ ...s, lipsync: e.target.checked }))} />
+            🗣 对口型镜头（人物开口说话，走 S2V）
+          </label>
+          <button onClick={addScene} disabled={addBusy} style={panelBtn(addBusy)}>
+            {addBusy ? '添加中…' : '添加到本集'}
+          </button>
+        </div>
+      )}
 
       {/* 第①步：出图（张数/尺寸可选）*/}
       <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginBottom: 8 }}>
@@ -1140,6 +1247,8 @@ export function ProductionPanel({ message, workspace, sessionId }) {
                 </span>
                 <span style={{ fontSize: 12, color: 'var(--text-sec)', flex: 1, overflow: 'hidden',
                                textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.title || '(无题)'}</span>
+                <button onClick={() => removeScene(s.scene_id)} disabled={!!busy} title="删除这个分镜（含候选图）"
+                  style={{ ...miniBtn, color: 'rgba(252,165,165,0.9)', borderColor: 'rgba(239,68,68,0.3)' }}>🗑</button>
 
                 {/* 单镜独立操作：出图（随时可重出）/ 出视频（已选图后）*/}
                 {(() => {
@@ -1251,6 +1360,13 @@ export function ProductionPanel({ message, workspace, sessionId }) {
                       style={miniAct(false, true)}>
                       ➕ 再续一段{sceneBusy[s.scene_id] === 'append' ? `…${fmtElapsed(s.scene_id)}` : ''}
                     </button>
+                    <button onClick={() => undoAppend(s.scene_id)} disabled={busy || !!sceneBusy[s.scene_id]}
+                      title="撤销最近一次「再续一段」，成片回退到续接之前（可多次回退），然后可重新续"
+                      style={{
+                        height: 26, padding: '0 12px', borderRadius: 6,
+                        border: '1px solid rgba(124,108,255,0.4)', background: 'rgba(124,108,255,0.12)',
+                        color: 'rgba(203,166,255,1)', fontSize: 11.5, cursor: 'pointer',
+                      }}>↩ 撤销上一段{sceneBusy[s.scene_id] === 'undo' ? '…' : ''}</button>
                     <button onClick={() => delSceneVideo(s.scene_id)} disabled={busy || !!sceneBusy[s.scene_id]}
                       title="删除这个分镜的成片（图还在，可重新出片）" style={{
                         height: 26, padding: '0 12px', borderRadius: 6,
@@ -1324,19 +1440,24 @@ export function ProductionPanel({ message, workspace, sessionId }) {
 /* 分镜提示词（出图/运镜/旁白）：AI 生成的也全部可见，且可改完保存再出图/出片 */
 function ScenePrompts({ scene, workspace, onSaved }) {
   const [open, setOpen] = useState(false)
+  const [tit, setTit] = useState(scene.title || '')
+  const [num, setNum] = useState(String(scene.scene_number ?? ''))
   const [img, setImg] = useState(scene.image_prompt || '')
   const [mot, setMot] = useState(scene.motion_prompt || '')
   const [nar, setNar] = useState(scene.narration || '')
   const [sub, setSub] = useState(scene.subtitle || '')
   const [saving, setSaving] = useState(false)
+  const numChanged = num !== '' && Number(num) !== scene.scene_number
   const dirty = img !== (scene.image_prompt || '') || mot !== (scene.motion_prompt || '')
     || nar !== (scene.narration || '') || sub !== (scene.subtitle || '')
+    || tit !== (scene.title || '') || numChanged
 
   const save = async () => {
     setSaving(true)
     try {
-      await updateScenePrompts(scene.scene_id,
-        { image_prompt: img, motion_prompt: mot, narration: nar, subtitle: sub }, workspace)
+      const fields = { image_prompt: img, motion_prompt: mot, narration: nar, subtitle: sub, title: tit }
+      if (numChanged) fields.scene_number = Number(num)
+      await updateScenePrompts(scene.scene_id, fields, workspace)
       onSaved?.()
     } catch { /* 保持编辑态，用户可重试 */ }
     setSaving(false)
@@ -1366,6 +1487,18 @@ function ScenePrompts({ scene, workspace, onSaved }) {
       </button>
       {open && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 6 }}>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 3, width: 70 }}>
+              <span style={{ fontSize: 10.5, color: 'var(--text-muted)' }}>镜号</span>
+              <input type="number" value={num} onChange={e => setNum(e.target.value)}
+                style={{ ...inputStyle, height: 28, fontSize: 11.5 }} />
+            </label>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 3, flex: 1 }}>
+              <span style={{ fontSize: 10.5, color: 'var(--text-muted)' }}>标题</span>
+              <input value={tit} onChange={e => setTit(e.target.value)}
+                style={{ ...inputStyle, height: 28, fontSize: 11.5 }} />
+            </label>
+          </div>
           {ta('出图提示词（image_prompt，角色触发词自动注入）', img, setImg, 3)}
           {ta('运镜/动态提示词（motion_prompt，出视频用）', mot, setMot)}
           {ta('旁白（narration，转 TTS 配音）', nar, setNar)}
@@ -1444,6 +1577,12 @@ const miniAct = (active, teal) => ({
 const miniBtn = {
   width: 24, height: 24, borderRadius: 6, border: '1px solid var(--border)',
   background: 'rgba(255,255,255,0.05)', color: 'var(--text-sec)', cursor: 'pointer', fontSize: 13,
+}
+// 多字小按钮（本集风格 / 新增分镜等）：自动宽度 + 不换行，避免文字竖排
+const miniBtn2 = {
+  height: 24, padding: '0 9px', borderRadius: 6, border: '1px solid var(--border)',
+  background: 'rgba(255,255,255,0.05)', color: 'var(--text-sec)', cursor: 'pointer',
+  fontSize: 12, whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center', gap: 4,
 }
 
 const inputStyle = {

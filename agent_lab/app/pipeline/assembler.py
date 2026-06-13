@@ -93,24 +93,46 @@ def extract_last_frame(video_path: str, out_png: str) -> str:
     return out_png
 
 
-def concat_videos(paths: list[str], out_path: str) -> str:
-    """同源片段快速拼接（流复制；失败回退重编码）。用于尾帧接续的多段合一。"""
+def concat_videos(paths: list[str], out_path: str, dedup_boundary: bool = False) -> str:
+    """尾帧接续的多段合一。
+
+    dedup_boundary=True：尾帧接续里每段(除第一段)的**首帧 == 上一段的末帧**(拿末帧当起点生成的)，
+    直接拼会出现重复帧 → 拼接处一帧冻结、看着"小卡顿"。开启后用 concat 滤镜丢掉后续段的首帧、重编码无缝拼。
+    dedup_boundary=False：老行为，流复制(-c copy)快速拼，失败回退重编码。
+    """
     ff = _ffmpeg()
     work = tempfile.mkdtemp(prefix="chain_")
     try:
-        lst = os.path.join(work, "list.txt")
-        with open(lst, "w", encoding="utf-8") as f:
-            for p in paths:
-                f.write(f"file '{p}'\n")
         tmp_out = os.path.join(work, "out.mp4")
-        res = _run([ff, "-y", "-hide_banner", "-f", "concat", "-safe", "0",
-                    "-i", lst, "-c", "copy", tmp_out])
-        if res.returncode != 0:   # 极少数封装差异导致 copy 失败 → 重编码兜底
-            res = _run([ff, "-y", "-hide_banner", "-f", "concat", "-safe", "0",
-                        "-i", lst, "-c:v", "libx264", "-preset", "veryfast",
+        ok = False
+        if dedup_boundary and len(paths) > 1:
+            inputs = []
+            for p in paths:
+                inputs += ["-i", p]
+            fc = []
+            for i in range(len(paths)):
+                # 第一段整段保留；后续段丢掉首帧(=上段末帧的重复帧)
+                trim = "" if i == 0 else "trim=start_frame=1,"
+                fc.append(f"[{i}:v]{trim}setpts=PTS-STARTPTS[v{i}]")
+            fc.append("".join(f"[v{i}]" for i in range(len(paths))) +
+                      f"concat=n={len(paths)}:v=1:a=0[outv]")
+            res = _run([ff, "-y", "-hide_banner", *inputs, "-filter_complex", ";".join(fc),
+                        "-map", "[outv]", "-c:v", "libx264", "-preset", "veryfast",
                         "-crf", "20", "-pix_fmt", "yuv420p", tmp_out], timeout=900)
-            if res.returncode != 0:
-                raise RuntimeError(f"片段拼接失败: {(res.stderr or '')[-400:]}")
+            ok = res.returncode == 0      # 滤镜失败(如尺寸不一致)→ 退回 copy 拼
+        if not ok:
+            lst = os.path.join(work, "list.txt")
+            with open(lst, "w", encoding="utf-8") as f:
+                for p in paths:
+                    f.write(f"file '{p}'\n")
+            res = _run([ff, "-y", "-hide_banner", "-f", "concat", "-safe", "0",
+                        "-i", lst, "-c", "copy", tmp_out])
+            if res.returncode != 0:   # 极少数封装差异导致 copy 失败 → 重编码兜底
+                res = _run([ff, "-y", "-hide_banner", "-f", "concat", "-safe", "0",
+                            "-i", lst, "-c:v", "libx264", "-preset", "veryfast",
+                            "-crf", "20", "-pix_fmt", "yuv420p", tmp_out], timeout=900)
+                if res.returncode != 0:
+                    raise RuntimeError(f"片段拼接失败: {(res.stderr or '')[-400:]}")
         os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
         if os.path.exists(out_path):
             os.remove(out_path)
@@ -133,7 +155,8 @@ def assemble_clips(
     *,
     voice: str = DEFAULT_VOICE,
     with_subtitles: bool = True,
-    crossfade: float = 0.0,
+    crossfade: float | None = None,
+    bgm: str | None = None,
 ) -> dict:
     """把分镜 clips 合成一条成片。
 
@@ -142,33 +165,75 @@ def assemble_clips(
         out_path: 输出 mp4 绝对路径。
         voice: edge-tts 音色。
         with_subtitles: 是否加旁白字幕（优先烧录，失败软字幕）。
-        crossfade: 预留（当前硬切）。
+        crossfade: 镜间交叉叠化秒数；None=用 settings.ASSEMBLE_CROSSFADE；0=硬切。失败自动回退硬切。
+        bgm: 背景音乐文件路径；None=用 settings.BGM_PATH；空=不加。
     Returns:
-        {"out": 路径, "duration": 总秒, "scenes": N, "tts": 用了旁白?, "subtitles": "burned|soft|none"}
+        {"out": 路径, "duration": 总秒, "scenes": N, "tts": 用了旁白?, "subtitles": "burned|soft|none", "bgm": bool}
     """
+    from agent_lab.app.core.config import settings
     ff = _ffmpeg()
     if not clips:
         raise ValueError("没有可合成的分镜片段")
     for c in clips:
         if not os.path.isfile(c["path"]):
             raise FileNotFoundError(f"分镜片段不存在: {c['path']}")
+    cf = float(settings.ASSEMBLE_CROSSFADE if crossfade is None else crossfade) or 0.0
+    bgm_path = (settings.BGM_PATH if bgm is None else bgm) or ""
 
     tw, th = _video_size(clips[0]["path"])  # 以第一段分辨率为基准，其余缩放+补边
     work = tempfile.mkdtemp(prefix="assemble_")
     try:
         return _assemble_in(work, clips, out_path, ff, tw, th,
-                            voice=voice, with_subtitles=with_subtitles)
+                            voice=voice, with_subtitles=with_subtitles,
+                            crossfade=cf, bgm=bgm_path)
     finally:
         import shutil
         shutil.rmtree(work, ignore_errors=True)   # 中间片段每次几十MB，必须清理（成败都清）
 
 
+def _xfade_chain(ff, parts: list[str], durs: list[float], cf: float, out: str) -> None:
+    """把各 part 用 xfade(视频)+acrossfade(音频)链成一条，镜间交叉叠化。失败抛异常由调用方回退硬切。"""
+    n = len(parts)
+    args = [ff, "-y", "-hide_banner"]
+    for p in parts:
+        args += ["-i", p]
+    vfl, afl = [], []
+    prev_v, prev_a = "0:v", "0:a"
+    acc = durs[0]
+    for i in range(1, n):
+        off = max(0.0, acc - cf)
+        vfl.append(f"[{prev_v}][{i}:v]xfade=transition=fade:duration={cf:.3f}:offset={off:.3f}[vx{i}]")
+        afl.append(f"[{prev_a}][{i}:a]acrossfade=d={cf:.3f}[ax{i}]")
+        prev_v, prev_a = f"vx{i}", f"ax{i}"
+        acc += durs[i] - cf
+    args += ["-filter_complex", ";".join(vfl + afl),
+             "-map", f"[{prev_v}]", "-map", f"[{prev_a}]",
+             "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p",
+             "-c:a", "aac", "-ar", "44100", "-ac", "2", out]
+    res = _run(args, timeout=1800)
+    if res.returncode != 0 or not os.path.isfile(out):
+        raise RuntimeError((res.stderr or "")[-500:])
+
+
+def _add_bgm(ff, video: str, bgm: str, out: str, vol: float) -> None:
+    """整片下垫一条循环的低音量 BGM(amix，时长跟视频)。失败抛异常由调用方忽略 BGM。"""
+    res = _run([ff, "-y", "-hide_banner", "-i", video, "-stream_loop", "-1", "-i", bgm,
+                "-filter_complex",
+                f"[1:a]volume={vol:.3f}[bg];[0:a][bg]amix=inputs=2:duration=first:dropout_transition=3[a]",
+                "-map", "0:v", "-map", "[a]", "-c:v", "copy",
+                "-c:a", "aac", "-ar", "44100", "-ac", "2", out], timeout=900)
+    if res.returncode != 0 or not os.path.isfile(out):
+        raise RuntimeError((res.stderr or "")[-500:])
+
+
 def _assemble_in(work: str, clips: list[dict], out_path: str, ff: str,
-                 tw: int, th: int, *, voice: str, with_subtitles: bool) -> dict:
+                 tw: int, th: int, *, voice: str, with_subtitles: bool,
+                 crossfade: float = 0.0, bgm: str = "") -> dict:
     parts: list[str] = []
-    subs: list[tuple[float, float, str]] = []   # (start, end, text)
-    t_cursor = 0.0
+    durs: list[float] = []
+    sub_texts: list[str] = []
     tts_used = False
+    FPS = 24   # 统一帧率，xfade 才能对齐不同来源(Wan/S2V fps 不同)的片段
 
     for i, c in enumerate(clips):
         clip = c["path"]
@@ -187,9 +252,9 @@ def _assemble_in(work: str, clips: list[dict], out_path: str, ff: str,
             freeze = max(0.0, out_dur - vd)
             tts_used = tts_used or has_narr
 
-        # 统一分辨率 + 末帧冻结补齐 + 统一编码（后续 concat 可直接 -c copy）
+        # 统一分辨率 + 帧率 + 末帧冻结补齐 + 统一编码
         vf = (f"scale={tw}:{th}:force_original_aspect_ratio=decrease,"
-              f"pad={tw}:{th}:(ow-iw)/2:(oh-ih)/2,setsar=1")
+              f"pad={tw}:{th}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps={FPS}")
         if freeze > 0.05:
             vf += f",tpad=stop_mode=clone:stop_duration={freeze:.3f}"
         part = os.path.join(work, f"part_{i}.mp4")
@@ -211,22 +276,54 @@ def _assemble_in(work: str, clips: list[dict], out_path: str, ff: str,
         res = _run(args, timeout=900)
         if res.returncode != 0:
             raise RuntimeError(f"分镜 {i+1} 处理失败:\n{(res.stderr or '')[-800:]}")
-        real = _duration(part)
-        if subtitle:
-            subs.append((t_cursor + 0.05, t_cursor + real - 0.05, subtitle))
-        t_cursor += real
+        durs.append(_duration(part))
+        sub_texts.append(subtitle)
         parts.append(part)
 
-    # 顺序拼接（各 part 编码一致，流复制零损耗）
-    lst = os.path.join(work, "list.txt")
-    with open(lst, "w", encoding="utf-8") as f:
-        for p in parts:
-            f.write(f"file '{p}'\n")
     merged = os.path.join(work, "merged.mp4")
-    res = _run([ff, "-y", "-hide_banner", "-f", "concat", "-safe", "0",
-                "-i", lst, "-c", "copy", merged])
-    if res.returncode != 0:
-        raise RuntimeError(f"拼接失败:\n{(res.stderr or '')[-800:]}")
+    starts: list[float] = []   # 每段在成片里的起点(秒)，用于字幕定时
+    used_xfade = False
+    if crossfade and crossfade > 0 and len(parts) >= 2:
+        try:
+            _xfade_chain(ff, parts, durs, crossfade, merged)
+            used_xfade = True
+            acc = 0.0
+            for d in durs:                       # 叠化：每段被前一段叠掉 crossfade 秒
+                starts.append(acc); acc += d - crossfade
+        except Exception as e:  # noqa: BLE001 - 叠化失败不该让合成失败
+            logger.warning("[assembler] crossfade 失败，回退硬切: %s", e)
+            used_xfade = False
+    if not used_xfade:
+        lst = os.path.join(work, "list.txt")
+        with open(lst, "w", encoding="utf-8") as f:
+            for p in parts:
+                f.write(f"file '{p}'\n")
+        res = _run([ff, "-y", "-hide_banner", "-f", "concat", "-safe", "0",
+                    "-i", lst, "-c", "copy", merged])
+        if res.returncode != 0:
+            raise RuntimeError(f"拼接失败:\n{(res.stderr or '')[-800:]}")
+        acc = 0.0
+        for d in durs:
+            starts.append(acc); acc += d
+
+    # 字幕定时（据每段起点）
+    subs: list[tuple[float, float, str]] = []
+    for i, txt in enumerate(sub_texts):
+        if txt:
+            subs.append((starts[i] + 0.1, starts[i] + durs[i] - 0.1, txt))
+
+    # 背景音乐：整片下垫一条低音量 BGM（贯穿=连贯感）。失败忽略，不影响成片。
+    if bgm and os.path.isfile(bgm):
+        from agent_lab.app.core.config import settings
+        bgm_out = os.path.join(work, "bgm.mp4")
+        try:
+            _add_bgm(ff, merged, bgm, bgm_out, float(getattr(settings, "BGM_VOLUME", 0.18) or 0.18))
+            merged = bgm_out
+            logger.info("[assembler] 已垫背景音乐: %s", os.path.basename(bgm))
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[assembler] BGM 失败，跳过: %s", e)
+    elif bgm:
+        logger.warning("[assembler] BGM 文件不存在，跳过: %s", bgm)
 
     # 字幕：烧录（在 work 目录用相对路径，避开 Windows 盘符转义地狱）→ 软字幕 → 无
     sub_mode = "none"

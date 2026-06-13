@@ -66,5 +66,8 @@ frontend_dev.log
 frontend_dev.err
 # 基准测试产物
 bench_out/
+# demo/编排脚本的运行日志
+coffee_demo.log
+short_demo.log
 # Claude 本地工作配置
 .claude/

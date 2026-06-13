@@ -74,10 +74,10 @@ class Settings(BaseSettings):
     GPU_LTX_SCRIPT: str = "/root/autodl-tmp/ltx_i2v.py"
     # 复用 FLUX 的 T5-XXL text_encoder，省 ~19G 盘（留空则用 LTX 自带 text_encoder）
     GPU_LTX_T5_DIR: str = "/root/autodl-tmp/models/flux-dev/text_encoder_2"
-    LTX_SIZE: str = "704*1280"
+    LTX_SIZE: str = "480*832"          # 默认竖屏快档：省显存(~10G)、更快，不会被卡上残留一点点占用就 OOM
     LTX_NUM_FRAMES: int = 121
     LTX_FPS: int = 24
-    LTX_STEPS: int = 40
+    LTX_STEPS: int = 30                 # LTX 30 步已够；比 40 快约 1/4
     LTX_GUIDANCE: float = 3.0
     # ── ComfyUI 后端（HTTP，可配置；对用户完全隐形）──────────────
     # 在 GPU 或任意机器上跑 ComfyUI，本框架通过它的 HTTP API 提交 workflow。
@@ -90,9 +90,18 @@ class Settings(BaseSettings):
     COMFYUI_IMAGE_AS: str = ""            # 出图：默认 ""=仍走 FLUX-SSH；设 "auto"/"flux" 才让出图透明走 ComfyUI
     COMFYUI_WORKFLOW_I2V: str = ""        # i2v workflow 模板(API格式 JSON)路径；空=用仓库自带 comfyui_workflows/i2v_template.json
     COMFYUI_TIMEOUT: int = 1800           # 单段出片超时（秒）
-    COMFYUI_FRAMES: int = 81              # 默认帧数
+    COMFYUI_FRAMES: int = 81              # 默认帧数（i2v 用；对口型 S2V 改为按音频时长动态算）
     COMFYUI_FPS: int = 16                 # 默认帧率（Wan 系常用 16）
+    # 对口型(S2V)单段一口气帧数上限：防 24G OOM/超长。0=不限，帧数完全跟音频走；
+    # 若长台词 OOM，可设为如 113（≈7s@16fps），超长会告警并建议拆句/分镜。
+    COMFYUI_S2V_MAX_FRAMES: int = 0
     COMFYUI_STEPS: int = 20               # 默认采样步数
+    # ── 合成连贯性 ──
+    # 镜间交叉叠化(秒)：0=硬切；0.4 左右让镜头切换更顺、减少"散"。失败自动回退硬切。
+    ASSEMBLE_CROSSFADE: float = 0.4
+    # 背景音乐文件(本地路径)：设了就在整片下垫一条低音量 BGM(贯穿全集=最便宜的连贯感)；空=不加。
+    BGM_PATH: str = ""
+    BGM_VOLUME: float = 0.18              # BGM 相对音量(垫在旁白下，别盖过人声)
     COMFYUI_SIZE: str = "480*832"         # 默认分辨率（宽*高）
     # ComfyUI 文生图（t2i）：把出图也接到 ComfyUI（GGUF Flux / 更好采样器 / LoRA 叠加）
     COMFYUI_WORKFLOW_T2I: str = ""        # t2i workflow 模板路径；空=用仓库自带 comfyui_workflows/t2i_template.json

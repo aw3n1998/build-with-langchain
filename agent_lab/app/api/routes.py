@@ -924,9 +924,11 @@ async def pipeline_project(project_id: str, workspace: str | None = None):
             "motion_prompt": s.get("motion_prompt") or "",
             "candidates": cands,
             "selected": any(c["selected"] for c in cands),
-            # url 带 mtime 版本号：追加/重出后文件变了但路径不变，靠 &v= 让浏览器不吃旧缓存
+            # url 带 mtime 版本号：追加/重出后文件变了但路径不变，靠 &v= 让浏览器不吃旧缓存。
+            # 以 DB 的 video_path 为准：删成片清空 video_path 后立刻不显示（即便文件被浏览器锁住一时没删掉）。
             "video": ({"url": f"/api/file?path={_quote(vlocal)}&v={int(os.path.getmtime(vlocal))}",
-                       "name": os.path.basename(vlocal)} if os.path.exists(vlocal) else None),
+                       "name": os.path.basename(vlocal)}
+                      if (s.get("video_path") and os.path.exists(vlocal)) else None),
         })
     episode = os.path.join(vdir, f"episode_{project_id}.mp4")
     return {
@@ -1072,6 +1074,8 @@ class ScenePromptsRequest(BaseModel):
     narration: str | None = None
     subtitle: str | None = None        # 屏幕字幕（独立于旁白）
     lipsync: bool | None = None        # 对口型(S2V)开关；None=不改
+    title: str | None = None           # 分镜标题；None=不改
+    scene_number: int | None = None    # 镜号；None=不改
 
 
 @router.post("/pipeline/scene_prompts")
@@ -1085,12 +1089,130 @@ async def pipeline_scene_prompts(req: ScenePromptsRequest):
         raise HTTPException(status_code=404, detail=f"分镜不存在: {req.scene_id}")
     s = store.update_scene_prompts(
         req.scene_id, image_prompt=req.image_prompt,
-        motion_prompt=req.motion_prompt, narration=req.narration, subtitle=req.subtitle)
+        motion_prompt=req.motion_prompt, narration=req.narration, subtitle=req.subtitle,
+        title=req.title, scene_number=req.scene_number)
     if req.lipsync is not None:
         s = store.set_scene_lipsync(req.scene_id, req.lipsync)
     return {"scene_id": s["id"], "image_prompt": s.get("image_prompt") or "",
             "motion_prompt": s.get("motion_prompt") or "", "narration": s.get("narration") or "",
-            "subtitle": s.get("subtitle") or "", "lipsync": bool(s.get("lipsync"))}
+            "subtitle": s.get("subtitle") or "", "lipsync": bool(s.get("lipsync")),
+            "title": s.get("title") or "", "scene_number": s.get("scene_number")}
+
+
+# ── 剧集（项目）管理 + 每集风格 + 分镜 增/删（面板自助，不绕 agent）──
+class ProjectCreateRequest(BaseModel):
+    workspace: str | None = None
+    title: str = "新剧集"
+
+
+class ProjectEditRequest(BaseModel):
+    workspace: str | None = None
+    project_id: str
+    title: str | None = None
+
+
+class ProjectStyleRequest(BaseModel):
+    workspace: str | None = None
+    project_id: str
+    # 全 None=只读返回；任一非 None=写入该字段
+    style_prompt: str | None = None     # 通用风格词（拼到每镜 image_prompt 后）
+    trigger_word: str | None = None     # 角色触发词（项目级，覆盖工作目录）
+    flux_lora: str | None = None        # LoRA 路径；"none"=不加载
+    negative_prompt: str | None = None
+    default_size: str | None = None     # 默认出图尺寸，如 768x1024
+
+
+class SceneAddRequest(BaseModel):
+    workspace: str | None = None
+    project_id: str
+    scene_number: int | None = None     # 缺省=接在最后
+    title: str = ""
+    narration: str = ""
+    image_prompt: str = ""
+    motion_prompt: str = ""
+    subtitle: str = ""
+    lipsync: bool = False
+
+
+class SceneDeleteRequest(BaseModel):
+    workspace: str | None = None
+    scene_id: str
+
+
+def _ws_store(workspace):
+    from agent_lab.app.pipeline.runtime import set_workspace
+    from agent_lab.app.pipeline.store import get_store
+    set_workspace(workspace)
+    return get_store()
+
+
+@router.post("/pipeline/project_create")
+async def pipeline_project_create(req: ProjectCreateRequest):
+    """面板「新建剧集」：不绕 agent 直接建项目。返回 project_id。"""
+    store = _ws_store(req.workspace)
+    p = store.create_project(req.title or "新剧集")
+    return {"project_id": p["id"], "title": p["title"]}
+
+
+@router.post("/pipeline/project_rename")
+async def pipeline_project_rename(req: ProjectEditRequest):
+    store = _ws_store(req.workspace)
+    if not store.get_project(req.project_id):
+        raise HTTPException(status_code=404, detail="项目不存在")
+    p = store.rename_project(req.project_id, req.title or "")
+    return {"project_id": p["id"], "title": p["title"]}
+
+
+@router.post("/pipeline/project_delete")
+async def pipeline_project_delete(req: ProjectEditRequest):
+    """删除整个剧集（含全部分镜/候选，级联）。"""
+    store = _ws_store(req.workspace)
+    ok = store.delete_project(req.project_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="项目不存在")
+    return {"deleted": True, "project_id": req.project_id}
+
+
+@router.post("/pipeline/project_style")
+async def pipeline_project_style(req: ProjectStyleRequest):
+    """读/写剧集级风格（每集一种风格）。全字段 None=只读；否则写入非 None 字段。"""
+    store = _ws_store(req.workspace)
+    if not store.get_project(req.project_id):
+        raise HTTPException(status_code=404, detail="项目不存在")
+    fields = {k: getattr(req, k) for k in
+              ("style_prompt", "trigger_word", "flux_lora", "negative_prompt", "default_size")}
+    if any(v is not None for v in fields.values()):
+        style = store.update_project_style(req.project_id, **fields)
+    else:
+        style = store.get_project_style(req.project_id)
+    return {"project_id": req.project_id, "style": style}
+
+
+@router.post("/pipeline/scene_add")
+async def pipeline_scene_add(req: SceneAddRequest):
+    """面板「新增分镜」：不绕 agent 直接加一镜。镜号缺省=接最后。"""
+    store = _ws_store(req.workspace)
+    if not store.get_project(req.project_id):
+        raise HTTPException(status_code=404, detail="项目不存在")
+    n = req.scene_number
+    if not n or n <= 0:
+        existing = store.list_scenes(req.project_id)
+        n = (max((s["scene_number"] for s in existing), default=0) + 1)
+    s = store.add_scene(req.project_id, n, narration=req.narration,
+                        image_prompt=req.image_prompt, motion_prompt=req.motion_prompt,
+                        title=req.title, subtitle=req.subtitle)
+    if req.lipsync:
+        s = store.set_scene_lipsync(s["id"], True)
+    return {"scene_id": s["id"], "scene_number": s["scene_number"], "title": s.get("title") or ""}
+
+
+@router.post("/pipeline/scene_delete")
+async def pipeline_scene_delete(req: SceneDeleteRequest):
+    store = _ws_store(req.workspace)
+    ok = store.delete_scene(req.scene_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="分镜不存在")
+    return {"deleted": True, "scene_id": req.scene_id}
 
 
 class SuggestSegmentPromptsRequest(BaseModel):
@@ -1189,12 +1311,19 @@ async def pipeline_upload_candidate(
 
 
 def _rm_local(path: str) -> None:
-    """删本地文件，吞掉不存在/被占用等错误（产物清理不应让接口失败）。"""
-    try:
-        if path and os.path.isfile(path):
+    """删本地文件。Windows 上文件被浏览器 <video> 占用会抛 PermissionError → 退避重试几次；
+    实在删不掉也不抛（DB 的 video_path 已清空，面板不会再显示，文件下次重出时覆盖）。"""
+    if not path or not os.path.isfile(path):
+        return
+    import time as _t
+    for i in range(4):
+        try:
             os.remove(path)
-    except OSError:
-        pass
+            return
+        except PermissionError:           # 被占用（播放中）→ 等一下再删
+            _t.sleep(0.4 * (i + 1))
+        except OSError:
+            return
 
 
 class DeleteCandidateRequest(BaseModel):
@@ -1226,7 +1355,8 @@ class SceneRequest(BaseModel):
 
 @router.post("/pipeline/delete_scene_video")
 async def pipeline_delete_scene_video(req: SceneRequest):
-    """删除某分镜的成片（本地 mp4 + DB），回到「待出片」，可重新出片。"""
+    """删除某分镜的成片（本地 mp4 + 分段 + 续段快照 + DB），回到「待出片」，可重新出片。"""
+    import glob as _glob
     from agent_lab.app.pipeline.runtime import set_workspace, video_dir
     from agent_lab.app.pipeline.store import get_store
     set_workspace(req.workspace)
@@ -1234,9 +1364,27 @@ async def pipeline_delete_scene_video(req: SceneRequest):
     scene = store.get_scene(req.scene_id)
     if not scene:
         raise HTTPException(status_code=404, detail="分镜不存在")
-    _rm_local(os.path.join(video_dir(), f"{scene['scene_number']:02d}_{req.scene_id}.mp4"))
+    base = os.path.join(video_dir(), f"{scene['scene_number']:02d}_{req.scene_id}")
+    _rm_local(base + ".mp4")
+    # 连分段/续段快照/末帧图一起清，别留垃圾
+    for p in _glob.glob(base + "_seg*.mp4") + _glob.glob(base + ".undo*.mp4") \
+            + _glob.glob(base + "*.png") + _glob.glob(base + ".tmp.mp4"):
+        _rm_local(p)
     store.clear_scene_video(req.scene_id)
     return {"ok": True}
+
+
+@router.post("/pipeline/scene_undo_append")
+async def pipeline_scene_undo_append(req: SceneRequest):
+    """撤销「上一段」续接：成片回退到最近一次「再续一段」之前（可多次回退）。"""
+    from agent_lab.app.pipeline.runtime import set_workspace
+    from agent_lab.app.pipeline.store import get_store
+    from agent_lab.app.pipeline.pipeline_tools import undo_last_append_segment
+    set_workspace(req.workspace)
+    if not get_store().get_scene(req.scene_id):
+        raise HTTPException(status_code=404, detail="分镜不存在")
+    msg = undo_last_append_segment(req.scene_id)
+    return {"ok": not msg.startswith(("没有", "回退失败")), "message": msg}
 
 
 class EpisodeRequest(BaseModel):

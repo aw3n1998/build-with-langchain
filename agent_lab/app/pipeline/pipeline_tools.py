@@ -271,9 +271,9 @@ def _gpu_retry(fn, *, what: str, retries: int = 1):
     raise last
 
 
-def _apply_trigger(prompt: str) -> str:
-    """把工作目录配置的角色触发词自动加在提示词最前（已含则不重复）。"""
-    tw = model_config().get("trigger_word")
+def _apply_trigger(prompt: str, trigger: str | None = None) -> str:
+    """把角色触发词加在提示词最前（已含则不重复）。trigger=None 时用工作目录配置；显式传入则用它（项目级优先）。"""
+    tw = trigger if trigger is not None else model_config().get("trigger_word")
     if tw and tw.lower() not in (prompt or "").lower():
         return f"{tw}, {prompt}".strip(", ").strip()
     return prompt
@@ -347,21 +347,37 @@ def generate_candidates(
         return f"分镜不存在: {scene_id}"
     provider = image_provider_registry.get(model)
     is_http = getattr(provider, "transport", "ssh") == "http"
+    # 剧集级风格（每集一种风格）：通用风格词/触发词/LoRA/负向/默认尺寸。项目级优先，回退工作目录 config.json。
+    pstyle = store.get_project_style(scene["project_id"]) if scene.get("project_id") else {}
     raw = image_prompt or scene.get("image_prompt") or ""
+    style_words = (pstyle.get("style_prompt") or "").strip()
+    if style_words and style_words.lower() not in raw.lower():
+        raw = f"{raw}，{style_words}".strip("，").strip()
     # FLUX 等英文模型读不懂中文(CLIP 截断 + 纯英文训练 → 退化成动漫人像)。
     # 英文模型(prompt_lang=="en") + 开关开 + 含中文 → 出图前自动翻英文，对用户隐形；翻译失败退回原文不阻断。
     if getattr(provider, "prompt_lang", "any") == "en" and settings.IMAGE_PROMPT_AUTOTRANSLATE:
         from agent_lab.app.pipeline.prompt_gen import translate_to_english
         raw = translate_to_english(raw)
-    prompt = _apply_trigger(raw)
+    trigger = (pstyle.get("trigger_word") or "").strip() or model_config().get("trigger_word")
+    prompt = _apply_trigger(raw, trigger)
     if not prompt:
         return "没有出图提示词（image_prompt 为空）。"
-    # 出图参数 + flux 专属 LoRA（工作目录级覆盖）一起打包给 provider 自取所需
+    # 默认尺寸：用户没指定(0)且项目设了 default_size(如 768x1024) → 用项目默认
+    if (not width or not height) and (pstyle.get("default_size") or "").strip():
+        try:
+            pw, ph = (int(x) for x in pstyle["default_size"].lower().replace("x", "*").split("*"))
+            width = width or pw
+            height = height or ph
+        except (ValueError, TypeError):
+            pass
+    # LoRA / 负向词：项目级优先，回退工作目录
+    lora = (pstyle.get("flux_lora") or "").strip() or (model_config().get("flux_lora") or None)
     params = {
         "n": (n or None), "steps": (steps or None), "guidance": guidance,
         "width": (width or None), "height": (height or None),
         "seed": seed, "offload": (offload or None),
-        "flux_lora": (model_config().get("flux_lora") or None),
+        "flux_lora": lora,
+        "negative": (pstyle.get("negative_prompt") or "").strip() or None,
     }
     local_dir = candidates_dir(scene_id)  # 落到当前工作目录
 
@@ -491,6 +507,23 @@ def request_video_params(scene_id: str, motion_prompt: str = "", model: str = ""
             f"VIDEO_PARAM_FORM::{json.dumps(payload, ensure_ascii=False)}")
 
 
+def _s2v_frames_for_audio(seconds: float, fps: int, cap: int = 0, margin: float = 0.2) -> int:
+    """对口型该出多少帧 = ⌈(音频秒数+余量)·fps⌉，向上取到 Wan 合法的 4n+1（时序步长4）。
+
+    音频多长视频多长，口型跟满整句、不被写死的 81 帧截断。cap>0 时封顶（防显存 OOM/超长）。
+    seconds/fps 非法 → 返回 0（调用方回退默认帧数）。
+    """
+    import math
+    if seconds <= 0 or fps <= 0:
+        return 0
+    raw = int(math.ceil((seconds + margin) * fps))
+    n = math.ceil(max(0, raw - 1) / 4)
+    frames = 4 * n + 1
+    if cap and cap > 0 and frames > cap:
+        frames = cap
+    return frames
+
+
 def _do_render_lipsync_s2v(scene_id, scene, asset, prompt, params) -> str:
     """对口型出片：取该镜旁白(=台词)→TTS→连同选中人物图喂 Wan2.2-S2V，出口型同步片(成片自带人声)。
 
@@ -528,6 +561,24 @@ def _do_render_lipsync_s2v(scene_id, scene, asset, prompt, params) -> str:
               **{k: v for k, v in (params or {}).items() if v not in (None, "", 0)}}
     merged.pop("lipsync", None); merged.pop("segments", None); merged.pop("motion_prompts", None)
     merged["audio_path"] = audio_local
+    # 帧数跟着音频走：否则写死 81帧≈5s 会把长台词截断（口型只对到一半）。
+    if not merged.get("frames"):     # 用户没在参数卡显式指定才自动算
+        from agent_lab.app.pipeline import log_bus
+        from agent_lab.app.pipeline.assembler import _duration as _media_seconds
+        fps = int(merged.get("fps") or settings.COMFYUI_FPS)
+        try:
+            dur = float(_media_seconds(audio_local))
+        except Exception:            # noqa: BLE001 探测失败就退回默认帧数
+            dur = 0.0
+        frames = _s2v_frames_for_audio(dur, fps, cap=int(settings.COMFYUI_S2V_MAX_FRAMES or 0))
+        if frames:
+            merged["frames"] = frames
+            cap = int(settings.COMFYUI_S2V_MAX_FRAMES or 0)
+            if cap and frames >= cap:
+                log_bus.emit(f"[对口型] 台词约 {dur:.1f}s 超过单段上限 {cap/fps:.1f}s，已截到上限；"
+                             f"建议把这句拆短或拆成两镜，避免说不完。")
+            else:
+                log_bus.emit(f"[对口型] 台词 {dur:.1f}s → {frames} 帧 ≈ {frames/fps:.1f}s（口型跟满全句，不截断）")
     try:
         store.set_scene_state(scene_id, SceneState.PENDING_VIDEO_GEN, force=True)
         _gpu_retry(lambda: s2v.generate(None, image_path=cur_image, prompt=prompt,
@@ -677,10 +728,10 @@ def do_render_scene_video(
         return f"图生视频失败{hint}: {e}"
 
     if segments > 1:
-        # 多段无缝拼接为最终成片（同源片段流复制，秒级完成）
+        # 多段拼接为最终成片：去重边界帧(尾帧接续每段首帧=上段末帧)，消除拼接处的一帧卡顿
         from agent_lab.app.pipeline.assembler import concat_videos
         try:
-            concat_videos(seg_locals, final_local)
+            concat_videos(seg_locals, final_local, dedup_boundary=True)
         except Exception as e:  # noqa: BLE001
             store.set_scene_state(scene_id, SceneState.FAILED, force=True)
             return f"接续段拼接失败: {e}"
@@ -757,6 +808,50 @@ def _render_one_continuation(scene_id, scene, provider, is_http, gpu,
     return seg_local
 
 
+def _undo_paths(final_local: str) -> list[str]:
+    """该成片的「续段前快照」列表（按编号升序）。供「撤销上一段」回退。"""
+    import glob, re
+    base = final_local[:-4] if final_local.lower().endswith(".mp4") else final_local
+    items = []
+    for p in glob.glob(base + ".undo*.mp4"):
+        m = re.search(r"\.undo(\d+)\.mp4$", p)
+        if m:
+            items.append((int(m.group(1)), p))
+    return [p for _, p in sorted(items)]
+
+
+def _next_undo_path(final_local: str) -> str:
+    import re
+    base = final_local[:-4] if final_local.lower().endswith(".mp4") else final_local
+    ks = [int(re.search(r"\.undo(\d+)\.mp4$", p).group(1)) for p in _undo_paths(final_local)]
+    return f"{base}.undo{(max(ks) + 1) if ks else 1}.mp4"
+
+
+def undo_last_append_segment(scene_id: str) -> str:
+    """撤销「上一段」续接：把成片回退到最近一次「再续一段」之前的版本（可多次回退）。"""
+    store = get_store()
+    scene = store.get_scene(scene_id)
+    if not scene:
+        return f"分镜不存在: {scene_id}"
+    final_local = os.path.join(video_dir(), f"{scene['scene_number']:02d}_{scene_id}.mp4")
+    snaps = _undo_paths(final_local)
+    if not snaps:
+        return "没有可回退的续段——这已是最初出的那一段，或还没「再续一段」过。"
+    latest = snaps[-1]
+    try:
+        os.replace(latest, final_local)   # 用快照覆盖回成片，并消耗掉这个快照
+    except PermissionError:
+        return "回退失败：成片正被播放/占用（多半在浏览器里放着）。请暂停该视频后再点「撤销上一段」。"
+    except OSError as e:
+        return f"回退失败: {e}"
+    store.set_scene_video(scene_id, final_local)
+    store.set_scene_state(scene_id, SceneState.COMPLETED)
+    left = len(_undo_paths(final_local))
+    tip = f"（还可再回退 {left} 次）" if left else "（已回到最初那一段）"
+    return (f"已撤销上一段续接，成片回退到上一版{tip}。可重新「再续一段」。\n"
+            f"VIDFILE::{scene_id}::{final_local}")
+
+
 def append_scene_segment(scene_id: str, motion_prompt: str = "", model: str = "",
                          params: dict | None = None, count: int = 1) -> str:
     """在分镜**已生成**的成片末尾，按尾帧接续再追加 count 段，就地变长（看效果再决定加多少）。
@@ -797,6 +892,12 @@ def append_scene_segment(scene_id: str, motion_prompt: str = "", model: str = ""
             return f"GPU 未配置: {e}"
 
     from agent_lab.app.pipeline.assembler import extract_last_frame, concat_videos
+    # 续段前给现有成片打快照 → 「撤销上一段」可回退到本次续接之前（可多次）
+    import shutil as _shutil
+    try:
+        _shutil.copy2(final_local, _next_undo_path(final_local))
+    except OSError:
+        pass
     done = 0
     try:
         for i in range(count):
@@ -807,7 +908,8 @@ def append_scene_segment(scene_id: str, motion_prompt: str = "", model: str = ""
             new_seg = _render_one_continuation(scene_id, scene, provider, is_http, gpu,
                                                frame_local, prompt_i, merged, tag)
             tmp_final = final_local + ".tmp.mp4"
-            concat_videos([final_local, new_seg], tmp_final)
+            # 去重边界帧：新段首帧=现有成片末帧(拿它当起点生成的) → 不去重会卡一帧
+            concat_videos([final_local, new_seg], tmp_final, dedup_boundary=True)
             try:
                 os.replace(tmp_final, final_local)         # 同目录同盘，原子替换，路径不变
             except PermissionError:

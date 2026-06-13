@@ -9,7 +9,7 @@ import FolderPicker   from './components/FolderPicker'
 import { getStatus, chatSubmit, resumeSubmit, cancelJob, getHistory, getSessionHistory, deleteSession,
          pipelineGenerate, pipelineSelect, pipelineRender, streamJobEvents, listProjects,
          getContextUsage, compactContext, getAgents, connectJobsWS,
-         initWorkspace } from './api'
+         initWorkspace, projectCreate, projectRename, projectDelete } from './api'
 import { ProductionPanel } from './components/MessageBubble'
 
 // 每个会话独立的工作目录（互不影响）
@@ -192,6 +192,39 @@ export default function App() {
     } catch {}
     setShowPanel(true)
   }, [workspace])
+
+  // 剧集（项目）自助管理：新建 / 改名 / 删除（不绕 agent）
+  const refreshProjects = useCallback(async () => {
+    try { const d = await listProjects(workspace); const ps = d?.projects || []; setAllProjects(ps); return ps }
+    catch { return [] }
+  }, [workspace])
+  const newProject = useCallback(async () => {
+    const title = window.prompt('新剧集名称：', '新剧集')
+    if (title == null) return
+    try {
+      const r = await projectCreate(title || '新剧集', workspace)
+      await refreshProjects(); setHasProject(true); setPanelProjectId(r.project_id)
+    } catch (e) { window.alert('新建失败：' + String(e.message || e)) }
+  }, [workspace, refreshProjects])
+  const renameProject = useCallback(async () => {
+    if (!panelProjectId) return
+    const cur = allProjects.find(p => p.project_id === panelProjectId)
+    const title = window.prompt('改名为：', cur?.title || '')
+    if (title == null) return
+    try { await projectRename(panelProjectId, title, workspace); await refreshProjects() }
+    catch (e) { window.alert('改名失败：' + String(e.message || e)) }
+  }, [panelProjectId, allProjects, workspace, refreshProjects])
+  const removeProject = useCallback(async () => {
+    if (!panelProjectId) return
+    const cur = allProjects.find(p => p.project_id === panelProjectId)
+    if (!window.confirm(`删除整个剧集「${cur?.title || panelProjectId}」？\n含全部分镜与候选图，不可恢复。`)) return
+    try {
+      await projectDelete(panelProjectId, workspace)
+      const ps = await refreshProjects()
+      setPanelProjectId(ps.length ? ps[0].project_id : null)
+      setHasProject(ps.length > 0)
+    } catch (e) { window.alert('删除失败：' + String(e.message || e)) }
+  }, [panelProjectId, allProjects, workspace, refreshProjects])
 
   // 刷新后恢复当前会话的历史消息（sessionId 已持久化，消息也要回来）
   useEffect(() => {
@@ -702,6 +735,16 @@ export default function App() {
                     ))}
                   </select>
                 )}
+                {(() => {
+                  const mb = { height: 26, padding: '0 8px', borderRadius: 6, border: '1px solid var(--border)',
+                    background: 'rgba(255,255,255,0.06)', color: 'rgba(255,255,255,0.8)', fontSize: 12, cursor: 'pointer' }
+                  return (<>
+                    <button onClick={newProject} title="新建一个剧集（不用让 agent 建）" style={mb}>➕ 新建剧集</button>
+                    {panelProjectId && <button onClick={renameProject} title="给当前剧集改名" style={mb}>✎</button>}
+                    {panelProjectId && <button onClick={removeProject} title="删除当前剧集（含全部分镜）"
+                      style={{ ...mb, color: 'rgba(252,165,165,0.9)', borderColor: 'rgba(239,68,68,0.3)' }}>🗑</button>}
+                  </>)
+                })()}
                 <button onClick={() => setShowPanel(false)} style={{
                   marginLeft: 'auto', height: 26, padding: '0 12px', borderRadius: 6,
                   border: '1px solid var(--border)', background: 'rgba(255,255,255,0.06)',

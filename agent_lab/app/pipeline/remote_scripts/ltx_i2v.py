@@ -30,10 +30,17 @@ def main() -> int:
     ap.add_argument("--steps", type=int, default=40)
     ap.add_argument("--guidance", type=float, default=3.0)
     ap.add_argument("--seed", type=int, default=-1)
-    ap.add_argument("--negative_prompt", default="worst quality, blurry, distorted, jittery")
+    ap.add_argument("--negative_prompt", default="worst quality, blurry, distorted, jittery, low detail, soft focus")
+    # LTX 解码参数：默认 0=不覆盖(用 pipeline 自带值，已验证出干净片)。这个模型版本对它极敏感，给错会发黑/出噪，故不默认开。
+    ap.add_argument("--decode_timestep", type=float, default=0.0)
+    ap.add_argument("--decode_noise_scale", type=float, default=0.0)
+    # 裁掉尾部退化帧：LTX 初代尾部约 1 个时间块(≈8帧)会糊/噪。多生成这么多帧再丢尾，保住时长+末帧干净。
+    ap.add_argument("--trim_tail", type=int, default=8)
     args = ap.parse_args()
 
     import os
+    # 抗显存碎片化：LTX 在高分辨率下接近吃满整卡，碎片化易导致"明明有空间却 OOM"。
+    os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
     import torch
     from diffusers import LTXImageToVideoPipeline
     from diffusers.utils import export_to_video, load_image
@@ -52,7 +59,7 @@ def main() -> int:
             args.model, text_encoder=te, torch_dtype=torch.bfloat16)
     else:
         pipe = LTXImageToVideoPipeline.from_pretrained(args.model, torch_dtype=torch.bfloat16)
-    # 显存吃紧时分块/卸载，单卡 24G 更稳
+    # 显存吃紧时分块/卸载，单卡 24G 更稳（已验证可出干净片；画质优化等研究结论再调）
     pipe.enable_model_cpu_offload()
     try:
         pipe.vae.enable_tiling()
@@ -65,18 +72,32 @@ def main() -> int:
 
     image = load_image(args.image).resize((w, h))
 
+    # 解码画质参数(decode_timestep/decode_noise_scale)对这个 LTX 版本极敏感，给错值会整片发黑/出噪，
+    # 故只在显式传入(>0)时才覆盖，默认沿用 pipeline 自带值(已验证可出干净片)。
+    extra = {}
+    if args.decode_timestep > 0:
+        extra["decode_timestep"] = args.decode_timestep
+    if args.decode_noise_scale > 0:
+        extra["decode_noise_scale"] = args.decode_noise_scale
+    # LTX 尾部几帧会退化成糊/噪(初代 2B + 原始 VAE 的已知短板)。
+    # 多生成 trim 帧、导出时丢掉尾部坏帧 → 末帧干净、时长不变，也避免坏帧沿"尾帧接续"传染。
+    trim = max(0, int(args.trim_tail))
+    n_gen = n + trim                      # n 是 8k+1，n_gen=n+8 仍是 8m+1，合法
     result = pipe(
         image=image,
         prompt=args.prompt,
         negative_prompt=args.negative_prompt,
         width=w,
         height=h,
-        num_frames=n,
+        num_frames=n_gen,
         num_inference_steps=args.steps,
         guidance_scale=args.guidance,
         generator=gen,
+        **extra,
     )
     frames = result.frames[0]
+    if trim and len(frames) > n:
+        frames = frames[:n]               # 丢掉尾部退化帧，保留干净的前 n 帧
 
     os.makedirs(os.path.dirname(os.path.abspath(args.out)) or ".", exist_ok=True)
     export_to_video(frames, args.out, fps=args.fps)
