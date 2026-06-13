@@ -3,7 +3,8 @@
 # Wan2.2 的 WanImageToVideo / WanSoundImageToVideo / AudioEncoder* 近版 ComfyUI 核心自带，无需 WanVideoWrapper。
 set -e
 cd /content
-[ -d ComfyUI ] || git clone --depth 1 https://github.com/comfyanonymous/ComfyUI
+# 自愈：只有 ComfyUI/main.py 在才算装好；否则(空壳/残缺)清掉重 clone
+[ -f ComfyUI/main.py ] || { rm -rf ComfyUI; git clone --depth 1 https://github.com/comfyanonymous/ComfyUI; }
 pip -q install -r ComfyUI/requirements.txt
 
 cd ComfyUI/custom_nodes
