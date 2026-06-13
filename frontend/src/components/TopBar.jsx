@@ -1,7 +1,9 @@
+import { Icon } from './icons'
+
 /**
  * TopBar — 顶部导航栏
  *
- * 左：Logo 方块 + "AgentLab" + 分隔点 + 模型名
+ * 左：Logo 方块 + "蜃景" + 分隔点 + 模型名
  * 右：新建对话图标 / Knowledge Base 按钮 / 设置图标
  */
 export default function TopBar({ model, ragStatus, onKnowledgeClick, showKnowledge, onNewChat, onSettingsClick }) {
@@ -12,43 +14,41 @@ export default function TopBar({ model, ragStatus, onKnowledgeClick, showKnowled
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'space-between',
-      padding: '0 16px',
-      borderBottom: '1px solid var(--border)',
-      background: 'rgba(13,13,13,0.95)',
-      backdropFilter: 'blur(12px)',
+      padding: '0 18px',
+      borderBottom: '1px solid rgba(255,255,255,0.07)',
+      background: 'rgba(13,13,13,0.82)',
+      backdropFilter: 'blur(14px)',
     }}>
       {/* ── 左：品牌标识 ── */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
         {/* Logo 方块 */}
         <div style={{
-          width: 22, height: 22, borderRadius: 6,
-          background: 'linear-gradient(135deg, #6366f1, #4338ca)',
+          width: 20, height: 20, borderRadius: 7,
+          background: 'linear-gradient(135deg,#6366f1,#4338ca)',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
-          flexShrink: 0,
+          color: '#fff', flexShrink: 0,
         }}>
-          <div style={{
-            width: 9, height: 9, borderRadius: 2,
-            background: 'rgba(13,13,13,0.7)',
-          }} />
+          <Icon.Clapper size={12} />
         </div>
 
-        <span style={{ fontSize: 14, fontWeight: 600, letterSpacing: '-0.01em', color: 'rgba(255,255,255,0.9)' }}>
-          AgentLab
+        <span style={{ fontSize: 13, fontWeight: 600, letterSpacing: '-0.01em', color: 'rgba(255,255,255,0.87)' }}>
+          蜃景
         </span>
 
-        <span style={{ color: 'var(--text-dim)', fontSize: 12 }}>·</span>
+        <span style={{ color: 'rgba(255,255,255,0.3)', fontSize: 12 }}>·</span>
 
-        <span style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: 'monospace' }}>
+        <span style={{ fontSize: 11.5, color: 'rgba(255,255,255,0.52)', fontFamily: "'SF Mono',ui-monospace,monospace" }}>
           {model}
         </span>
       </div>
 
       {/* ── 右：操作区 ── */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         {/* 新建对话 */}
         <IconBtn title="新建对话" onClick={onNewChat}>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-            <path d="M12 20h9M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/>
+            <path d="m15 5 4 4"/>
           </svg>
         </IconBtn>
 
@@ -56,27 +56,22 @@ export default function TopBar({ model, ragStatus, onKnowledgeClick, showKnowled
         <button
           onClick={onKnowledgeClick}
           style={{
-            height: 28, padding: '0 10px',
-            fontSize: 12, fontWeight: 500,
-            color: showKnowledge ? 'rgba(255,255,255,0.85)' : 'var(--text-sec)',
-            background: showKnowledge ? 'rgba(99,102,241,0.15)' : 'transparent',
-            border: `1px solid ${showKnowledge ? 'rgba(99,102,241,0.4)' : 'var(--border-strong)'}`,
+            height: 30, padding: '0 11px',
+            fontSize: 11.5,
+            color: showKnowledge ? '#a5a8ff' : 'rgba(255,255,255,0.7)',
+            background: showKnowledge ? 'rgba(99,102,241,0.15)' : 'rgba(255,255,255,0.04)',
+            border: `1px solid ${showKnowledge ? 'rgba(99,102,241,0.5)' : 'rgba(255,255,255,0.13)'}`,
             borderRadius: 7,
             cursor: 'pointer',
-            display: 'flex', alignItems: 'center', gap: 6,
+            display: 'inline-flex', alignItems: 'center', gap: 7,
+            fontFamily: 'inherit',
             transition: 'all 0.15s',
           }}
           onMouseEnter={e => {
-            if (!showKnowledge) {
-              e.currentTarget.style.borderColor = 'rgba(255,255,255,0.25)'
-              e.currentTarget.style.color = 'rgba(255,255,255,0.75)'
-            }
+            if (!showKnowledge) e.currentTarget.style.background = 'rgba(255,255,255,0.08)'
           }}
           onMouseLeave={e => {
-            if (!showKnowledge) {
-              e.currentTarget.style.borderColor = 'var(--border-strong)'
-              e.currentTarget.style.color = 'var(--text-sec)'
-            }
+            if (!showKnowledge) e.currentTarget.style.background = 'rgba(255,255,255,0.04)'
           }}
         >
           {/* 连接状态绿点 */}
@@ -87,10 +82,9 @@ export default function TopBar({ model, ragStatus, onKnowledgeClick, showKnowled
           Knowledge Base
           {ragStatus.rag_connected && ragStatus.chunk_count > 0 && (
             <span style={{
-              fontSize: 10, color: 'var(--text-muted)',
-              background: 'rgba(255,255,255,0.06)',
-              border: '1px solid var(--border)',
-              borderRadius: 4, padding: '0 5px',
+              fontSize: 9.5,
+              padding: '1px 5px', borderRadius: 4,
+              background: 'rgba(255,255,255,0.1)',
             }}>
               {ragStatus.chunk_count}
             </span>
@@ -99,7 +93,7 @@ export default function TopBar({ model, ragStatus, onKnowledgeClick, showKnowled
 
         {/* 设置 */}
         <IconBtn title="Settings" onClick={onSettingsClick}>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
             <circle cx="12" cy="12" r="3"/>
             <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/>
           </svg>
@@ -116,18 +110,19 @@ function IconBtn({ children, title, onClick }) {
       onClick={onClick}
       style={{
         width: 30, height: 30,
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        borderRadius: 7, border: 'none', background: 'transparent',
-        color: 'var(--text-muted)', cursor: 'pointer',
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+        borderRadius: 7,
+        border: '1px solid rgba(255,255,255,0.13)',
+        background: 'rgba(255,255,255,0.04)',
+        color: 'rgba(255,255,255,0.7)', cursor: 'pointer',
+        fontFamily: 'inherit',
         transition: 'all 0.15s',
       }}
       onMouseEnter={e => {
-        e.currentTarget.style.background = 'rgba(255,255,255,0.07)'
-        e.currentTarget.style.color = 'rgba(255,255,255,0.75)'
+        e.currentTarget.style.background = 'rgba(255,255,255,0.08)'
       }}
       onMouseLeave={e => {
-        e.currentTarget.style.background = 'transparent'
-        e.currentTarget.style.color = 'var(--text-muted)'
+        e.currentTarget.style.background = 'rgba(255,255,255,0.04)'
       }}
     >
       {children}

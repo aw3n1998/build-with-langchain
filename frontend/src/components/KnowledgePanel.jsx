@@ -63,7 +63,7 @@ export default function KnowledgePanel({ open, onClose, onStatusChange }) {
           style={{
             position: 'fixed',
             inset: 0,
-            background: 'rgba(0,0,0,0.45)',
+            background: 'rgba(0,0,0,0.5)',
             zIndex: 40,
             backdropFilter: 'blur(2px)',
           }}
@@ -76,53 +76,48 @@ export default function KnowledgePanel({ open, onClose, onStatusChange }) {
         top: 0,
         right: 0,
         bottom: 0,
-        width: 320,
-        background: '#111111',
-        borderLeft: '1px solid var(--border)',
+        width: 'min(320px,92vw)',
+        background: '#0d0d0d',
+        borderLeft: '1px solid var(--border-strong)',
         zIndex: 50,
         display: 'flex',
         flexDirection: 'column',
         transform: open ? 'translateX(0)' : 'translateX(100%)',
         transition: 'transform 0.22s cubic-bezier(0.4,0,0.2,1)',
-        boxShadow: open ? '-8px 0 32px rgba(0,0,0,0.5)' : 'none',
+        boxShadow: open ? '-12px 0 40px rgba(0,0,0,0.5)' : 'none',
       }}>
         {/* 头部 */}
         <div style={{
-          height: 52,
+          flexShrink: 0,
+          padding: '16px 18px',
           display: 'flex',
           alignItems: 'center',
-          justifyContent: 'space-between',
-          padding: '0 16px',
+          gap: 9,
           borderBottom: '1px solid var(--border)',
-          flexShrink: 0,
         }}>
-          <div>
-            <p style={{ fontSize: 13, fontWeight: 600, color: 'rgba(255,255,255,0.85)' }}>
-              Knowledge Base
-            </p>
-            <p style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 1 }}>
-              Import documents for RAG retrieval
-            </p>
-          </div>
+          <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)' }}>
+            Knowledge Base
+          </span>
+          <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#34d399' }} />
           <button
             onClick={onClose}
             style={{
+              marginLeft: 'auto',
               width: 28, height: 28,
-              borderRadius: 7, border: 'none',
-              background: 'transparent',
-              color: 'var(--text-muted)',
+              borderRadius: 7,
+              border: '1px solid var(--border-strong)',
+              background: 'rgba(255,255,255,0.04)',
+              color: 'rgba(255,255,255,0.7)',
               cursor: 'pointer',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: 16,
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: 15,
               transition: 'all 0.15s',
             }}
             onMouseEnter={e => {
               e.currentTarget.style.background = 'rgba(255,255,255,0.08)'
-              e.currentTarget.style.color = 'rgba(255,255,255,0.7)'
             }}
             onMouseLeave={e => {
-              e.currentTarget.style.background = 'transparent'
-              e.currentTarget.style.color = 'var(--text-muted)'
+              e.currentTarget.style.background = 'rgba(255,255,255,0.04)'
             }}
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
@@ -132,40 +127,42 @@ export default function KnowledgePanel({ open, onClose, onStatusChange }) {
           </button>
         </div>
 
-        {/* Tab 切换 */}
-        <div style={{
-          display: 'flex',
-          gap: 2,
-          padding: '12px 14px 0',
-          flexShrink: 0,
-        }}>
-          {[
-            { id: 'file', label: 'Upload File' },
-            { id: 'text', label: 'Paste Text'  },
-          ].map(t => (
-            <button
-              key={t.id}
-              onClick={() => { setTab(t.id); setFeedback(null) }}
-              style={{
-                flex: 1,
-                height: 30,
-                borderRadius: 7,
-                border: 'none',
-                fontSize: 12,
-                fontWeight: 500,
-                cursor: 'pointer',
-                transition: 'all 0.15s',
-                background: tab === t.id ? 'rgba(255,255,255,0.08)' : 'transparent',
-                color: tab === t.id ? 'rgba(255,255,255,0.8)' : 'var(--text-muted)',
-              }}
-            >
-              {t.label}
-            </button>
-          ))}
-        </div>
-
         {/* 内容区（可滚动） */}
-        <div style={{ flex: 1, overflowY: 'auto', padding: 14 }}>
+        <div style={{ flex: 1, overflowY: 'auto', padding: '16px 18px' }}>
+          {/* Tab 切换（segmented） */}
+          <div style={{
+            display: 'flex',
+            gap: 6,
+            marginBottom: 16,
+            background: 'rgba(255,255,255,0.04)',
+            borderRadius: 8,
+            padding: 3,
+          }}>
+            {[
+              { id: 'file', label: 'Upload File' },
+              { id: 'text', label: 'Paste Text'  },
+            ].map(t => (
+              <button
+                key={t.id}
+                onClick={() => { setTab(t.id); setFeedback(null) }}
+                style={{
+                  flex: 1,
+                  height: 28,
+                  borderRadius: 6,
+                  border: 'none',
+                  fontSize: 11.5,
+                  fontWeight: tab === t.id ? 600 : 400,
+                  cursor: 'pointer',
+                  fontFamily: 'inherit',
+                  transition: 'all 0.15s',
+                  background: tab === t.id ? '#6366f1' : 'transparent',
+                  color: tab === t.id ? '#fff' : 'var(--text-sec)',
+                }}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
           {tab === 'file' ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               {/* Project ID */}
@@ -183,25 +180,26 @@ export default function KnowledgePanel({ open, onClose, onStatusChange }) {
                 flexDirection: 'column',
                 alignItems: 'center',
                 justifyContent: 'center',
-                height: 110,
+                textAlign: 'center',
+                padding: '32px 16px',
                 borderRadius: 10,
-                border: `1.5px dashed ${busy ? 'var(--border)' : 'var(--border-strong)'}`,
+                border: `1.5px dashed ${busy ? 'var(--border)' : 'rgba(255,255,255,0.18)'}`,
                 cursor: busy ? 'not-allowed' : 'pointer',
-                color: busy ? 'var(--text-dim)' : 'var(--text-muted)',
+                color: busy ? 'var(--text-dim)' : 'var(--text-sec)',
                 transition: 'all 0.15s',
-                gap: 6,
+                gap: 10,
               }}
                 onMouseEnter={e => {
                   if (!busy) e.currentTarget.style.borderColor = 'rgba(99,102,241,0.5)'
                 }}
                 onMouseLeave={e => {
-                  if (!busy) e.currentTarget.style.borderColor = 'var(--border-strong)'
+                  if (!busy) e.currentTarget.style.borderColor = 'rgba(255,255,255,0.18)'
                 }}
               >
                 {busy ? (
                   <>
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
-                         stroke="currentColor" strokeWidth="1.5"
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none"
+                         stroke="rgba(255,255,255,0.3)" strokeWidth="1.5"
                          style={{ animation: 'spin 1s linear infinite' }}>
                       <circle cx="12" cy="12" r="10" strokeOpacity="0.25"/>
                       <path d="M12 2a10 10 0 0110 10" strokeLinecap="round"/>
@@ -210,14 +208,14 @@ export default function KnowledgePanel({ open, onClose, onStatusChange }) {
                   </>
                 ) : (
                   <>
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
-                         stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
-                      <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
-                      <polyline points="17 8 12 3 7 8"/>
-                      <line x1="12" y1="3" x2="12" y2="15"/>
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none"
+                         stroke="rgba(255,255,255,0.3)" strokeWidth="1.5"
+                         strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                      <path d="M17 8l-5-5-5 5"/>
+                      <path d="M12 3v12"/>
                     </svg>
-                    <span style={{ fontSize: 12, fontWeight: 500 }}>Click to upload</span>
-                    <span style={{ fontSize: 11, color: 'var(--text-dim)' }}>PDF · TXT · DOCX</span>
+                    <span style={{ fontSize: 12, color: 'var(--text-sec)' }}>拖拽上传 PDF / TXT / DOCX</span>
                   </>
                 )}
                 <input
@@ -247,9 +245,9 @@ export default function KnowledgePanel({ open, onClose, onStatusChange }) {
                     width: '100%',
                     background: 'rgba(255,255,255,0.04)',
                     border: '1px solid var(--border-strong)',
-                    borderRadius: 8,
-                    padding: '8px 10px',
-                    fontSize: 13,
+                    borderRadius: 6,
+                    padding: '8px 9px',
+                    fontSize: 12,
                     color: 'var(--text)',
                     resize: 'vertical',
                     outline: 'none',
@@ -267,8 +265,9 @@ export default function KnowledgePanel({ open, onClose, onStatusChange }) {
                   height: 34,
                   borderRadius: 8,
                   border: 'none',
-                  fontSize: 13,
-                  fontWeight: 500,
+                  fontSize: 12.5,
+                  fontWeight: 600,
+                  fontFamily: 'inherit',
                   cursor: busy || !textContent.trim() ? 'not-allowed' : 'pointer',
                   background: busy || !textContent.trim()
                     ? 'rgba(255,255,255,0.06)'
@@ -322,8 +321,8 @@ export default function KnowledgePanel({ open, onClose, onStatusChange }) {
 
 function Field({ label, children }) {
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-      <label style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 500 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <label style={{ fontSize: 11, color: 'var(--text-sec)' }}>
         {label}
       </label>
       {children}
@@ -341,9 +340,10 @@ function TextInput({ value, onChange, placeholder }) {
       style={{
         background: 'rgba(255,255,255,0.04)',
         border: '1px solid var(--border-strong)',
-        borderRadius: 8,
-        padding: '7px 10px',
-        fontSize: 13,
+        borderRadius: 6,
+        height: 30,
+        padding: '0 9px',
+        fontSize: 12,
         color: 'var(--text)',
         outline: 'none',
         width: '100%',

@@ -170,7 +170,8 @@ export default function InputBar({ onSend, disabled, agent, onAgentChange,
         <div style={{
           display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8,
         }}>
-          <span style={{ fontSize: 11, color: 'var(--text-dim)' }}>输入 <code style={{
+          <span style={{ fontSize: 11, color: 'var(--text-muted)',
+            fontFamily: "'SF Mono', ui-monospace, monospace" }}>输入 <code style={{
             background: 'rgba(255,255,255,0.08)', padding: '1px 5px', borderRadius: 4,
           }}>/</code> 唤起命令</span>
           <div style={{ flex: 1 }} />
@@ -204,11 +205,11 @@ export default function InputBar({ onSend, disabled, agent, onAgentChange,
                 disabled={disabled}
                 title={a.desc}
                 style={{
-                  height: 24, padding: '0 10px',
-                  borderRadius: 6,
-                  border: `1px solid ${active ? 'rgba(99,102,241,0.55)' : 'var(--border-strong)'}`,
-                  background: active ? 'rgba(99,102,241,0.18)' : 'transparent',
-                  color: active ? 'rgba(255,255,255,0.85)' : 'var(--text-muted)',
+                  height: 25, padding: '0 9px',
+                  borderRadius: 13,
+                  border: `1px solid ${active ? 'rgba(99,102,241,0.5)' : 'var(--border-strong)'}`,
+                  background: active ? 'rgba(99,102,241,0.15)' : 'rgba(255,255,255,0.04)',
+                  color: active ? '#a5a8ff' : 'var(--text-sec)',
                   fontSize: 11, fontWeight: active ? 500 : 400,
                   cursor: disabled ? 'not-allowed' : 'pointer',
                   whiteSpace: 'nowrap',
@@ -219,13 +220,13 @@ export default function InputBar({ onSend, disabled, agent, onAgentChange,
                 onMouseEnter={e => {
                   if (!disabled && !active) {
                     e.currentTarget.style.borderColor = 'rgba(255,255,255,0.22)'
-                    e.currentTarget.style.color = 'rgba(255,255,255,0.65)'
+                    e.currentTarget.style.color = 'rgba(255,255,255,0.7)'
                   }
                 }}
                 onMouseLeave={e => {
                   if (!disabled && !active) {
                     e.currentTarget.style.borderColor = 'var(--border-strong)'
-                    e.currentTarget.style.color = 'var(--text-muted)'
+                    e.currentTarget.style.color = 'var(--text-sec)'
                   }
                 }}
               >
@@ -286,7 +287,7 @@ export default function InputBar({ onSend, disabled, agent, onAgentChange,
             onKeyDown={handleKeyDown}
             disabled={disabled}
             rows={1}
-            placeholder={disabled ? 'Responding...' : 'Ask anything about your knowledge base...'}
+            placeholder={disabled ? '回复中…' : '给 蜃景 发消息…  Enter 发送 · Shift+Enter 换行'}
             style={{
               width: '100%',
               background: 'transparent',
@@ -308,9 +309,9 @@ export default function InputBar({ onSend, disabled, agent, onAgentChange,
           }}>
             <span style={{
               fontSize: 11, color: 'var(--text-dim)',
-              fontFamily: 'monospace', userSelect: 'none',
+              fontFamily: "'SF Mono', ui-monospace, monospace", userSelect: 'none',
             }}>
-              Return to send · Shift+Return for newline
+              Enter 发送 · Shift+Enter 换行
             </span>
 
             <button
@@ -318,9 +319,9 @@ export default function InputBar({ onSend, disabled, agent, onAgentChange,
               disabled={!disabled && !canSend}
               title={disabled ? '停止生成' : ''}
               style={{
-                height: 30, padding: '0 14px',
+                height: 30, padding: '0 18px',
                 borderRadius: 8, border: 'none',
-                fontSize: 12, fontWeight: 600,
+                fontSize: 12.5, fontWeight: 600,
                 cursor: (disabled || canSend) ? 'pointer' : 'not-allowed',
                 display: 'flex', alignItems: 'center', gap: 6,
                 transition: 'all 0.15s',
@@ -348,7 +349,7 @@ export default function InputBar({ onSend, disabled, agent, onAgentChange,
                 </>
               ) : (
                 <>
-                  Send
+                  发送
                   <svg width="11" height="11" viewBox="0 0 24 24" fill="none"
                        stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M5 12h14M12 5l7 7-7 7"/>
@@ -368,7 +369,7 @@ export default function InputBar({ onSend, disabled, agent, onAgentChange,
 }
 
 const selStyle = {
-  height: 24, borderRadius: 6, padding: '0 6px', flexShrink: 0,
+  height: 25, borderRadius: 7, padding: '0 6px', flexShrink: 0,
   border: '1px solid var(--border-strong)', background: 'var(--card)',
   color: 'rgba(255,255,255,0.75)', fontSize: 11, cursor: 'pointer',
 }

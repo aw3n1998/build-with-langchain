@@ -21,7 +21,7 @@ function S({ size = 15, stroke = 1.7, children, style, ...rest }) {
 
 export const Icon = {
   // 场记板：短剧工作台 logo / 分镜
-  Clapper: (p) => <S {...p}><path d="M20.2 6 3 11M4 11l16-4.5M5.5 6.5l2 4M10 5l2 4M14.5 3.7l2 4" /><rect x="3" y="11" width="18" height="9" rx="2" /></S>,
+  Clapper: (p) => <S {...p}><path d="M20.2 6 3 11l-.9-2.4c-.3-1.1.3-2.2 1.3-2.5l13.5-4c1.1-.3 2.2.3 2.5 1.3Z" /><path d="M3 11h18v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" /></S>,
   // 加号：新建
   Plus: (p) => <S {...p}><path d="M12 5v14M5 12h14" /></S>,
   // 文件夹：工作目录

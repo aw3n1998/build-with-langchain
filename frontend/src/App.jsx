@@ -92,6 +92,8 @@ export default function App() {
   const [allProjects, setAllProjects]     = useState([])   // 工作目录下全部项目（供面板里切换）
   // 有任务（对话/出图/出片）在跑的会话集合：侧边栏据此显示绿点
   const [runningSessions, setRunningSessions] = useState(() => new Set())
+  // 纯视觉 hover 态（studio 顶栏「AI 助手」主按钮）
+  const [aiBtnHover, setAiBtnHover] = useState(false)
 
   // 流取消令牌：切换/新建会话时 +1，旧流的所有写入立即失效并退出循环。
   // 对话回合本身在后台任务里跑（job_manager chat 通道），切走只是不再"看"，
@@ -665,8 +667,8 @@ export default function App() {
         {/* 🎬 短剧工作台：主舞台（默认）。聊天退为可切换的 AI 助手。*/}
         {viewMode === 'studio' && (
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100%', minWidth: 0, overflow: 'hidden' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '13px 22px',
-                          borderBottom: '1px solid var(--border)', background: 'var(--bg)', flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, minHeight: 56, padding: '0 20px',
+                          borderBottom: '1px solid rgba(255,255,255,0.07)', background: 'var(--bg)', flexWrap: 'wrap' }}>
               {/* 当前剧集名（切换/新建由左栏剧集列表负责，顶栏只对「当前剧集」做操作，避免多处重复入口）*/}
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 9, marginRight: 4, minWidth: 0 }}>
                 <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
@@ -675,17 +677,19 @@ export default function App() {
                   <Icon.Clapper size={16} />
                 </span>
                 <span title={(allProjects.find(p => p.project_id === panelProjectId)?.title) || ''}
-                  style={{ fontSize: 15.5, fontWeight: 700, letterSpacing: '0.01em',
+                  style={{ fontSize: 15, fontWeight: 600, letterSpacing: '0.01em',
                            color: panelProjectId ? 'var(--text)' : 'var(--text-muted)',
                            maxWidth: 320, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {(allProjects.find(p => p.project_id === panelProjectId)?.title) || '选择或新建剧集'}
                 </span>
               </span>
               {panelProjectId && <button onClick={renameProject} style={studioHdrIcon} title="给当前剧集改名"><Icon.Pencil /></button>}
-              {panelProjectId && <button onClick={removeProject} style={{ ...studioHdrIcon, color: 'rgba(252,165,165,0.9)', borderColor: 'rgba(239,68,68,0.28)' }} title="删除当前剧集"><Icon.Trash /></button>}
+              {panelProjectId && <button onClick={removeProject} style={{ ...studioHdrIcon, color: 'rgba(248,113,113,1)', borderColor: 'rgba(239,68,68,0.3)' }} title="删除当前剧集"><Icon.Trash /></button>}
               <button onClick={() => setShowFolderPicker(true)} style={studioHdrBtn} title={workspace || '默认工作目录'}><Icon.Folder />工作目录</button>
               <button onClick={() => setViewMode('chat')}
-                style={{ ...studioHdrBtn, marginLeft: 'auto', borderColor: 'rgba(99,102,241,0.45)', color: 'rgba(190,192,255,1)', background: 'rgba(99,102,241,0.10)' }}><Icon.Chat />AI 助手</button>
+                onMouseEnter={() => setAiBtnHover(true)} onMouseLeave={() => setAiBtnHover(false)}
+                style={{ ...studioHdrBtn, marginLeft: 'auto', border: 'none',
+                         background: aiBtnHover ? '#5254cc' : '#6366f1', color: '#fff', fontWeight: 600 }}><Icon.Chat />AI 助手</button>
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 22px' }}>
               {panelProjectId ? (
@@ -733,19 +737,20 @@ export default function App() {
             display: 'inline-flex', alignItems: 'center', gap: 5,
             height: 24, padding: '0 11px', borderRadius: 6, marginRight: 4,
             border: '1px solid rgba(99,102,241,0.5)', background: 'rgba(99,102,241,0.18)',
-            color: 'rgba(190,192,255,1)', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+            color: '#a5a8ff', fontSize: 12, fontWeight: 600, cursor: 'pointer',
           }}><Icon.Clapper size={13} />工作台</button>
           <span>工作目录：</span>
           <span style={{
-            fontFamily: 'monospace', color: workspace ? 'rgba(134,239,172,0.9)' : 'var(--text-dim)',
+            fontFamily: "'SF Mono', ui-monospace, monospace",
+            color: workspace ? 'rgba(134,239,172,0.9)' : 'var(--text-dim)',
             maxWidth: 480, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
           }}>
             {workspace || '（默认 agent_workspace）'}
           </span>
           <button onClick={() => setShowFolderPicker(true)} style={{
             marginLeft: 'auto', height: 24, padding: '0 12px', borderRadius: 6,
-            border: '1px solid var(--border)', background: 'rgba(255,255,255,0.05)',
-            color: 'rgba(255,255,255,0.7)', fontSize: 12, cursor: 'pointer',
+            border: '1px solid var(--border-strong)', background: 'rgba(255,255,255,0.04)',
+            color: 'var(--text)', fontSize: 12, cursor: 'pointer',
           }}>更改</button>
           {/* 常驻制作面板入口：有项目即点亮，小白不需要知道"要说打开面板" */}
           <button onClick={openPanelDrawer} disabled={!hasProject}
@@ -754,7 +759,7 @@ export default function App() {
               height: 24, padding: '0 12px', borderRadius: 6, marginLeft: 8,
               border: `1px solid ${hasProject ? 'rgba(99,102,241,0.5)' : 'var(--border)'}`,
               background: hasProject ? 'rgba(99,102,241,0.18)' : 'rgba(255,255,255,0.04)',
-              color: hasProject ? 'rgba(190,192,255,1)' : 'var(--text-dim)',
+              color: hasProject ? '#a5a8ff' : 'var(--text-dim)',
               fontSize: 12, fontWeight: 600, cursor: hasProject ? 'pointer' : 'not-allowed',
             }}>制作面板</button>
           {/* 上下文窗口真实用量进度条 */}
@@ -850,7 +855,7 @@ function ContextBar({ usage, onCompact }) {
   const pct = Math.min(100, (tokens / window) * 100)
   const triggerPct = Math.min(100, (trigger_tokens / window) * 100)
   const color = will_compact ? 'rgba(239,68,68,0.9)'
-    : pct > triggerPct * 0.8 ? 'rgba(234,179,8,0.9)' : 'rgba(99,102,241,0.85)'
+    : pct > triggerPct * 0.8 ? 'rgba(234,179,8,0.9)' : '#6366f1'
   const k = (n) => n >= 1000 ? (n / 1000).toFixed(1) + 'k' : String(n)
   return (
     <div title={`上下文 ${tokens}/${window} tokens；达 ${trigger_tokens} 触发压缩`}
@@ -864,11 +869,11 @@ function ContextBar({ usage, onCompact }) {
         <div style={{ position: 'absolute', top: -1, bottom: -1, left: `${triggerPct}%`,
                       width: 2, background: 'rgba(239,68,68,0.6)' }} />
       </div>
-      <span style={{ fontSize: 11, color: 'var(--text-dim)', fontFamily: 'monospace',
+      <span style={{ fontSize: 11, color: 'var(--text-dim)', fontFamily: "'SF Mono', ui-monospace, monospace",
                      whiteSpace: 'nowrap' }}>{k(tokens)}/{k(window)}</span>
       <button onClick={onCompact} title="立即压缩上下文" style={{
         height: 20, padding: '0 8px', borderRadius: 5, border: '1px solid var(--border)',
-        background: 'rgba(255,255,255,0.05)', color: 'var(--text-muted)', fontSize: 11,
+        background: 'rgba(255,255,255,0.04)', color: 'var(--text-muted)', fontSize: 11,
         cursor: 'pointer', whiteSpace: 'nowrap',
       }}>压缩</button>
     </div>
