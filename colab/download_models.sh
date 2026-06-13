@@ -9,7 +9,7 @@ get() {  # repo  repo内路径  目标models子目录
   local base; base=$(basename "$2")
   if [ -s "$3/$base" ]; then echo "[skip] $base"; return; fi
   echo "[get ] $base"
-  huggingface-cli download "$1" "$2" --local-dir "$3" --local-dir-use-symlinks False >/dev/null
+  hf download "$1" "$2" --local-dir "$3" >/dev/null   # huggingface-cli 已废弃，用 hf
 }
 
 # ── FLUX 出图(gated，需 HF token)──
