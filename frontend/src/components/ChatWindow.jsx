@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import MessageBubble from './MessageBubble'
+import { Icon } from './icons'
 
 export default function ChatWindow({ messages, onResume, onSend, onGenerate, onSelectImage, onRenderVideo, workspace, sessionId }) {
   const bottomRef = useRef(null)
@@ -16,7 +17,7 @@ export default function ChatWindow({ messages, onResume, onSend, onGenerate, onS
         <div style={{
           maxWidth: 760,
           margin: '0 auto',
-          padding: '40px 24px 24px',
+          padding: '36px 24px 40px',
           display: 'flex',
           flexDirection: 'column',
           gap: 20,
@@ -56,12 +57,9 @@ function EmptyState() {
         width: 48, height: 48, borderRadius: 14,
         background: 'linear-gradient(135deg, #6366f1, #4338ca)',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
-        marginBottom: 20,
+        marginBottom: 20, color: '#fff',
       }}>
-        <div style={{
-          width: 20, height: 20, borderRadius: 5,
-          background: 'rgba(13,13,13,0.65)',
-        }} />
+        <Icon.Clapper size={24} stroke={1.7} />
       </div>
 
       <h2 style={{
@@ -71,7 +69,7 @@ function EmptyState() {
         letterSpacing: '-0.01em',
         marginBottom: 8,
       }}>
-        AgentLab
+        蜃景 Mirage
       </h2>
 
       <p style={{
@@ -81,7 +79,7 @@ function EmptyState() {
         lineHeight: 1.7,
         marginBottom: 32,
       }}>
-        An AI agent with knowledge base retrieval. Import documents from the top-right, then ask questions based on your content.
+        小说一键拆分镜、出图、出片的 AI 短剧工作台。把剧情发给我，或从右上角导入资料后再提问。
       </p>
 
       {/* 能力卡片 */}
@@ -93,10 +91,10 @@ function EmptyState() {
         width: '100%',
       }}>
         {[
-          { label: 'Hybrid retrieval',    desc: 'BM25 + vector search' },
-          { label: 'Streaming responses', desc: 'Token-by-token output' },
-          { label: 'Multi-agent',         desc: 'LangGraph supervisor' },
-          { label: 'Document ingestion',  desc: 'PDF · TXT · DOCX' },
+          { label: '混合检索',  desc: 'BM25 + 向量' },
+          { label: '流式输出',  desc: '逐字返回' },
+          { label: '多 Agent', desc: 'LangGraph 协作' },
+          { label: '文档导入',  desc: 'PDF · TXT · DOCX' },
         ].map(({ label, desc }) => (
           <div key={label} style={{
             background: 'var(--card)',
