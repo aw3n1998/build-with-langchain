@@ -61,10 +61,9 @@ async def lifespan(app: FastAPI):
     logger.info("  文档地址：http://localhost:8000/docs")
     logger.info("=" * 50)
 
-    # ai_service 在模块导入时已经初始化（包括 RAG Pipeline）
-    # 这里只做日志，不需要额外操作
-    from mirage.app.services.ai_service import ai_service
-    logger.info("AI 服务就绪，RAG 连接状态: %s", ai_service._rag_pipeline.is_connected)
+    # ai_service 在模块导入时已经初始化
+    from mirage.app.services.ai_service import ai_service  # noqa: F401
+    logger.info("AI 服务就绪")
 
     yield  # ← 应用运行期间在这里
 
@@ -76,10 +75,9 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Mirage API",
     description=(
-        "工程行业 AI Agent 服务接口\n\n"
+        "短剧工作台 AI Agent 服务接口\n\n"
         "- **chat**：与多 Agent 系统对话（SSE 流式推送）\n"
-        "- **rag/ingest**：导入文档到知识库\n"
-        "- **rag/status**：查询知识库状态\n"
+        "- **status**：查询当前模型/模式\n"
     ),
     version="1.0.0",
     lifespan=lifespan,

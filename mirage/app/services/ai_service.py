@@ -6,8 +6,6 @@ from mirage.app.agents.supervisor    import build_supervisor
 from mirage.app.services.tools import code_tools, file_tools, shell_tools, general_tools
 from mirage.app.services.skill_registry import SkillRegistry
 from mirage.app.services.agent_registry import agent_registry
-from mirage.app.rag.pipeline import init_pipeline
-from mirage.app.rag.rag_tools import rag_tools
 from mirage.app.pipeline.pipeline_tools import pipeline_tools
 from mirage.app.core.config import settings
 from mirage.app.core.logger import get_logger
@@ -34,14 +32,6 @@ class AIService:
         # 用户回「可以/继续/好的」这类无关键词短语时跟随上次，而不是掉回 supervisor——
         # 否则对话记忆会被切到另一条线程，表现为"agent 失忆"。
         self._session_agents: dict[str, str] = {}
-
-        self._rag_pipeline = init_pipeline(embedder)
-        connected = self._rag_pipeline.connect()
-        if connected:
-            logger.info("[AIService] RAG Pipeline 就绪，知识库 chunk 数: %d",
-                        self._rag_pipeline.chunk_count)
-        else:
-            logger.warning("[AIService] Milvus 未启动，RAG 工具降级运行")
 
     # ── LLM 工厂 ─────────────────────────────────────────────────
 
@@ -103,7 +93,7 @@ class AIService:
     def _ensure_registry(self):
         if not self._registry._names:
             logger.info("[AIService] 初始化 SkillRegistry，注册工具...")
-            all_tools = code_tools + file_tools + shell_tools + general_tools + rag_tools + pipeline_tools
+            all_tools = code_tools + file_tools + shell_tools + general_tools + pipeline_tools
             self._registry.register(all_tools)
 
     # ── Supervisor 懒初始化 ───────────────────────────────────────

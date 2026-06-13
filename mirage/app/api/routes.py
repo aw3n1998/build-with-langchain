@@ -3,8 +3,7 @@ FastAPI 路由层
 
 接口设计原则：
   1. 聊天用 SSE（Server-Sent Events）流式推送，前端实时显示，不等整个回答完成
-  2. RAG 导入用普通 POST，返回操作结果
-  3. 所有接口统一返回结构，方便前端解析
+  2. 所有接口统一返回结构，方便前端解析
 
 SSE 格式（text/event-stream）：
   data: {"type": "chunk", "content": "你好"}
@@ -75,15 +74,7 @@ class ResumeRequest(BaseModel):
     approved: bool = Field(default=True, description="True=继续执行，False=取消")
 
 
-class IngestResponse(BaseModel):
-    success: bool
-    message: str
-    session_id: str | None = None
-
-
 class StatusResponse(BaseModel):
-    rag_connected: bool
-    chunk_count: int
     model: str
     # 视频专用模式：True 时前端隐藏多 agent 选择器/配置等误导性 UI（后端基础设施仍保留，供切回多 agent）。
     video_agent_only: bool = True
@@ -252,48 +243,11 @@ async def chat_resume(request: ResumeRequest) -> StreamingResponse:
     )
 
 
-@router.post("/rag/ingest/file", response_model=IngestResponse)
-async def ingest_file(
-    file: UploadFile = File(..., description="要导入的文档（.txt / .pdf / .docx）"),
-    project_id: str = Form(default="default", description="项目 ID，多租户隔离用"),
-):
-    import tempfile, os, pathlib
-    suffix = pathlib.Path(file.filename).suffix.lower()
-    allowed = {".txt", ".pdf", ".docx"}
-    if suffix not in allowed:
-        raise HTTPException(status_code=400, detail=f"不支持的文件类型 {suffix}，支持：{allowed}")
-
-    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-        tmp.write(await file.read())
-        tmp_path = tmp.name
-
-    try:
-        pipeline = ai_service._rag_pipeline
-        result = pipeline.ingest(tmp_path, project_id=project_id)
-        success = result.startswith("✅")
-        return IngestResponse(success=success, message=result)
-    finally:
-        os.unlink(tmp_path)
-
-
-@router.post("/rag/ingest/text", response_model=IngestResponse)
-async def ingest_text(
-    content: str = Form(..., description="要导入的纯文本内容"),
-    source_name: str = Form(default="inline", description="来源名称（显示在检索结果里）"),
-    project_id: str = Form(default="default"),
-):
-    pipeline = ai_service._rag_pipeline
-    result = pipeline.ingest_text(content, source_name=source_name, project_id=project_id)
-    return IngestResponse(success=result.startswith("✅"), message=result)
-
-
-@router.get("/rag/status", response_model=StatusResponse)
-async def rag_status():
+@router.get("/status", response_model=StatusResponse)
+async def status():
+    """应用状态：当前模型 + 是否视频专用模式（前端顶栏/输入区用）。"""
     from mirage.app.core.config import settings
-    pipeline = ai_service._rag_pipeline
     return StatusResponse(
-        rag_connected=pipeline.is_connected if pipeline else False,
-        chunk_count=pipeline.chunk_count if pipeline else 0,
         model=settings.MODEL_NAME,
         video_agent_only=getattr(settings, "VIDEO_AGENT_ONLY", True),
     )

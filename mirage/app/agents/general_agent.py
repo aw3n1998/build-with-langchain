@@ -5,7 +5,7 @@ General Agent — 通用子 Agent，直连模式专用。
 可以单独编译、持久化会话历史（通过 checkpointer），直接接收用户消息。
 
 能力：
-  - 语义检索最相关工具（RAG 检索、通用工具等）
+  - 语义检索最相关工具（按工具描述的向量相似度召回）
   - 支持多轮工具调用（ReAct 循环）
 """
 
@@ -21,7 +21,7 @@ from mirage.app.core.logger import get_logger
 logger = get_logger("general_agent")
 
 _PROMPT = SystemMessage(content=(
-    "你是一个专业的 AI 助手，可以回答问题、检索知识库、执行通用任务。"
+    "你是一个专业的 AI 助手，可以回答问题、执行通用任务。"
     "根据用户需求调用合适的工具，工具调用完成后给出清晰的最终回答。"
 ))
 
