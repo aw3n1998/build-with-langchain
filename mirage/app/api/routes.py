@@ -919,6 +919,10 @@ class BatchRequest(BaseModel):
     segments: int = 1
     size: str = ""            # 出片分辨率（如 704*1280）；空=默认
     video_params: dict = {}   # 「更多参数」：所选模型的专业参数（schema 驱动，如 fps/steps/guidance/seed）
+    # 两档开关：None=按默认(WAN_LIGHTNING) / True=极速档(Lightning 4步打样) / False=精修档(满档)
+    lightning: bool | None = None
+    # 只渲指定分镜(精修重渲"选中的"用)；空=按默认 todo。即便已 COMPLETED 也会重渲。
+    scene_ids: list[str] | None = None
     # 出图参数（面板可选）
     n: int = 0                # 每镜候选张数；0=默认
     width: int = 0
@@ -992,12 +996,17 @@ async def _batch_finish_events(req: BatchRequest):
         yield {"type": "tool_result", "name": "batch_finish",
                "content": "还没有任何分镜选好图，请先逐个分镜点选一张候选图。"}
         return
-    # 「更多参数」打底，常用项（段数/分辨率）覆盖在上
+    # 「更多参数」打底，常用项（段数/分辨率/档位/选中镜）覆盖在上
     params: dict = dict(req.video_params or {})
     if req.segments and req.segments > 1:
         params["segments"] = req.segments
     if req.size:
         params["size"] = req.size
+    if req.lightning is not None:                  # 两档:True=极速(Lightning 4步打样)/False=精修(满档)
+        params["lightning"] = "1" if req.lightning else "0"
+    if req.scene_ids:                              # 精修重渲"选中的":只渲这些镜(含已 COMPLETED；do_render 内部 force 重渲)
+        _ids = set(req.scene_ids)
+        todo = [s for s in scenes if s["id"] in _ids and s.get("selected_asset_id")]
     for i, s in enumerate(todo, 1):
         yield {"type": "batch_progress", "phase": "render",
                "scene_id": s["id"], "index": i, "total": len(todo),
