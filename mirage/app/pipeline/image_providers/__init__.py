@@ -22,9 +22,13 @@ if settings.COMFYUI_BASE_URL and settings.COMFYUI_IMAGE_AS:
     if _ias == "auto":   # 跟随默认出图模型
         _ias = settings.IMAGE_PROVIDER_DEFAULT or image_provider_registry.default_name
     if _ias:
-        _idisp = image_provider_registry.get(_ias).display_name if image_provider_registry.has(_ias) else _ias
+        import os as _os
+        # 显示名跟随实际底模（COMFYUI_FLUX_UNET，如 Chroma1-HD），别再写死「FLUX」误导
+        _unet = _os.path.splitext(_os.path.basename(settings.COMFYUI_FLUX_UNET or ""))[0]
+        _idisp = (f"出图 · {_unet}" if _unet
+                  else (image_provider_registry.get(_ias).display_name if image_provider_registry.has(_ias) else _ias))
         from mirage.app.pipeline.image_providers.comfyui_image import ComfyUIImageProvider
-        image_provider_registry.register(ComfyUIImageProvider(name=_ias, display_name=_idisp))  # 同名覆盖 SSH 版
+        image_provider_registry.register(ComfyUIImageProvider(name=_ias, display_name=_idisp))  # 同名覆盖 SSH 版（ComfyUI/Chroma 出图，参数=n/尺寸/步数/负向/seed，无 FLUX 的 guidance/显存策略）
 if settings.IMAGE_PROVIDER_DEFAULT and image_provider_registry.has(settings.IMAGE_PROVIDER_DEFAULT):
     image_provider_registry.set_default(settings.IMAGE_PROVIDER_DEFAULT)
 
