@@ -450,9 +450,8 @@ class PipelineStore:
             sets.append("scene_number=?")
             params.append(int(scene_number))
         if sets:
-            from datetime import datetime
             sets.append("updated_at=?")
-            params.append(datetime.now().isoformat(timespec="seconds"))
+            params.append(_now())   # 统一走 _now()(UTC+Z)，与全表其它 updated_at 一致
             params.append(scene_id)
             with self._lock, self._conn() as conn:
                 conn.execute(f"UPDATE scenes SET {', '.join(sets)} WHERE id=?", params)
