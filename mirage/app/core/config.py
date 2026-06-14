@@ -118,6 +118,10 @@ class Settings(BaseSettings):
     # i2v 高/低噪各自的 Lightning LoRA 文件名(放 ComfyUI/models/loras/;★高噪用 high、低噪用 low，别混)。
     WAN_LIGHTNING_LORA_HIGH: str = "wan2.2_i2v_A14b_high_noise_lora_rank64_lightx2v_4step_1022.safetensors"
     WAN_LIGHTNING_LORA_LOW: str = "wan2.2_i2v_A14b_low_noise_lora_rank64_lightx2v_4step_1022.safetensors"
+    # LoRA 强度:i2v 官方基准 1.0/1.0；★实测 1.0/1.0 常运动太弱/慢动作 → 把 HIGH 调到 1.5(low 保持 1.0)。
+    # 别降高噪(社区"0.65-0.8"是 T2V 防过曝的，照搬到 i2v 会更不动)。
+    WAN_LIGHTNING_STR_HIGH: float = 1.0
+    WAN_LIGHTNING_STR_LOW: float = 1.0
     # ── 视频模型解耦：默认 Provider + LTX-Video 配置 ──────────────
     # 默认用哪个视频模型（对应 providers 注册名：wan2.2 / ltx）
     VIDEO_PROVIDER_DEFAULT: str = "wan2.2"

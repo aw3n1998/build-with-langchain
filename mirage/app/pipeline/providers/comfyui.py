@@ -110,6 +110,8 @@ class ComfyUIProvider(VideoProvider):
         if lightning:
             mapping["%LIGHT_HI_LORA%"] = settings.WAN_LIGHTNING_LORA_HIGH
             mapping["%LIGHT_LO_LORA%"] = settings.WAN_LIGHTNING_LORA_LOW
+            mapping["%LIGHT_HI_STR%"] = float(settings.WAN_LIGHTNING_STR_HIGH)   # 运动弱就调 1.5
+            mapping["%LIGHT_LO_STR%"] = float(settings.WAN_LIGHTNING_STR_LOW)
             template = ch.load_workflow(settings.COMFYUI_WORKFLOW_I2V_LIGHTNING,
                                         "i2v_fp8_lightning_template.json", "i2v-lightning")
         else:

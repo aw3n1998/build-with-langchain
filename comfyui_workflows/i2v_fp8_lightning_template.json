@@ -12,12 +12,12 @@
   "67": {
     "class_type": "LoraLoaderModelOnly",
     "_meta": { "title": "高噪 Lightning LoRA(4步加速;★必须用 high_noise 那个,别混)" },
-    "inputs": { "model": ["37", 0], "lora_name": "%LIGHT_HI_LORA%", "strength_model": 1.0 }
+    "inputs": { "model": ["37", 0], "lora_name": "%LIGHT_HI_LORA%", "strength_model": "%LIGHT_HI_STR%" }
   },
   "68": {
     "class_type": "LoraLoaderModelOnly",
     "_meta": { "title": "低噪 Lightning LoRA(★必须用 low_noise 那个)" },
-    "inputs": { "model": ["41", 0], "lora_name": "%LIGHT_LO_LORA%", "strength_model": 1.0 }
+    "inputs": { "model": ["41", 0], "lora_name": "%LIGHT_LO_LORA%", "strength_model": "%LIGHT_LO_STR%" }
   },
   "65": {
     "class_type": "ModelSamplingSD3",
