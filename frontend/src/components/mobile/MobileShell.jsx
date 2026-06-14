@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ProductionPanel } from '../MessageBubble'
+import MobileStudio from './MobileStudio'
 import ChatWindow from '../ChatWindow'
 import SettingsPanel from '../SettingsPanel'
 import FolderPicker from '../FolderPicker'
@@ -101,11 +101,11 @@ export default function MobileShell(props) {
         </button>
       </header>
 
-      {/* ── 内容区:复用真功能 ProductionPanel ── */}
+      {/* ── 内容区:移动原生工作室(4 Tab,接真数据) ── */}
       <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', WebkitOverflowScrolling: 'touch',
                     padding: `12px var(--gutter) calc(var(--safe-bottom) + 88px)` }}>
         {panelProjectId ? (
-          <ProductionPanel message={{ project_id: panelProjectId }} workspace={workspace} sessionId={sessionId} />
+          <MobileStudio projectId={panelProjectId} workspace={workspace} sessionId={sessionId} />
         ) : (
           <div style={{ textAlign: 'center', color: 'var(--text-secondary)', padding: '64px 16px' }}>
             <div style={{ width: 56, height: 56, borderRadius: 16, margin: '0 auto 16px',
