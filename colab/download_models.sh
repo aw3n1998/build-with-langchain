@@ -19,8 +19,11 @@ get() {  # repo  repo内路径  目标models子目录
   find "$3" -mindepth 1 -type d -empty -delete 2>/dev/null || true
 }
 
-# ── FLUX 出图(gated，需 HF token)──
-get black-forest-labs/FLUX.1-dev flux1-dev.safetensors "$M/unet"
+# ── 出图底模：Chroma1-HD(开放无审查 FLUX 系，A100 友好，~17GB；已替代 flux1-dev)──
+get lodestones/Chroma1-HD Chroma1-HD.safetensors "$M/unet"
+# flux1-dev 底模已弃用(换 Chroma)；要回退取消下一行注释即可：
+# get black-forest-labs/FLUX.1-dev flux1-dev.safetensors "$M/unet"
+# Chroma 复用 FLUX 的 VAE(ae，gated 需 HF token) 与 T5；clip_l 仅旧 flux 模板用，Chroma 不需要(留下无害)
 get black-forest-labs/FLUX.1-dev ae.safetensors        "$M/vae"
 get comfyanonymous/flux_text_encoders t5xxl_fp16.safetensors "$M/clip"
 get comfyanonymous/flux_text_encoders clip_l.safetensors     "$M/clip"

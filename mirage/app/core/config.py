@@ -67,8 +67,9 @@ class Settings(BaseSettings):
     LORA_TRAIN_ENDPOINT: str = ""        # 训练后端接入点(等 Colab 起训练服务后填)
     LORA_TRAIN_STEPS: int = 1200         # 默认训练步数
     # 人物 LoRA 训练底模。务必与出图底模(GPU_FLUX_BASE / COMFYUI_FLUX_UNET)同源，否则训出的 LoRA 不通用。
-    # 强 NSFW：把它指向无审查 FLUX 系底模(HF id 或本地路径)。仅限原创虚构成年角色，遵守合规前置(立项报告第 4 章)。
-    LORA_TRAIN_BASE: str = "black-forest-labs/FLUX.1-dev"
+    # 现已切到 Chroma1-HD(无审查)；仅限原创虚构成年角色，遵守合规前置(立项报告第 4 章)。
+    # 注意：Chroma 架构异于 FLUX-dev，ai-toolkit 训练需用其 Chroma 模式(非 is_flux)，开训时按 ai-toolkit 当时的 Chroma 支持调整。
+    LORA_TRAIN_BASE: str = "lodestones/Chroma1-HD"
     # 出图前把中文 image_prompt 自动翻成英文（FLUX-dev 读不懂中文，会退化成动漫人像）。
     # 仅对 prompt_lang=="en" 的出图模型生效；对用户隐形。要关：.env 里设 IMAGE_PROMPT_AUTOTRANSLATE=false
     IMAGE_PROMPT_AUTOTRANSLATE: bool = True
@@ -122,13 +123,14 @@ class Settings(BaseSettings):
     BGM_VOLUME: float = 0.18              # BGM 相对音量(垫在旁白下，别盖过人声)
     COMFYUI_SIZE: str = "720*1280"        # 默认分辨率（宽*高）：原生最强守住 720p 竖屏（旧 480*832 是快出档）
     # ComfyUI 文生图（t2i）：把出图也接到 ComfyUI（GGUF Flux / 更好采样器 / LoRA 叠加）
-    COMFYUI_WORKFLOW_T2I: str = ""        # t2i workflow 模板路径；空=用仓库自带 comfyui_workflows/t2i_template.json
+    # t2i workflow 模板路径。默认指向 Chroma 模板(无审查底模)；要回旧 flux-dev 改成 "" 即可(回退仓库自带 t2i_template.json)。
+    COMFYUI_WORKFLOW_T2I: str = "comfyui_workflows/t2i_chroma_template.json"
     COMFYUI_T2I_SIZE: str = "768*1024"    # 出图默认分辨率（宽*高）
     COMFYUI_T2I_STEPS: int = 28           # 出图默认采样步数
     COMFYUI_T2I_N: int = 4                # 一次出几张候选图
     # 出图底模(ComfyUI t2i 的 UNET 文件名，放在 ComfyUI/models/unet/ 下)。可插拔：
-    # 强 NSFW 把它指向无审查 FLUX 系底模文件即可；同一底模也要做对应人物 LoRA 训练(见 LORA_TRAIN_BASE)。
-    COMFYUI_FLUX_UNET: str = "flux1-dev.safetensors"
+    # 现为 Chroma1-HD(无审查 FLUX 系)，配 t2i_chroma_template.json 使用；同源人物 LoRA 训练见 LORA_TRAIN_BASE。
+    COMFYUI_FLUX_UNET: str = "Chroma1-HD.safetensors"
     # ComfyUI 后处理（放大/补帧）：合成后可选再过一道 workflow；留空=不做后处理
     COMFYUI_WORKFLOW_POST: str = ""       # 后处理 workflow 模板路径（空=关闭后处理）
     # Wan2.2-S2V 对口型（语音驱动）：人物开口说话的镜头用。图+音频→口型同步视频，走 ComfyUI。

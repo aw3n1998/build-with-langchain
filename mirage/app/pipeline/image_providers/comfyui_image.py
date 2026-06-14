@@ -121,8 +121,8 @@ class ComfyUIImageProvider(ImageProvider):
                     "%NEG_PROMPT%": negative,
                     "%WIDTH%": width, "%HEIGHT%": height,
                     "%STEPS%": steps, "%SEED%": seed,
-                    # 出图底模(UNET 文件名)可配：NSFW 指向无审查 FLUX 底模即可（同一底模需对应训练人物 LoRA）
-                    "%UNET%": settings.COMFYUI_FLUX_UNET or "flux1-dev.safetensors",
+                    # 出图底模(UNET 文件名)可配：默认无审查 Chroma1-HD（同一底模需对应训练人物 LoRA）
+                    "%UNET%": settings.COMFYUI_FLUX_UNET or "Chroma1-HD.safetensors",
                 }
                 if use_lora:
                     mapping["%LORA%"] = os.path.basename(lora)
