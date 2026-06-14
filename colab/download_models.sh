@@ -52,14 +52,20 @@ if [ "$FLUX_BASE_KIND" != "checkpoint" ]; then
   get comfyanonymous/flux_text_encoders clip_l.safetensors     "$M/clip"
 fi
 
-# ── Wan2.2-I2V-A14B 双专家 —— 默认 fp8_scaled(A100 原生 FP8 张量核,免反量化,比 GGUF 快数倍；各 ~14.3G)──
-#    放 unet/(与 s2v fp8 同目录;UNETLoader 必认——diffusion_models/ 个别 ComfyUI 版不列)；走 i2v_fp8_template.json。
-get Comfy-Org/Wan_2.2_ComfyUI_Repackaged split_files/diffusion_models/wan2.2_i2v_high_noise_14B_fp8_scaled.safetensors "$M/unet"
-get Comfy-Org/Wan_2.2_ComfyUI_Repackaged split_files/diffusion_models/wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors  "$M/unet"
-# 低显存卡(<24G)才用 GGUF Q5_K_M(各~10.8G,逐步反量化、慢;40G A100 别用)。
-# 要用就取消下两行注释 + 把 COMFYUI_WORKFLOW_I2V 指回 i2v_gguf_template.json：
+# ── Wan2.2-I2V-A14B 双专家 —— 默认 fp16 原生满精度(A100-80G 免量化,画质最高；各 ~28G)──
+#    放 unet/(UNETLoader 必认——diffusion_models/ 个别 ComfyUI 版不列)；走 i2v_bf16_template.json。
+get Comfy-Org/Wan_2.2_ComfyUI_Repackaged split_files/diffusion_models/wan2.2_i2v_high_noise_14B_fp16.safetensors "$M/unet"
+get Comfy-Org/Wan_2.2_ComfyUI_Repackaged split_files/diffusion_models/wan2.2_i2v_low_noise_14B_fp16.safetensors  "$M/unet"
+# fp16 配套文本编码器 umt5(原生满精度,~11G)——i2v_bf16_template.json 用它。
+get Comfy-Org/Wan_2.2_ComfyUI_Repackaged split_files/text_encoders/umt5_xxl_fp16.safetensors "$M/clip"
+# ↓ 显存不够 fp16(≤40G A100) → fp8_scaled(各~14.3G,A100 原生FP8免反量化);取消下两行注释 +
+#   把 COMFYUI_WORKFLOW_I2V 指回 i2v_fp8_template.json(它用下方 S2V 块已下的 fp8 umt5)：
+# get Comfy-Org/Wan_2.2_ComfyUI_Repackaged split_files/diffusion_models/wan2.2_i2v_high_noise_14B_fp8_scaled.safetensors "$M/unet"
+# get Comfy-Org/Wan_2.2_ComfyUI_Repackaged split_files/diffusion_models/wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors  "$M/unet"
+# ↓ <24G 卡才用 GGUF Q5_K_M(各~10.8G,逐步反量化、慢);指回 i2v_gguf_template.json：
 # get QuantStack/Wan2.2-I2V-A14B-GGUF HighNoise/Wan2.2-I2V-A14B-HighNoise-Q5_K_M.gguf "$M/unet"
 # get QuantStack/Wan2.2-I2V-A14B-GGUF LowNoise/Wan2.2-I2V-A14B-LowNoise-Q5_K_M.gguf   "$M/unet"
+# umt5 fp8(S2V 对口型必用;也是 i2v fp8 回退档的文本编码器)——保留下载。
 get Comfy-Org/Wan_2.2_ComfyUI_Repackaged split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors "$M/clip"
 get Comfy-Org/Wan_2.2_ComfyUI_Repackaged split_files/vae/wan2.2_vae.safetensors "$M/vae"
 
