@@ -41,10 +41,11 @@ elif [ -n "$FLUX_BASE_URL" ]; then
 else
   get "$FLUX_BASE_REPO" "$FLUX_BASE_FILE" "$BASE_DIR"
 fi
-# UNET-only 模板才需单独的 ae/t5xxl/clip_l(flux t2i 用 DualCLIP+VAELoader)；
-# 全合一 checkpoint(如 Fluxed Up)已内置 CLIP+VAE → 跳过省 ~10G，且省掉 gated 的 ae(可不用 HF_TOKEN)。
+# UNET-only 底模(默认;含 CivitAI 多数"checkpoint"其实是 UNET-only)需单独的 ae/t5xxl/clip_l。
+# ae 用 FLUX.1-schnell(Apache,非 gated,与 dev 同一 VAE)→ 全程免 HF_TOKEN。t5xxl/clip_l 也公开。
+# 真·全合一 checkpoint(自带 CLIP+VAE)才设 FLUX_BASE_KIND=checkpoint 跳过这三个。
 if [ "$FLUX_BASE_KIND" != "checkpoint" ]; then
-  get black-forest-labs/FLUX.1-dev ae.safetensors        "$M/vae"       # gated 需 HF token
+  get black-forest-labs/FLUX.1-schnell ae.safetensors    "$M/vae"       # 非 gated,免 HF_TOKEN
   get comfyanonymous/flux_text_encoders t5xxl_fp16.safetensors "$M/clip"
   get comfyanonymous/flux_text_encoders clip_l.safetensors     "$M/clip"
 fi

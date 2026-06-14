@@ -20,6 +20,7 @@ Colab 持久化 + 后台服务辅助。
 from __future__ import annotations
 
 import os
+import shlex
 import shutil
 import subprocess
 import time
@@ -87,6 +88,31 @@ def start_bg(cmd: list[str], log_path: str, cwd: str | None = None):
         stdout=open(log_path, "w"), stderr=subprocess.STDOUT,
         start_new_session=True,
     )
+
+
+def restart_service(name: str, cmd: list[str], url: str, log_path: str,
+                    port: int, pattern: str, cwd: str | None = None, timeout: int = 150) -> bool:
+    """**硬重启**:先按端口 + 进程名杀掉旧实例(避免残留旧 .env/旧模型列表的后端继续服务——
+    这是「改了配置却没生效」的常见坑),再 detached 起新的并等就绪。
+    每次 Run 都换成当前 .env/模型对应的新实例,幂等可靠。"""
+    subprocess.run(
+        f"fuser -k {int(port)}/tcp 2>/dev/null; pkill -9 -f {shlex.quote(pattern)} 2>/dev/null; true",
+        shell=True,
+    )
+    time.sleep(3)
+    print(f"{name}: 硬重启中…")
+    start_bg(cmd, log_path, cwd=cwd)
+    ok = wait_http(url, timeout=timeout)
+    if ok:
+        print(f"{name}: ✓ ready")
+    else:
+        tail = ""
+        try:
+            tail = open(log_path).read()[-2000:]
+        except Exception:  # noqa: BLE001
+            pass
+        print(f"{name}: ✗ 未就绪，看 {log_path}\n{tail}")
+    return ok
 
 
 def wait_http(url: str, timeout: int = 120, interval: int = 3) -> bool:
