@@ -50,9 +50,11 @@ class ComfyUIProvider(VideoProvider):
     def param_schema(self) -> list[dict]:
         return [
             {"key": "lightning", "label": "极速档(Lightning)", "type": "select",
-             "default": "1" if settings.WAN_LIGHTNING else "",
+             # 关态用非空哨兵 "0"(而非 "")：do_render 合并参数时会丢弃空串，空串会让「关」失效——
+             # WAN_LIGHTNING=true 时就逐镜关不掉极速档。"0" 不在 generate() 的真值集合里→判为关。
+             "default": "1" if settings.WAN_LIGHTNING else "0",
              "help": "开=4步蒸馏极速(~1-2分/镜，画质≈A14B 略降)；关=A14B 满档 30 步精修(更清更慢)。逐镜可切。",
-             "options": [{"value": "", "label": "关·精修(A14B 满档)"},
+             "options": [{"value": "0", "label": "关·精修(A14B 满档)"},
                          {"value": "1", "label": "开·极速(Lightning 4步)"}]},
             {
                 "key": "size", "label": "分辨率(宽*高)", "type": "select",
@@ -73,8 +75,8 @@ class ComfyUIProvider(VideoProvider):
             {"key": "steps", "label": "采样步数", "type": "number", "default": settings.COMFYUI_STEPS,
              "advanced": True, "help": "去噪步数。越大越精细越慢。"},
             {"key": "negative", "label": "负向提示词", "type": "text",
-             "default": "lowres, blurry, deformed, extra limbs, watermark, text",
-             "advanced": True, "help": "不想要的内容（避免畸形/水印等）。"},
+             "default": "",   # 留空=回落到 settings.WAN_VIDEO_NEGATIVE(Wan 官方长串);非空才覆盖
+             "advanced": True, "help": "不想要的内容。留空=用 Wan 官方视频负向词(压静止/过曝/畸形/morphing)。"},
             {"key": "seed", "label": "seed(-1随机)", "type": "number", "default": -1,
              "advanced": True, "help": "随机种子。-1 每次不同；固定可复现，便于微调对比。"},
         ]
