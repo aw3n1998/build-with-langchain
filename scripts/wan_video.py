@@ -6,7 +6,7 @@ wan_video.py —— 拿选中的图喂 Wan2.2-TI2V-5B 出视频 → 拉回本地
 本脚本默认自动读取最新的 SELECTED.txt（选中图的服务器路径），问你运镜提示词，
 在 GPU 上跑 Wan2.2 图生视频（已验证的省显存配置），再把 mp4 下载到本机。
 
-完全独立：只依赖 paramiko，不 import agent_lab，可单独拷走运行。
+完全独立：只依赖 paramiko，不 import mirage，可单独拷走运行。
 
 两种用法
 ─────────

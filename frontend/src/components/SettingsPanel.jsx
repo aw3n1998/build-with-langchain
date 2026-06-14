@@ -125,32 +125,33 @@ export default function SettingsPanel({ open, onClose, onSaved, videoOnly = fals
       {open && (
         <div onClick={onClose} style={{
           position: 'fixed', inset: 0,
-          background: 'rgba(0,0,0,0.45)', zIndex: 40,
+          background: 'rgba(0,0,0,0.5)', zIndex: 40,
           backdropFilter: 'blur(2px)',
         }} />
       )}
 
       <div style={{
         position: 'fixed', top: 0, right: 0, bottom: 0,
-        width: 360,
-        background: '#111111',
-        borderLeft: '1px solid var(--border)',
+        width: 'min(420px,92vw)',
+        background: '#0d0d0d',
+        borderLeft: '1px solid var(--border-strong)',
         zIndex: 50,
         display: 'flex', flexDirection: 'column',
         transform: open ? 'translateX(0)' : 'translateX(100%)',
         transition: 'transform 0.22s cubic-bezier(0.4,0,0.2,1)',
-        boxShadow: open ? '-8px 0 32px rgba(0,0,0,0.5)' : 'none',
+        boxShadow: open ? '-12px 0 40px rgba(0,0,0,0.5)' : 'none',
       }}>
 
         {/* 头部 */}
         <div style={{
-          height: 52, flexShrink: 0,
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          padding: '0 16px',
+          flexShrink: 0,
+          display: 'flex', alignItems: 'center', gap: 10,
+          padding: '16px 20px',
           borderBottom: '1px solid var(--border)',
         }}>
+          <GearIcon />
           <div>
-            <p style={{ fontSize: 13, fontWeight: 600, color: 'rgba(255,255,255,0.85)' }}>
+            <p style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)' }}>
               Settings
             </p>
             <p style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 1 }}>
@@ -161,24 +162,24 @@ export default function SettingsPanel({ open, onClose, onSaved, videoOnly = fals
         </div>
 
         {/* 滚动内容区 */}
-        <div style={{ flex: 1, overflowY: 'auto', padding: '14px 0' }}>
+        <div style={{ flex: 1, overflowY: 'auto', padding: '18px 20px' }}>
 
           {/* ── Backend Endpoint ── */}
-          <div style={{ padding: '0 16px 16px', borderBottom: '1px solid var(--border)' }}>
+          <div style={{ marginBottom: 18 }}>
             <SectionLabel>Backend Endpoint</SectionLabel>
             <input
               type="text"
               value={endpoint}
               onChange={e => setEndpoint(e.target.value)}
               placeholder="http://localhost:8000/api  (blank = Vite proxy)"
-              style={inputStyle}
+              style={endpointInputStyle}
             />
             <p style={hintStyle}>FastAPI server address. Leave blank to use the default proxy.</p>
           </div>
 
           {/* ── Per-Agent 配置块 ── */}
-          <div style={{ padding: '10px 0 0' }}>
-            <div style={{ padding: '0 16px 8px' }}>
+          <div>
+            <div style={{ marginBottom: 10 }}>
               <p style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em',
                           color: 'var(--text-dim)', textTransform: 'uppercase' }}>
                 {videoOnly ? '模型配置' : 'Agent LLM Configuration'}
@@ -198,16 +199,21 @@ export default function SettingsPanel({ open, onClose, onSaved, videoOnly = fals
               const label = (videoOnly && a.id === 'supervisor') ? '对话 / 导演模型' : a.label
 
               return (
-                <div key={a.id}>
+                <div key={a.id} style={{
+                  border: '1px solid var(--border)',
+                  borderRadius: 10,
+                  background: '#161616',
+                  marginBottom: 10,
+                  overflow: 'hidden',
+                }}>
                   {/* 折叠标题行 */}
                   <button
                     onClick={() => setExpanded(prev => ({ ...prev, [a.id]: !isOpen }))}
                     style={{
                       width: '100%', display: 'flex', alignItems: 'center',
-                      padding: '9px 16px', gap: 8,
-                      background: isOpen ? 'rgba(255,255,255,0.04)' : 'transparent',
+                      padding: '11px 16px', gap: 8,
+                      background: 'transparent',
                       border: 'none', cursor: 'pointer',
-                      borderTop: '1px solid var(--border)',
                       transition: 'background 0.12s',
                     }}
                   >
@@ -220,15 +226,15 @@ export default function SettingsPanel({ open, onClose, onSaved, videoOnly = fals
                             strokeLinecap="round" strokeLinejoin="round"/>
                     </svg>
 
-                    <span style={{ fontSize: 12, fontWeight: 500,
-                                   color: isEmpty ? 'var(--text-muted)' : 'rgba(255,255,255,0.82)',
+                    <span style={{ fontSize: 12.5, fontWeight: 600,
+                                   color: isEmpty ? 'var(--text-sec)' : 'var(--text)',
                                    flex: 1, textAlign: 'left' }}>
                       {label}
                     </span>
 
                     {/* 配置摘要 */}
                     <span style={{ fontSize: 10, color: 'var(--text-dim)',
-                                   fontFamily: 'monospace', maxWidth: 160,
+                                   fontFamily: "'SF Mono',ui-monospace,monospace", maxWidth: 160,
                                    overflow: 'hidden', textOverflow: 'ellipsis',
                                    whiteSpace: 'nowrap' }}>
                       {summary}
@@ -242,7 +248,7 @@ export default function SettingsPanel({ open, onClose, onSaved, videoOnly = fals
                         style={{
                           fontSize: 10, color: 'var(--text-dim)',
                           padding: '1px 5px', borderRadius: 4,
-                          border: '1px solid var(--border)',
+                          border: '1px solid var(--border-strong)',
                           flexShrink: 0,
                           cursor: 'pointer',
                         }}
@@ -255,13 +261,12 @@ export default function SettingsPanel({ open, onClose, onSaved, videoOnly = fals
                   {/* 展开区域 */}
                   {isOpen && (
                     <div style={{
-                      padding: '12px 16px 14px',
-                      background: 'rgba(255,255,255,0.02)',
+                      padding: '4px 16px 14px',
                       borderTop: '1px solid var(--border)',
                     }}>
                       {/* Preset chips */}
-                      <p style={{ ...labelStyle, marginBottom: 7 }}>Preset</p>
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginBottom: 12 }}>
+                      <p style={{ ...labelStyle, marginTop: 10, marginBottom: 8 }}>Preset</p>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 13 }}>
                         {PRESETS.map(p => {
                           const active = cfg.model === p.label && cfg.api_base === p.base
                           return (
@@ -272,10 +277,11 @@ export default function SettingsPanel({ open, onClose, onSaved, videoOnly = fals
                               style={{
                                 height: 24, padding: '0 9px',
                                 borderRadius: 6,
-                                border: `1px solid ${active ? 'rgba(99,102,241,0.55)' : 'var(--border-strong)'}`,
-                                background: active ? 'rgba(99,102,241,0.18)' : 'transparent',
-                                color: active ? 'rgba(255,255,255,0.85)' : 'var(--text-muted)',
+                                border: `1px solid ${active ? 'rgba(99,102,241,0.4)' : 'var(--border-strong)'}`,
+                                background: active ? 'rgba(99,102,241,0.12)' : 'rgba(255,255,255,0.04)',
+                                color: active ? '#a5a8ff' : 'var(--text-sec)',
                                 fontSize: 11, cursor: 'pointer',
+                                fontFamily: 'inherit',
                                 transition: 'all 0.12s',
                               }}
                             >
@@ -300,21 +306,24 @@ export default function SettingsPanel({ open, onClose, onSaved, videoOnly = fals
                         />
                         <div>
                           <p style={labelStyle}>API Key</p>
-                          <div style={{ position: 'relative' }}>
+                          <div style={{ display: 'flex', gap: 7 }}>
                             <input
                               type={showKey[a.id] ? 'text' : 'password'}
                               value={cfg.api_key}
                               onChange={e => updateField(a.id, 'api_key', e.target.value)}
                               placeholder="sk-••••••••••••••••"
-                              style={{ ...inputStyle, paddingRight: 32 }}
+                              style={{ ...inputStyle, flex: 1, width: 'auto' }}
                             />
                             <button
                               onClick={() => setShowKey(prev => ({ ...prev, [a.id]: !prev[a.id] }))}
                               style={{
-                                position: 'absolute', right: 8, top: '50%',
-                                transform: 'translateY(-50%)',
-                                background: 'none', border: 'none', cursor: 'pointer',
-                                color: 'var(--text-dim)', padding: 0, display: 'flex',
+                                width: 32, flexShrink: 0,
+                                borderRadius: 8,
+                                border: '1px solid var(--border-strong)',
+                                background: 'rgba(255,255,255,0.04)',
+                                cursor: 'pointer',
+                                color: 'var(--text-sec)', padding: 0,
+                                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                               }}
                             >
                               {showKey[a.id] ? <EyeOffIcon /> : <EyeIcon />}
@@ -332,18 +341,18 @@ export default function SettingsPanel({ open, onClose, onSaved, videoOnly = fals
 
         {/* 底部操作 */}
         <div style={{
-          padding: '12px 16px', flexShrink: 0,
+          padding: '12px 20px', flexShrink: 0,
           borderTop: '1px solid var(--border)',
-          display: 'flex', gap: 8,
+          display: 'flex', gap: 10,
         }}>
           <button onClick={handleReset} style={secondaryBtnStyle}
             onMouseEnter={e => {
               e.currentTarget.style.borderColor = 'rgba(255,255,255,0.25)'
-              e.currentTarget.style.color = 'rgba(255,255,255,0.6)'
+              e.currentTarget.style.background = 'rgba(255,255,255,0.08)'
             }}
             onMouseLeave={e => {
               e.currentTarget.style.borderColor = 'var(--border-strong)'
-              e.currentTarget.style.color = 'var(--text-muted)'
+              e.currentTarget.style.background = 'rgba(255,255,255,0.04)'
             }}
           >
             Reset all
@@ -384,21 +393,34 @@ function LabeledInput({ label, value, onChange, placeholder }) {
   )
 }
 
+function GearIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+         stroke="rgba(255,255,255,0.7)" strokeWidth="1.7"
+         strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+      <circle cx="12" cy="12" r="3"/>
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82 2 2 0 1 1-2.83 2.83 1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51 2 2 0 0 1-4 0 1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33 2 2 0 1 1-2.83-2.83 1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1 2 2 0 0 1 0-4 1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82 2 2 0 1 1 2.83-2.83 1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51 2 2 0 0 1 4 0 1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33 2 2 0 1 1 2.83 2.83 1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1 2 2 0 0 1 0 4 1.65 1.65 0 0 0-1.51 1Z"/>
+    </svg>
+  )
+}
+
 function CloseBtn({ onClick }) {
   return (
     <button onClick={onClick} style={{
-      width: 28, height: 28, borderRadius: 7, border: 'none',
-      background: 'transparent', color: 'var(--text-muted)',
+      marginLeft: 'auto',
+      width: 28, height: 28, borderRadius: 7,
+      border: '1px solid var(--border-strong)',
+      background: 'rgba(255,255,255,0.04)', color: 'rgba(255,255,255,0.7)',
       cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
       transition: 'all 0.15s',
     }}
       onMouseEnter={e => {
         e.currentTarget.style.background = 'rgba(255,255,255,0.08)'
-        e.currentTarget.style.color = 'rgba(255,255,255,0.7)'
+        e.currentTarget.style.color = 'rgba(255,255,255,0.87)'
       }}
       onMouseLeave={e => {
-        e.currentTarget.style.background = 'transparent'
-        e.currentTarget.style.color = 'var(--text-muted)'
+        e.currentTarget.style.background = 'rgba(255,255,255,0.04)'
+        e.currentTarget.style.color = 'rgba(255,255,255,0.7)'
       }}
     >
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
@@ -411,8 +433,8 @@ function CloseBtn({ onClick }) {
 
 function EyeIcon() {
   return (
-    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/>
       <circle cx="12" cy="12" r="3"/>
     </svg>
   )
@@ -420,7 +442,7 @@ function EyeIcon() {
 
 function EyeOffIcon() {
   return (
-    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
       <path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94"/>
       <path d="M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19"/>
       <line x1="1" y1="1" x2="23" y2="23"/>
@@ -434,7 +456,12 @@ const inputStyle = {
   border: '1px solid var(--border-strong)',
   borderRadius: 8, padding: '7px 10px',
   fontSize: 12, color: 'var(--text)',
-  outline: 'none', fontFamily: 'inherit',
+  outline: 'none',
+  fontFamily: "'SF Mono',ui-monospace,monospace",
+}
+const endpointInputStyle = {
+  ...inputStyle,
+  color: '#86efac',
 }
 const labelStyle = {
   fontSize: 10, fontWeight: 600, color: 'var(--text-muted)',
@@ -445,12 +472,12 @@ const hintStyle = {
   fontSize: 11, color: 'var(--text-dim)', marginTop: 5, lineHeight: 1.55,
 }
 const secondaryBtnStyle = {
-  flex: 1, height: 32, borderRadius: 8,
+  flex: 1, height: 34, borderRadius: 8,
   border: '1px solid var(--border-strong)',
-  background: 'transparent', color: 'var(--text-muted)',
-  fontSize: 12, cursor: 'pointer', transition: 'all 0.15s',
+  background: 'rgba(255,255,255,0.04)', color: 'var(--text)',
+  fontSize: 12.5, cursor: 'pointer', transition: 'all 0.15s',
 }
 const primaryBtnStyle = {
-  flex: 2, height: 32, borderRadius: 8, border: 'none',
-  fontSize: 12, fontWeight: 500, cursor: 'pointer', transition: 'all 0.15s',
+  flex: 1, height: 34, borderRadius: 8, border: 'none',
+  fontSize: 12.5, fontWeight: 600, cursor: 'pointer', transition: 'all 0.15s',
 }

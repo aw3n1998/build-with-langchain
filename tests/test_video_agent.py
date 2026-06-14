@@ -24,7 +24,7 @@ if ROOT not in sys.path:
 # 状态库落到仓库内固定文件，便于事后核对
 os.environ.setdefault("NP2V_DB_PATH", os.path.join(ROOT, "pipeline.db"))
 
-from agent_lab.app.services.ai_service import ai_service  # noqa: E402
+from mirage.app.services.ai_service import ai_service  # noqa: E402
 
 PROMPT = (
     "我要把一段小说做成短剧视频，先跑一个测试分镜。请按步骤：\n"
@@ -53,7 +53,7 @@ async def main():
     print("\n" + "=" * 60)
 
     # 收尾：直接查状态库确认 agent 到底做了什么
-    from agent_lab.app.pipeline.store import get_store
+    from mirage.app.pipeline.store import get_store
     store = get_store(os.environ["NP2V_DB_PATH"])
     print("DB:", os.environ["NP2V_DB_PATH"])
     import sqlite3

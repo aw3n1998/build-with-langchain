@@ -8,11 +8,11 @@ import importlib, os, sys, time
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.chdir(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from agent_lab.app.pipeline import runtime
+from mirage.app.pipeline import runtime
 WS = r"F:\小说\小说"                                   # 用户真实工作目录 → 进剧集工作台
 runtime.set_workspace(WS)
-pt = importlib.import_module("agent_lab.app.pipeline.pipeline_tools")
-from agent_lab.app.pipeline.store import get_store
+pt = importlib.import_module("mirage.app.pipeline.pipeline_tools")
+from mirage.app.pipeline.store import get_store
 
 store = get_store()
 CHAR = "穿米色风衣的年轻男人，短发，干净侧脸"           # 人物一致

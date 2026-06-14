@@ -2,7 +2,7 @@
 """
 flux_select.py —— 输入提示词 → 远程 FLUX 出 N 张候选 → 拉回本地 → 你选图。
 
-这是一个**完全独立**的脚本：只依赖 paramiko（pip install paramiko），不 import agent_lab，
+这是一个**完全独立**的脚本：只依赖 paramiko（pip install paramiko），不 import mirage，
 可以单独拷到任何机器跑；也可以放在 build-with-langchain 仓库里和框架共存。
 
 两种用法
@@ -73,7 +73,7 @@ CORE_STYLE = (
 # 服务器出图脚本（随脚本内联，首次运行自动上传，无需手动部署）
 _REMOTE_SOURCE = os.path.join(
     os.path.dirname(os.path.abspath(__file__)),
-    "agent_lab", "app", "pipeline", "remote_scripts", "flux_candidates.py",
+    "mirage", "app", "pipeline", "remote_scripts", "flux_candidates.py",
 )
 
 

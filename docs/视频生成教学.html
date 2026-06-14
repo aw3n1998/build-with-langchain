@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>AgentLab 视频生成教学 · 小说→短剧</title>
+<title>蜃景 视频生成教学 · 小说→短剧</title>
 <style>
   :root{
     --bg:#0f1216; --panel:#171b22; --panel2:#1d222b; --line:#2a313c;
@@ -90,7 +90,7 @@
 <div class="wrap">
 
 <header>
-  <h1>🎬 AgentLab 视频生成教学</h1>
+  <h1>🎬 蜃景 视频生成教学</h1>
   <div class="sub">从一句剧情 → 一条完整短剧 mp4　·　每步：做什么 / 在哪点 / 填什么 / 原理 / 避坑</div>
   <div class="badge">小说 → 分镜 → 出图 → 选图 → 出片 → 合成</div>
 </header>
@@ -122,7 +122,7 @@
     <tr><th>组件</th><th>启动</th><th>说明</th></tr>
     <tr><td><b>远程 GPU(4090)</b></td><td>AutoDL 实例开机</td><td>出图(FLUX)、普通出片(Wan/LTX) 走 SSH 打这张卡</td></tr>
     <tr><td><b>ComfyUI</b><br><small>对口型用</small></td><td><code>tmux new-session -d -s comfy "...main.py --listen 0.0.0.0 --port 6006"</code></td><td><b>只有对口型镜头要它</b>；普通出图/出片不用</td></tr>
-    <tr><td><b>后端</b></td><td><code>uvicorn agent_lab.main_api:app --port 8000</code></td><td>改过 <code>.env</code> <b>必须重启</b>才生效</td></tr>
+    <tr><td><b>后端</b></td><td><code>uvicorn mirage.main_api:app --port 8000</code></td><td>改过 <code>.env</code> <b>必须重启</b>才生效</td></tr>
     <tr><td><b>前端</b></td><td><code>npm --prefix frontend run dev</code></td><td>默认 5173</td></tr>
   </table>
   <div class="note warn">实例每次开关，<b>SSH 端口和 ComfyUI 公网地址都会变</b> → 改 <code>.env</code> 的 <code>GPU_SSH_PORT</code> 和 <code>COMFYUI_BASE_URL</code>，然后<b>重启后端</b>。</div>
@@ -322,7 +322,7 @@
   出图阶段停 ComfyUI，对口型阶段开 ComfyUI；一张卡，任务会自动排队。
 </div>
 
-<footer>AgentLab · 小说转短剧视频流水线 · 视频生成教学</footer>
+<footer>蜃景 · 小说转短剧视频流水线 · 视频生成教学</footer>
 </div>
 </body>
 </html>

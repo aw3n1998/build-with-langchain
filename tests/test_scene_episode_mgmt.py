@@ -4,7 +4,7 @@ import os, sys, tempfile
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.chdir(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from agent_lab.app.pipeline.store import PipelineStore
+from mirage.app.pipeline.store import PipelineStore
 
 
 def _store():

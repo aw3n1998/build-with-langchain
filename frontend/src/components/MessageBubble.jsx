@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
 import { Icon } from './icons'
+import { useDialog } from './Dialog'
 
 // 面板参数持久化：存到浏览器 localStorage，刷新后不丢，省得每次重设。
 // 只用于「设置类」状态（模型/尺寸/段数/高级参数等），不用于每镜临时态或拉取的数据。
@@ -18,7 +19,7 @@ import ReactMarkdown from 'react-markdown'
 import { fileUrl, getVideoProviders, getImageProviders, getProject, batchGenerate, batchFinish,
          pipelineSelect, streamJobEvents, uploadCandidate, updateScenePrompts,
          deleteCandidate, deleteSceneVideo, sceneUndoAppend, deleteEpisode, suggestSegmentPrompts,
-         autoStoryboard, characters as charactersApi,
+         autoStoryboard, autoFill, characters as charactersApi, templatesApi,
          loraCreate, loraAction, loraUploadImage,
          suggestContinuation, sceneGenerate, sceneRender, sceneAppend,
          cancelJob, listActiveJobs,
@@ -32,39 +33,57 @@ import { fileUrl, getVideoProviders, getImageProviders, getProject, batchGenerat
  * Interrupt：HITL 确认卡片
  * param_form：出图参数交互卡
  */
-export default function MessageBubble({ message, onResume, onSend, onGenerate, onSelectImage, onRenderVideo, workspace, sessionId, stale }) {
+export default function MessageBubble({ message, onResume, onSend, onGenerate, onSelectImage, onRenderVideo, workspace, sessionId, stale, compact }) {
   if (message.role === 'user') {
     return <UserMessage content={message.content} />
   }
   if (message.role === 'interrupt') {
     return <InterruptCard message={message} onResume={onResume} />
   }
+  // compact（浮动小助手）模式：生产类卡片不在小窗里堆，给一行轻量占位，引导去工作台。
   if (message.role === 'param_form') {
-    return <ParamCard message={message} onGenerate={onGenerate} stale={stale} />
+    return compact ? <CompactNote text="出图参数卡 —— 请到工作台面板出图" /> : <ParamCard message={message} onGenerate={onGenerate} stale={stale} />
   }
   if (message.role === 'video_param_form') {
-    return <VideoParamCard message={message} onRenderVideo={onRenderVideo} stale={stale} />
+    return compact ? <CompactNote text="出视频参数卡 —— 请到工作台面板出片" /> : <VideoParamCard message={message} onRenderVideo={onRenderVideo} stale={stale} />
   }
   if (message.role === 'production') {
-    return <ProductionPanel message={message} workspace={workspace} sessionId={sessionId} />
+    return compact ? <CompactNote text="短剧制作面板 —— 请在工作台查看" /> : <ProductionPanel message={message} workspace={workspace} sessionId={sessionId} />
   }
-  return <AssistantMessage message={message} onSend={onSend} onSelectImage={onSelectImage} stale={stale} />
+  return <AssistantMessage message={message} onSend={onSend} onSelectImage={onSelectImage} stale={stale} compact={compact} />
+}
+
+/* 浮动小助手里的生产类占位条：不渲染重卡片，引导回工作台 */
+function CompactNote({ text }) {
+  return (
+    <div style={{
+      display: 'inline-flex', alignItems: 'center', gap: 7, alignSelf: 'flex-start',
+      fontSize: 12, color: 'rgba(255,255,255,0.52)',
+      background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.2)',
+      borderRadius: 8, padding: '7px 11px',
+    }}>
+      <span>📋</span>{text}
+    </div>
+  )
 }
 
 /* ── 用户消息 ──────────────────────────────────────── */
 function UserMessage({ content }) {
   return (
     <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '4px 0' }}>
-      <p style={{
+      <div style={{
         maxWidth: '72%',
-        fontSize: 14,
-        lineHeight: 1.7,
-        color: 'rgba(255,255,255,0.82)',
-        textAlign: 'right',
+        background: 'rgba(99,102,241,0.14)',
+        border: '1px solid rgba(99,102,241,0.25)',
+        borderRadius: '14px 14px 4px 14px',
+        padding: '11px 15px',
+        fontSize: 13.5,
+        lineHeight: 1.55,
+        color: 'rgba(255,255,255,0.87)',
         whiteSpace: 'pre-wrap',
       }}>
         {content}
-      </p>
+      </div>
     </div>
   )
 }
@@ -115,7 +134,7 @@ function parsePcActions(text) {
 }
 
 /* ── AI 消息卡片 ────────────────────────────────────── */
-function AssistantMessage({ message, onSend, onSelectImage, stale }) {
+function AssistantMessage({ message, onSend, onSelectImage, stale, compact }) {
   const { main, quickReplies } = splitMsgSplit(message.content || '')
   const mainParts = parsePcActions(main)
   const quickParts = parsePcActions(quickReplies)
@@ -123,22 +142,18 @@ function AssistantMessage({ message, onSend, onSelectImage, stale }) {
   const sources = extractSources(main)
 
   return (
-    <div style={{
-      background: 'var(--card)',
-      border: '1px solid var(--border)',
-      borderRadius: 12,
-      padding: '16px 20px',
-    }}>
-      {/* AGENTLAB 标签 */}
+    <div>
+      {/* MIRAGE 品牌标签：裸渲染（无卡片框），紫色 SF Mono */}
       <p style={{
         fontSize: 10,
         fontWeight: 700,
-        letterSpacing: '0.1em',
+        letterSpacing: '1px',
         textTransform: 'uppercase',
-        color: 'var(--text-dim)',
-        marginBottom: 12,
+        color: '#6366f1',
+        fontFamily: "'SF Mono', ui-monospace, monospace",
+        marginBottom: 9,
       }}>
-        AGENTLAB
+        MIRAGE
       </p>
 
       {/* 工具调用链：让"调用了什么"在页面可见 */}
@@ -161,13 +176,13 @@ function AssistantMessage({ message, onSend, onSelectImage, stale }) {
         {message.streaming && <span className="cursor-blink" />}
       </div>
 
-      {/* 候选图墙：点击=放大，按钮=选图 */}
-      {message.images && message.images.length > 0 && (
+      {/* 候选图墙：点击=放大，按钮=选图（compact 小助手里不堆图，去工作台看）*/}
+      {!compact && message.images && message.images.length > 0 && (
         <ImageWall images={message.images} onSelectImage={onSelectImage} stale={stale} />
       )}
 
       {/* 成片内嵌播放器 */}
-      {message.video && (
+      {!compact && message.video && (
         <div style={{ marginTop: 14 }}>
           <video src={fileUrl(message.video.url)} controls
                  style={{ maxWidth: '100%', maxHeight: 420, borderRadius: 10,
@@ -178,23 +193,21 @@ function AssistantMessage({ message, onSend, onSelectImage, stale }) {
         </div>
       )}
 
-      {/* RAG 来源标签 */}
+      {/* RAG 来源标签：靛蓝 pill（对齐 mockup #01 file.md）*/}
       {sources.length > 0 && !message.streaming && (
         <div style={{
-          display: 'flex', flexWrap: 'wrap', gap: 6,
-          marginTop: 16, paddingTop: 14,
-          borderTop: '1px solid var(--border)',
+          display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 11,
         }}>
           {sources.map((src, i) => (
             <span key={i} style={{
-              fontSize: 11, color: 'var(--text-muted)',
-              background: 'rgba(255,255,255,0.04)',
-              border: '1px solid var(--border)',
-              borderRadius: 5, padding: '2px 8px',
-              fontFamily: 'monospace', letterSpacing: '0.01em',
+              fontSize: 10.5, color: '#a5a8ff',
+              background: 'rgba(99,102,241,0.1)',
+              border: '1px solid rgba(99,102,241,0.25)',
+              borderRadius: 5, padding: '3px 8px',
+              fontFamily: "'SF Mono', ui-monospace, monospace", letterSpacing: '0.01em',
             }}>
-              <span style={{ color: 'var(--text-dim)', marginRight: 5 }}>
-                {String(i + 1).padStart(2, '0')}
+              <span style={{ color: 'rgba(165,168,255,0.6)', marginRight: 5 }}>
+                #{String(i + 1).padStart(2, '0')}
               </span>
               {src}
             </span>
@@ -236,8 +249,8 @@ function ImageWall({ images, onSelectImage, stale }) {
             onClick={() => setZoom(img)}
             title="点击放大查看"
             style={{
-              position: 'relative', borderRadius: 10, overflow: 'hidden', cursor: 'zoom-in',
-              border: img.selected ? '2px solid rgba(34,197,94,0.9)' : '1px solid var(--border)',
+              position: 'relative', borderRadius: 9, overflow: 'hidden', cursor: 'zoom-in',
+              border: img.selected ? '2px solid #34d399' : '1px solid rgba(255,255,255,0.1)',
               transition: 'all 0.15s',
             }}
             onMouseEnter={e => e.currentTarget.style.transform = 'scale(1.02)'}
@@ -254,8 +267,8 @@ function ImageWall({ images, onSelectImage, stale }) {
                 style={{
                   position: 'absolute', top: 6, right: 6, width: 24, height: 24, borderRadius: 6,
                   border: 'none', cursor: canSelect ? 'pointer' : 'default', fontSize: 13,
-                  background: img.selected ? 'rgba(34,197,94,0.9)' : 'rgba(0,0,0,0.5)',
-                  color: '#fff',
+                  background: img.selected ? '#34d399' : 'rgba(0,0,0,0.5)',
+                  color: img.selected ? '#04201a' : '#fff',
                 }}>{img.selected ? '✓' : '○'}</button>
             )}
             <div style={{
@@ -310,6 +323,8 @@ function ParamCard({ message, onGenerate, stale }) {
   const [p, setP] = useState(message.params)
   const submitted = message.submitted || stale   // 回合结束后参数卡也失效
   const sizePreset = `${p.width}x${p.height}`
+  // param_form 内输入框用青色描边（对齐 mockup），其余沿用 inputStyle
+  const cyanInput = { ...inputStyle, border: '1px solid rgba(0,189,176,0.25)' }
 
   const field = (label, key, type = 'number', opts) => (
     <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
@@ -317,32 +332,32 @@ function ParamCard({ message, onGenerate, stale }) {
       {opts ? (
         <select value={p[key]} disabled={submitted}
           onChange={e => setP({ ...p, [key]: e.target.value })}
-          style={inputStyle}>
+          style={cyanInput}>
           {opts.map(o => <option key={o.v} value={o.v}>{o.label}</option>)}
         </select>
       ) : (
         <input type={type} value={p[key]} disabled={submitted}
           onChange={e => setP({ ...p, [key]: type === 'number' ? Number(e.target.value) : e.target.value })}
-          style={inputStyle} />
+          style={cyanInput} />
       )}
     </label>
   )
 
   return (
     <div style={{
-      border: '1px solid rgba(99,102,241,0.3)', background: 'rgba(99,102,241,0.06)',
-      borderRadius: 12, padding: '16px 18px',
+      border: '1px solid rgba(0,189,176,0.3)', background: 'rgba(0,189,176,0.05)',
+      borderRadius: 12, padding: '15px 17px',
     }}>
-      <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase',
-                    color: 'rgba(165,168,255,0.8)', marginBottom: 12 }}>
-        出图参数 · 确认后生成
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#00bdb0" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M15 4V2"/><path d="M8 9h2"/><path d="m3 21 9-9"/><path d="M12.2 6.2 11 5"/></svg>
+        <span style={{ fontSize: 12.5, fontWeight: 600, color: '#5fe8de' }}>出图参数卡 param_form</span>
       </div>
 
       <label style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 10 }}>
         <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>提示词（角色触发词已自动加好）</span>
         <textarea value={p.image_prompt} disabled={submitted} rows={2}
           onChange={e => setP({ ...p, image_prompt: e.target.value })}
-          style={{ ...inputStyle, resize: 'vertical', fontFamily: 'inherit' }} />
+          style={{ ...cyanInput, resize: 'vertical', fontFamily: 'inherit' }} />
       </label>
 
       {/* 常用：张数 + 尺寸（小白只看这些）*/}
@@ -352,7 +367,7 @@ function ParamCard({ message, onGenerate, stale }) {
           <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>尺寸</span>
           <select value={sizePreset} disabled={submitted}
             onChange={e => { const [w, h] = e.target.value.split('x').map(Number); setP({ ...p, width: w, height: h }) }}
-            style={inputStyle}>
+            style={cyanInput}>
             <option value="768x1024">768×1024 竖屏</option>
             <option value="1024x768">1024×768 横屏</option>
             <option value="1024x1024">1024×1024 方形</option>
@@ -376,9 +391,9 @@ function ParamCard({ message, onGenerate, stale }) {
         disabled={submitted}
         style={{
           marginTop: 12,
-          height: 34, padding: '0 20px', borderRadius: 8, border: '1px solid rgba(99,102,241,0.35)',
-          background: submitted ? 'rgba(255,255,255,0.06)' : 'rgba(99,102,241,0.22)',
-          color: submitted ? 'var(--text-muted)' : 'rgba(190,192,255,1)',
+          height: 34, padding: '0 20px', borderRadius: 8, border: 'none',
+          background: submitted ? 'rgba(255,255,255,0.06)' : '#00bdb0',
+          color: submitted ? 'var(--text-muted)' : '#04201e',
           fontSize: 13, fontWeight: 600, cursor: submitted ? 'default' : 'pointer',
         }}>
         {submitted ? '已提交出图' : '出图'}
@@ -533,16 +548,16 @@ function VideoParamCard({ message, onRenderVideo, stale }) {
 
   return (
     <div style={{
-      border: '1px solid rgba(0,189,176,0.3)', background: 'rgba(0,189,176,0.06)',
-      borderRadius: 12, padding: '16px 18px',
+      border: '1px solid rgba(0,189,176,0.3)', background: 'rgba(0,189,176,0.05)',
+      borderRadius: 12, padding: '15px 17px',
     }}>
       {/* 顶部横条：标题 + 模型选择 + 预计时长，一行读完 */}
       <div style={{
         display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 12, marginBottom: 12,
       }}>
-        <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase',
-                      color: 'rgba(94,234,212,0.85)' }}>
-          出视频参数
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#00bdb0" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="m12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z"/></svg>
+          <span style={{ fontSize: 12.5, fontWeight: 600, color: '#5fe8de' }}>出视频参数卡 video_param_form</span>
         </div>
 
         {/* 模型选择（≥2 个模型时显示） */}
@@ -592,10 +607,10 @@ function VideoParamCard({ message, onRenderVideo, stale }) {
           onClick={submit}
           disabled={submitted}
           style={{
-            flex: '0 0 auto', height: 30, padding: '0 22px', borderRadius: 6,
-            border: '1px solid rgba(0,189,176,0.4)',
-            background: submitted ? 'rgba(255,255,255,0.06)' : 'rgba(0,189,176,0.22)',
-            color: submitted ? 'var(--text-muted)' : 'rgba(94,234,212,1)',
+            flex: '0 0 auto', height: 30, padding: '0 22px', borderRadius: 8,
+            border: 'none',
+            background: submitted ? 'rgba(255,255,255,0.06)' : '#00bdb0',
+            color: submitted ? 'var(--text-muted)' : '#04201e',
             fontSize: 13, fontWeight: 600, cursor: submitted ? 'default' : 'pointer',
           }}>
           {submitted ? '已提交' : '出视频'}
@@ -632,15 +647,16 @@ function AdvancedSection({ children }) {
 
 /* ── 制作面板：确定性整片流程（一键出图 → 点选 → 一键出片合成）──────── */
 const STATE_LABEL = {
-  DRAFT: { t: '待出图', c: 'var(--text-muted)' },
-  PENDING_FLUX_GEN: { t: '出图中', c: 'rgba(234,179,8,0.9)' },
-  PENDING_HUMAN_SELECTION: { t: '待选图', c: 'rgba(99,102,241,0.95)' },
-  PENDING_VIDEO_GEN: { t: '已选·待出片', c: 'rgba(94,234,212,0.95)' },
-  COMPLETED: { t: '已出片', c: 'rgba(34,197,94,0.95)' },
-  FAILED: { t: '失败', c: 'rgba(239,68,68,0.95)' },
+  DRAFT:                   { t: '待出图',     c: 'rgba(255,255,255,0.52)', bg: 'rgba(255,255,255,0.06)', bd: 'rgba(255,255,255,0.13)' },
+  PENDING_FLUX_GEN:        { t: '出图中',     c: '#eab308', bg: 'rgba(234,179,8,0.12)',  bd: 'rgba(234,179,8,0.35)', spin: true },
+  PENDING_HUMAN_SELECTION: { t: '待选图',     c: '#c084fc', bg: 'rgba(168,85,247,0.12)', bd: 'rgba(168,85,247,0.35)' },
+  PENDING_VIDEO_GEN:       { t: '已选·待出片', c: '#5fe8de', bg: 'rgba(0,189,176,0.12)',  bd: 'rgba(0,189,176,0.35)' },
+  COMPLETED:               { t: '已出片',     c: '#34d399', bg: 'rgba(52,211,153,0.12)', bd: 'rgba(52,211,153,0.35)' },
+  FAILED:                  { t: '失败',       c: '#f87171', bg: 'rgba(239,68,68,0.12)',  bd: 'rgba(239,68,68,0.35)' },
 }
 
 export function ProductionPanel({ message, workspace, sessionId }) {
+  const dialog = useDialog()
   const pid = message.project_id
   const [proj, setProj] = useState(null)
   const [err, setErr] = useState('')
@@ -682,6 +698,9 @@ export function ProductionPanel({ message, workspace, sessionId }) {
   const [sbN, setSbN] = usePersistedState('sbN', 8)
   const [sbReplace, setSbReplace] = useState(false)
   const [sbBusy, setSbBusy] = useState(false)
+  // 一键 AI 分析填充（角色+风格+LoRA+分镜）
+  const [afBusy, setAfBusy] = useState(false)
+  const [afReplace, setAfReplace] = useState(false)
   // 角色/声音圣经
   const [showChars, setShowChars] = useState(false)
   const [charsBusy, setCharsBusy] = useState(false)
@@ -853,6 +872,23 @@ export function ProductionPanel({ message, workspace, sessionId }) {
     } catch (e) { setProgress('拆分镜失败：' + String(e.message || e)) }
     finally { setSbBusy(false) }
   }
+  // 一键 AI 分析：抽角色(+空 LoRA) → 风格 → 分镜，全套入库
+  const doAutoFill = async () => {
+    if (!novel.trim()) { setProgress('先粘一段小说/剧情文本'); return }
+    const hasContent = (proj?.characters?.length || 0) > 0 || (proj?.scenes?.length || 0) > 0 || !!(proj?.style?.style_prompt)
+    if (afReplace && hasContent) {
+      if (!await dialog.confirm('将替换现有 角色 / 风格 / 分镜，继续？', {
+        message: '已有内容会被本次分析结果覆盖（LoRA 任务保留，不会误删你传的参考图）。', danger: true, confirmText: '替换',
+      })) return
+    }
+    setAfBusy(true); setProgress('AI 分析小说中…（抽角色 → 风格 → 分镜，约 20-60 秒）')
+    try {
+      const r = await autoFill(pid, novel, Number(sbN) || 8, afReplace, workspace)
+      setProgress(`已自动填充：${r.characters} 角色 · ${r.lora_created} 个新 LoRA · 风格已生成 · ${r.scenes_count} 分镜`)
+      await load(); await loadStyle()   // loadStyle：把 AI 生成的风格刷进「本集风格」编辑器(否则显示滞后)
+    } catch (e) { setProgress('一键分析失败：' + String(e.message || e)) }
+    finally { setAfBusy(false) }
+  }
   // 角色/声音圣经
   const charOp = async (action, fields = {}) => {
     setCharsBusy(true)
@@ -868,9 +904,9 @@ export function ProductionPanel({ message, workspace, sessionId }) {
     catch (e) { setProgress('新建 LoRA 失败：' + String(e.message || e)) }
     finally { setLoraBusy(false) }
   }
-  const loraOp = async (action, tid) => {
+  const loraOp = async (action, tid, extra = {}) => {
     setLoraBusy(true)
-    try { const r = await loraAction(pid, action, tid, workspace); await load()
+    try { const r = await loraAction(pid, action, tid, workspace, extra); await load()
       const t = (r.trainings || []).find(x => x.id === tid)
       if (action === 'train' && t && t.message) setProgress(t.message)
     } catch (e) { setProgress('LoRA 操作失败：' + String(e.message || e)) }
@@ -895,7 +931,7 @@ export function ProductionPanel({ message, workspace, sessionId }) {
     finally { setAddBusy(false) }
   }
   const removeScene = async (sceneId) => {
-    if (!window.confirm('删除这个分镜？（含它的候选图，不可恢复）')) return
+    if (!await dialog.confirm('删除这个分镜？', { message: '含它的候选图，不可恢复。', danger: true, confirmText: '删除' })) return
     try { await sceneDelete(sceneId, workspace); await load() }
     catch (e) { setProgress('删除分镜失败：' + String(e.message || e)) }
   }
@@ -914,7 +950,7 @@ export function ProductionPanel({ message, workspace, sessionId }) {
         style={{ ...inputStyle, width: '100%', height: 30, boxSizing: 'border-box' }} />
     </div>
   )
-  const subBox = { background: 'rgba(99,102,241,0.06)', border: '1px solid rgba(99,102,241,0.2)', borderRadius: 10, padding: '12px 14px', marginBottom: 10 }
+  const subBox = { background: '#161616', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 12, padding: '16px 18px', marginBottom: 12 }
   useEffect(() => { cancelled.current = false; load(); return () => { cancelled.current = true } }, [pid])  // eslint-disable-line
   useEffect(() => { if (tab === 'script' && !style) loadStyle() }, [tab])  // eslint-disable-line 进剧本 tab 时加载本集风格
   useEffect(() => {
@@ -1016,25 +1052,25 @@ export function ProductionPanel({ message, workspace, sessionId }) {
   }
 
   const delCandidate = async (assetId) => {
-    if (!window.confirm('删除这张候选图？')) return
+    if (!await dialog.confirm('删除这张候选图？', { danger: true, confirmText: '删除' })) return
     try { await deleteCandidate(assetId, workspace); load() } catch { /* ignore */ }
   }
   const delSceneVideo = async (sceneId) => {
-    if (!window.confirm('删除这个分镜的成片？删除后可重新出片（图还在）。')) return
+    if (!await dialog.confirm('删除这个分镜的成片？', { message: '删除后可重新出片（图还在）。', danger: true, confirmText: '删除' })) return
     try { await deleteSceneVideo(sceneId, workspace); load() }
-    catch (e) { alert('删除成片失败：' + (e.message || e)) }   // 别再静默吞错
+    catch (e) { dialog.alert('删除成片失败：' + (e.message || e)) }   // 别再静默吞错
   }
   const undoAppend = async (sceneId) => {
     setSceneBusy(b => ({ ...b, [sceneId]: 'undo' }))
     try {
       const r = await sceneUndoAppend(sceneId, workspace)
-      if (r && r.ok === false && r.message) alert(r.message)   // 没得回退/文件被占用 → 提示
+      if (r && r.ok === false && r.message) dialog.alert(r.message)   // 没得回退/文件被占用 → 提示
       load()
-    } catch (e) { alert('撤销失败：' + (e.message || e)) }
+    } catch (e) { dialog.alert('撤销失败：' + (e.message || e)) }
     finally { setSceneBusy(b => { const n = { ...b }; delete n[sceneId]; return n }) }
   }
   const delEpisode = async () => {
-    if (!window.confirm('删除整集成片？各分镜不受影响，可重新合成。')) return
+    if (!await dialog.confirm('删除整集成片？', { message: '各分镜不受影响，可重新合成。', danger: true, confirmText: '删除' })) return
     try { await deleteEpisode(pid, workspace); load() } catch { /* ignore */ }
   }
 
@@ -1043,28 +1079,28 @@ export function ProductionPanel({ message, workspace, sessionId }) {
   const someSelected = c.selected > 0
 
   return (
-    <div style={{
-      border: '1px solid rgba(99,102,241,0.3)', background: 'rgba(99,102,241,0.05)',
-      borderRadius: 12, padding: '16px 18px',
-    }}>
-      <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 10, marginBottom: 12 }}>
-        <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: '0.05em', color: 'rgba(190,192,255,1)' }}>
-          短剧制作面板 · {proj?.title || pid}
+    <div>
+      <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 16, marginBottom: 14 }}>
+        <div style={{ fontSize: 14, fontWeight: 600, color: 'rgba(255,255,255,0.87)' }}>
+          {proj?.title || pid}
         </div>
-        <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-          {c.total} 分镜 · 已出图 {c.with_candidates} · 已选 {c.selected} · 已出片 {c.done}
+        <div style={{ display: 'flex', gap: 14, fontSize: 12, color: 'rgba(255,255,255,0.52)' }}>
+          <span>总数 <b style={{ color: 'rgba(255,255,255,0.87)', fontWeight: 600 }}>{c.total}</b></span>
+          <span>已出图 <b style={{ color: '#eab308', fontWeight: 600 }}>{c.with_candidates}</b></span>
+          <span>已选 <b style={{ color: '#c084fc', fontWeight: 600 }}>{c.selected}</b></span>
+          <span>已出片 <b style={{ color: '#34d399', fontWeight: 600 }}>{c.done}</b></span>
         </div>
-        <button onClick={load} title="刷新" style={{ ...miniBtn, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}><Icon.Refresh size={13} /></button>
+        <button onClick={load} title="刷新" style={{ ...miniBtn, marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}><Icon.Refresh size={13} /></button>
       </div>
 
       {/* Tab 栏：剧本 / 角色&LoRA / 分镜 / 导出 */}
-      <div style={{ display: 'flex', gap: 2, marginBottom: 14, borderBottom: '1px solid var(--border)', flexWrap: 'wrap' }}>
+      <div style={{ display: 'flex', gap: 26, marginBottom: 18, borderBottom: '1px solid rgba(255,255,255,0.07)', flexWrap: 'wrap' }}>
         {[['script', '剧本', Icon.Script], ['cast', '角色 & LoRA', Icon.Users], ['shots', '分镜制作', Icon.Layers], ['export', '导出', Icon.Download]].map(([k, label, Ico]) => (
           <button key={k} onClick={() => setTab(k)} style={{
-            display: 'inline-flex', alignItems: 'center', gap: 6,
-            background: 'none', border: 'none', borderBottom: tab === k ? '2px solid var(--accent, #6366f1)' : '2px solid transparent',
-            color: tab === k ? 'var(--text)' : 'var(--text-sec)', cursor: 'pointer',
-            padding: '8px 14px', fontSize: 13, fontWeight: tab === k ? 650 : 500, marginBottom: -1,
+            display: 'inline-flex', alignItems: 'center', gap: 7,
+            background: 'none', border: 'none', borderBottom: tab === k ? '2px solid #6366f1' : '2px solid transparent',
+            color: tab === k ? 'rgba(255,255,255,0.87)' : 'rgba(255,255,255,0.52)', cursor: 'pointer',
+            padding: '0 0 11px', fontSize: 13, fontWeight: tab === k ? 650 : 500, marginBottom: -1,
             transition: 'color .14s',
           }}><Ico size={15} style={{ opacity: tab === k ? 1 : 0.7 }} />{label}</button>
         ))}
@@ -1085,9 +1121,25 @@ export function ProductionPanel({ message, workspace, sessionId }) {
               <input type="checkbox" checked={sbReplace} onChange={e => setSbReplace(e.target.checked)} />替换现有分镜
             </label>
           </div>
-          <div style={{ fontSize: 10.5, color: 'var(--text-dim)', marginBottom: 8 }}>提示：先在「角色圣经」「本集风格」设好角色和风格，拆出来更统一。</div>
-          <button onClick={doStoryboard} disabled={sbBusy} style={{ ...panelBtn(sbBusy), display: 'inline-flex', alignItems: 'center', gap: 7 }}>
-            {sbBusy ? 'AI 拆分镜中…' : <><Icon.Wand size={15} />开始拆分镜</>}
+          {/* 主推：一键 AI 分析，把角色/风格/LoRA/分镜 全套填好 */}
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 6 }}>
+            <button onClick={doAutoFill} disabled={afBusy || sbBusy}
+              style={{ height: 36, padding: '0 16px', borderRadius: 8, border: 'none',
+                       background: (afBusy || sbBusy) ? 'rgba(255,255,255,0.06)' : (afBusy ? '#5254cc' : '#6366f1'),
+                       color: (afBusy || sbBusy) ? 'var(--text-muted)' : '#fff', fontSize: 13, fontWeight: 600,
+                       cursor: (afBusy || sbBusy) ? 'default' : 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+              {afBusy ? 'AI 分析中…' : '🪄 一键 AI 分析填充'}
+            </button>
+            <label style={{ fontSize: 12, display: 'inline-flex', gap: 4, alignItems: 'center', color: 'var(--text-muted)' }}>
+              <input type="checkbox" checked={afReplace} onChange={e => setAfReplace(e.target.checked)} />替换现有
+            </label>
+            <span style={{ fontSize: 11, color: 'var(--text-dim)' }}>角色 + 风格 + LoRA + 分镜，全自动</span>
+          </div>
+          {/* 次要：角色/风格已设好、只想补分镜 */}
+          <div style={{ fontSize: 10.5, color: 'var(--text-dim)', marginBottom: 6 }}>或只想补分镜（角色/风格已弄好时）：</div>
+          <button onClick={doStoryboard} disabled={sbBusy || afBusy}
+            style={{ ...miniBtn2, height: 30, padding: '0 12px' }}>
+            {sbBusy ? 'AI 拆分镜中…' : <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Icon.Wand size={13} />只拆分镜</span>}
           </button>
         </div>
       )}
@@ -1128,11 +1180,16 @@ export function ProductionPanel({ message, workspace, sessionId }) {
           {(proj?.lora_trainings || []).map(t => (
             <div key={t.id} style={{ border: '1px solid var(--border)', borderRadius: 6, padding: 8, marginBottom: 6 }}>
               <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 4 }}>
-                <strong style={{ fontSize: 12 }}>{t.name}</strong>
-                <span style={{ fontSize: 10.5, color: 'var(--text-muted)' }}>{t.image_count} 张图 · {t.status}</span>
-                <button onClick={() => loraOp('delete', t.id)} disabled={loraBusy}
-                  style={{ ...miniBtn2, marginLeft: 'auto', color: '#fca5a5', borderColor: 'rgba(239,68,68,0.4)' }}>删除</button>
+                <input defaultValue={t.name} placeholder="LoRA / 角色名称"
+                  onBlur={e => { const v = e.target.value.trim(); if (v && v !== t.name) loraOp('update', t.id, { name: v }) }}
+                  style={{ ...inputStyle, height: 26, flex: 1, fontWeight: 600 }} />
+                <span style={{ fontSize: 10.5, color: 'var(--text-muted)', whiteSpace: 'nowrap', flexShrink: 0 }}>{t.image_count} 张图 · {t.status}</span>
+                <button onClick={async () => { if (await dialog.confirm('删除这个 LoRA 训练？', { message: '参考图也会一并删除，不可恢复。', danger: true, confirmText: '删除' })) loraOp('delete', t.id) }} disabled={loraBusy}
+                  style={{ ...miniBtn2, color: '#fca5a5', borderColor: 'rgba(239,68,68,0.4)', flexShrink: 0 }}>删除</button>
               </div>
+              <input defaultValue={t.trigger_word || ''} placeholder="触发词 trigger_word（出图自动注入；没有可留空）"
+                onBlur={e => { if (e.target.value !== (t.trigger_word || '')) loraOp('update', t.id, { trigger_word: e.target.value }) }}
+                style={{ ...inputStyle, height: 26, width: '100%', boxSizing: 'border-box', marginBottom: 4 }} />
               {t.message && <div style={{ fontSize: 10.5, color: '#ffb454', marginBottom: 4 }}>{t.message}</div>}
               <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                 <label style={{ ...miniBtn2, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 5 }}>
@@ -1158,9 +1215,14 @@ export function ProductionPanel({ message, workspace, sessionId }) {
           {styleField('FLUX LoRA 路径', 'flux_lora', 'GPU 上 LoRA 路径；none=不加载任何 LoRA')}
           {styleField('负向词', 'negative_prompt', '不想要的元素（ComfyUI 出图用）')}
           {styleField('默认出图尺寸', 'default_size', '如 768x1024（留空用面板尺寸）')}
-          <button onClick={saveStyle} disabled={styleBusy} style={panelBtn(styleBusy)}>
-            {styleBusy ? '保存中…' : '保存本集风格'}
-          </button>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            <button onClick={saveStyle} disabled={styleBusy} style={panelBtn(styleBusy)}>
+              {styleBusy ? '保存中…' : '保存本集风格'}
+            </button>
+            <TemplateBar kind="style" label="风格" workspace={workspace}
+              getContent={() => JSON.stringify(style || {})}
+              onApply={c => { try { setStyle({ ...(style || {}), ...JSON.parse(c) }) } catch { /* ignore */ } }} />
+          </div>
         </div>
       )}
 
@@ -1211,7 +1273,11 @@ export function ProductionPanel({ message, workspace, sessionId }) {
       {/* 第③步：出片并合成（模型/段数/分辨率可选）*/}
       <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginBottom: 12 }}>
         <button onClick={() => runJob('finish')} disabled={!!busy || !someSelected}
-          style={panelBtn(busy === 'finish', !someSelected)}>
+          style={!someSelected ? panelBtn(false, true) : {
+            height: 32, padding: '0 14px', borderRadius: 8, border: 'none',
+            background: busy === 'finish' ? 'rgba(0,189,176,0.7)' : '#00bdb0',
+            color: '#04201e', fontSize: 12.5, fontWeight: 600, cursor: 'pointer',
+          }}>
           {busy === 'finish' ? '出片合成中…' : (allSelected ? '③ 一键出片并合成' : `③ 出片并合成（已选${c.selected}/${c.total}）`)}
         </button>
         {models.length > 0 && (
@@ -1350,12 +1416,13 @@ export function ProductionPanel({ message, workspace, sessionId }) {
             <div style={{
               maxHeight: 200, overflowY: 'auto', borderRadius: 8, padding: '8px 10px',
               background: '#0a0a0a', border: '1px solid var(--border)',
-              fontFamily: '"SF Mono","Fira Code",ui-monospace,monospace', fontSize: 11, lineHeight: 1.5,
-              color: 'rgba(180,230,200,0.92)', whiteSpace: 'pre-wrap', wordBreak: 'break-all',
+              fontFamily: '"SF Mono","Fira Code",ui-monospace,monospace', fontSize: 11, lineHeight: 1.7,
+              color: '#34d399', whiteSpace: 'pre-wrap', wordBreak: 'break-all',
             }}>
               {logs.map((l, i) => (
-                <div key={i} style={{ color: l.startsWith('✗') ? 'rgba(252,165,165,1)'
-                  : l.startsWith('»') ? 'rgba(147,197,253,0.95)' : 'inherit' }}>{l}</div>
+                <div key={i} style={{ color: l.startsWith('✗') ? '#f87171'
+                  : l.startsWith('»') ? '#6cb6ff'
+                  : /warn/i.test(l) ? '#eab308' : 'inherit' }}>{l}</div>
               ))}
               <div ref={logEndRef} />
             </div>
@@ -1386,8 +1453,8 @@ export function ProductionPanel({ message, workspace, sessionId }) {
           const sl = STATE_LABEL[s.state] || { t: s.state, c: 'var(--text-muted)' }
           return (
             <div key={s.scene_id} style={{
-              border: '1px solid var(--border)', borderRadius: 10, padding: '10px 12px',
-              background: 'rgba(255,255,255,0.02)',
+              border: `1px solid ${s.state === 'PENDING_FLUX_GEN' ? 'rgba(234,179,8,0.25)' : 'rgba(255,255,255,0.07)'}`,
+              borderRadius: 12, padding: '15px 18px', background: '#161616',
             }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
                 <span style={{ fontSize: 12, fontWeight: 700, color: 'rgba(255,255,255,0.8)' }}>
@@ -1466,7 +1533,15 @@ export function ProductionPanel({ message, workspace, sessionId }) {
                       }} />
                   </label>
                 )}
-                <span style={{ fontSize: 11, fontWeight: 600, color: sl.c }}>{sl.t}</span>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, height: 22, padding: '0 9px',
+                               borderRadius: 6, fontSize: 11, color: sl.c,
+                               background: sl.bg || 'rgba(255,255,255,0.06)',
+                               border: `1px solid ${sl.bd || 'rgba(255,255,255,0.13)'}` }}>
+                  {sl.spin
+                    ? <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" style={{ animation: 'al-spin 1s linear infinite' }}><path d="M21 12a9 9 0 1 1-6.2-8.5"/></svg>
+                    : <span style={{ width: 5, height: 5, borderRadius: '50%', background: 'currentColor' }} />}
+                  {sl.t}
+                </span>
               </div>
 
               {s.video ? (
@@ -1528,8 +1603,8 @@ export function ProductionPanel({ message, workspace, sessionId }) {
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(96px,1fr))', gap: 8 }}>
                   {s.candidates.map(img => (
                     <div key={img.assetId} style={{
-                      position: 'relative', borderRadius: 8, overflow: 'hidden', cursor: 'pointer',
-                      border: img.selected ? '2px solid rgba(34,197,94,0.9)' : '1px solid var(--border)',
+                      position: 'relative', borderRadius: 9, overflow: 'hidden', cursor: 'pointer',
+                      border: img.selected ? '2px solid #34d399' : '1px solid rgba(255,255,255,0.1)',
                     }}>
                       <img src={fileUrl(img.url)} alt={img.name} onClick={() => setZoom(img)}
                            style={{ width: '100%', aspectRatio: '3/4', objectFit: 'cover', display: 'block' }} />
@@ -1537,8 +1612,9 @@ export function ProductionPanel({ message, workspace, sessionId }) {
                         title={img.selected ? '已选' : '选这张'}
                         style={{
                           position: 'absolute', top: 4, right: 4, width: 22, height: 22, borderRadius: 6,
-                          border: 'none', cursor: 'pointer', fontSize: 12, color: '#fff',
-                          background: img.selected ? 'rgba(34,197,94,0.9)' : 'rgba(0,0,0,0.55)',
+                          border: 'none', cursor: 'pointer', fontSize: 12,
+                          color: img.selected ? '#04201a' : '#fff',
+                          background: img.selected ? '#34d399' : 'rgba(0,0,0,0.55)',
                         }}>{img.selected ? '✓' : '○'}</button>
                       <button onClick={() => delCandidate(img.assetId)} title="删除这张候选图"
                         style={{
@@ -1667,7 +1743,13 @@ function ScenePrompts({ scene, workspace, onSaved }) {
             </label>
           </div>
           {ta('出图提示词（image_prompt，角色触发词自动注入）', img, setImg, 3)}
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', margin: '0 0 6px' }}>
+            <TemplateBar kind="prompt" label="提示词" workspace={workspace} getContent={() => img} onApply={c => setImg(c)} />
+          </div>
           {ta('运镜/动态提示词（motion_prompt，出视频用）', mot, setMot)}
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', margin: '0 0 6px' }}>
+            <TemplateBar kind="motion" label="运镜" workspace={workspace} getContent={() => mot} onApply={c => setMot(c)} />
+          </div>
           {ta('旁白（narration，转 TTS 配音）', nar, setNar)}
           {ta('字幕（subtitle，屏幕文字；留空=同旁白）', sub, setSub)}
           <div>
@@ -1727,10 +1809,9 @@ function SegmentPromptsEditor({ segs, prompts, intent, busy, onIntent, onGenerat
 }
 
 const panelBtn = (active, disabled) => ({
-  height: 32, padding: '0 16px', borderRadius: 8,
-  border: '1px solid rgba(99,102,241,0.4)',
-  background: disabled ? 'rgba(255,255,255,0.05)' : active ? 'rgba(99,102,241,0.35)' : 'rgba(99,102,241,0.2)',
-  color: disabled ? 'var(--text-muted)' : 'rgba(190,192,255,1)',
+  height: 32, padding: '0 14px', borderRadius: 8, border: 'none',
+  background: disabled ? 'rgba(255,255,255,0.06)' : active ? '#5254cc' : '#6366f1',
+  color: disabled ? 'var(--text-muted)' : '#fff',
   fontSize: 12.5, fontWeight: 600, cursor: disabled ? 'default' : 'pointer',
 })
 // 单镜操作小按钮（出图=紫、出视频=青）
@@ -1777,6 +1858,54 @@ const inputStyle = {
   width: '100%', colorScheme: 'dark',
 }
 
+/* ── 可复用模板库小条：存当前值为模板 + 套用/删除已存模板（风格/运镜/提示词复用）── */
+function TemplateBar({ kind, label, getContent, onApply, workspace }) {
+  const dialog = useDialog()
+  const [list, setList] = useState([])
+  const [open, setOpen] = useState(false)
+  const load = async () => {
+    try { const r = await templatesApi('list', { kind }, workspace); setList(r.templates || []) }
+    catch { /* ignore */ }
+  }
+  useEffect(() => { load() }, [])  // eslint-disable-line react-hooks/exhaustive-deps
+  const save = async () => {
+    const content = getContent()
+    const empty = !content || (typeof content === 'string' && !content.trim())
+    if (empty) { return }
+    const name = await dialog.prompt(`存为${label}模板`, '', { title: `${label}模板命名`, placeholder: '给这个模板起个名' })
+    if (name == null) return
+    try {
+      await templatesApi('add', { kind, name: name || label, content: typeof content === 'string' ? content : JSON.stringify(content) }, workspace)
+      load()
+    } catch { /* ignore */ }
+  }
+  const del = async (id) => { try { await templatesApi('delete', { kind, template_id: id }, workspace); load() } catch { /* ignore */ } }
+  return (
+    <div style={{ display: 'inline-flex', gap: 6, alignItems: 'center', position: 'relative' }}>
+      <button onClick={save} style={miniBtn2} title={`把当前${label}存成可复用模板`}>存{label}模板</button>
+      <button onClick={() => { if (!open) load(); setOpen(v => !v) }} style={miniBtn2} title="套用已存模板">套用 ({list.length})</button>
+      {open && (
+        <div style={{ position: 'absolute', top: 30, left: 0, zIndex: 20, width: 240, maxHeight: 220, overflowY: 'auto',
+                      background: '#0d0d0d', border: '1px solid var(--border-strong)', borderRadius: 8, padding: 6,
+                      boxShadow: '0 12px 30px rgba(0,0,0,0.5)' }}>
+          {list.length === 0 && <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: 6 }}>还没有{label}模板</div>}
+          {list.map(t => (
+            <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 6px', borderRadius: 6 }}
+              onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.05)'}
+              onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+              <span onClick={() => { onApply(t.content); setOpen(false) }} title="点击套用"
+                style={{ flex: 1, fontSize: 12, cursor: 'pointer', overflow: 'hidden', textOverflow: 'ellipsis',
+                         whiteSpace: 'nowrap', color: 'rgba(255,255,255,0.85)' }}>{t.name}</span>
+              <button onClick={() => del(t.id)} title="删除模板"
+                style={{ ...miniBtn, width: 20, height: 20, color: '#fca5a5', borderColor: 'rgba(239,68,68,0.4)' }}>×</button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 /* ── 工具调用链渲染 ─────────────────────────────────── */
 function ToolSteps({ steps }) {
   const summarizeArgs = (args) => {
@@ -1789,23 +1918,23 @@ function ToolSteps({ steps }) {
     }
   }
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 14 }}>
+    <div style={{
+      border: '1px solid rgba(99,102,241,0.2)',
+      background: 'rgba(99,102,241,0.06)',
+      borderRadius: 10,
+      padding: '12px 14px',
+      marginBottom: 14,
+      display: 'flex', flexDirection: 'column', gap: 7,
+    }}>
       {steps.map((s, i) => (
-        <div key={i} style={{
-          fontSize: 12,
-          fontFamily: 'monospace',
-          border: '1px solid var(--border)',
-          borderRadius: 8,
-          padding: '8px 10px',
-          background: 'rgba(255,255,255,0.03)',
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-            <span style={{ color: s.done ? 'rgba(134,239,172,0.9)' : 'rgba(234,179,8,0.9)' }}>
+        <div key={i} style={{ fontSize: 12, fontFamily: "'SF Mono', ui-monospace, monospace" }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ color: s.done ? '#34d399' : 'rgba(234,179,8,0.9)' }}>
               {s.done ? '✓' : '·'}
             </span>
-            <span style={{ fontWeight: 700, color: 'rgba(147,197,253,0.95)' }}>{s.name}</span>
+            <span style={{ fontWeight: 600, color: 'rgba(255,255,255,0.52)' }}>{s.name}</span>
             {s.args && Object.keys(s.args).length > 0 && (
-              <span style={{ color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              <span style={{ color: 'rgba(255,255,255,0.4)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {summarizeArgs(s.args)}
               </span>
             )}
@@ -1814,8 +1943,8 @@ function ToolSteps({ steps }) {
             <div style={{
               marginTop: 6,
               paddingTop: 6,
-              borderTop: '1px solid var(--border)',
-              color: 'var(--text-muted)',
+              borderTop: '1px solid rgba(99,102,241,0.15)',
+              color: 'rgba(255,255,255,0.4)',
               whiteSpace: 'pre-wrap',
               wordBreak: 'break-all',
               maxHeight: 90,
@@ -1837,8 +1966,14 @@ function PcActionButton({ action, onSend, isQuickReply = false }) {
 
   // 颜色主题
   let bgColor, borderColor, textColor, hoverBg
-  if (hasUserInput || isQuickReply) {
-    // 快捷回复按钮：紫色调
+  if (isQuickReply) {
+    // 快捷回复区按钮：中性灰（对齐 mockup）
+    bgColor   = 'rgba(255,255,255,0.04)'
+    borderColor = 'rgba(255,255,255,0.13)'
+    textColor = 'rgba(255,255,255,0.87)'
+    hoverBg   = 'rgba(255,255,255,0.08)'
+  } else if (hasUserInput) {
+    // 内联快捷动作：紫色调
     bgColor   = 'rgba(99,102,241,0.12)'
     borderColor = 'rgba(99,102,241,0.3)'
     textColor = 'rgba(165,168,255,0.9)'
@@ -1886,8 +2021,8 @@ function PcActionButton({ action, onSend, isQuickReply = false }) {
         display: 'inline-flex',
         alignItems: 'center',
         gap: 6,
-        height: 30,
-        padding: '0 14px',
+        height: isQuickReply ? 28 : 30,
+        padding: isQuickReply ? '0 12px' : '0 14px',
         borderRadius: 8,
         border: `1px solid ${borderColor}`,
         background: bgColor,
@@ -1902,7 +2037,7 @@ function PcActionButton({ action, onSend, isQuickReply = false }) {
       onMouseEnter={e => { if (hasUserInput) e.currentTarget.style.background = hoverBg }}
       onMouseLeave={e => { if (hasUserInput) e.currentTarget.style.background = bgColor }}
     >
-      <span style={{ fontSize: 13, lineHeight: 1 }}>{icon}</span>
+      {!isQuickReply && <span style={{ fontSize: 13, lineHeight: 1 }}>{icon}</span>}
       {action.label || action.name || '操作'}
     </button>
   )
@@ -1941,14 +2076,6 @@ function extractSources(content) {
 function InterruptCard({ message, onResume }) {
   const resolved = message.resolved
 
-  const WarningIcon = () => (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
-         stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
-      <line x1="12" y1="9" x2="12" y2="13"/>
-      <line x1="12" y1="17" x2="12.01" y2="17"/>
-    </svg>
-  )
   const CheckIcon = () => (
     <svg width="12" height="12" viewBox="0 0 24 24" fill="none"
          stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -1962,64 +2089,48 @@ function InterruptCard({ message, onResume }) {
     </svg>
   )
 
-  const accentColor = resolved === undefined
-    ? 'rgba(234,179,8,0.85)'
-    : resolved ? 'rgba(34,197,94,0.85)' : 'rgba(239,68,68,0.85)'
-
   return (
     <div style={{
-      border: `1px solid ${resolved === undefined ? 'rgba(234,179,8,0.35)' : resolved ? 'rgba(34,197,94,0.3)' : 'rgba(239,68,68,0.3)'}`,
+      border: '1px solid rgba(255,255,255,0.13)',
       borderRadius: 12,
-      padding: '14px 18px',
-      background: resolved === undefined
-        ? 'rgba(234,179,8,0.06)'
-        : resolved ? 'rgba(34,197,94,0.05)' : 'rgba(239,68,68,0.05)',
+      padding: '15px 17px',
+      background: '#161616',
       transition: 'all 0.2s',
     }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-        <span style={{ color: accentColor }}><WarningIcon /></span>
-        <span style={{
-          fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase',
-          color: accentColor.replace('0.85', '0.7'),
-        }}>
-          Human-in-the-loop · 等待确认
-        </span>
-      </div>
-
       <p style={{
-        fontSize: 13.5, lineHeight: 1.65,
-        color: 'rgba(255,255,255,0.75)',
-        marginBottom: resolved === undefined ? 14 : 0,
+        fontSize: 12.5, lineHeight: 1.6,
+        color: 'rgba(255,255,255,0.87)',
+        marginBottom: resolved === undefined ? 13 : 0,
       }}>
         {message.content}
       </p>
 
       {resolved === undefined ? (
-        <div style={{ display: 'flex', gap: 8 }}>
+        <div style={{ display: 'flex', gap: 10 }}>
           <button
             onClick={() => onResume?.(true)}
             style={{
-              height: 30, padding: '0 16px', borderRadius: 8, border: '1px solid rgba(34,197,94,0.25)',
-              background: 'rgba(34,197,94,0.18)', color: 'rgba(34,197,94,0.9)',
-              fontSize: 12, fontWeight: 600, cursor: 'pointer',
+              height: 32, padding: '0 16px', borderRadius: 8, border: 'none',
+              background: '#34d399', color: '#04201a',
+              fontSize: 12.5, fontWeight: 600, cursor: 'pointer',
               display: 'flex', alignItems: 'center', gap: 6, transition: 'all 0.15s',
             }}
-            onMouseEnter={e => e.currentTarget.style.background = 'rgba(34,197,94,0.28)'}
-            onMouseLeave={e => e.currentTarget.style.background = 'rgba(34,197,94,0.18)'}
+            onMouseEnter={e => e.currentTarget.style.opacity = '0.88'}
+            onMouseLeave={e => e.currentTarget.style.opacity = '1'}
           >
             <CheckIcon /> 确认执行
           </button>
           <button
             onClick={() => onResume?.(false)}
             style={{
-              height: 30, padding: '0 16px', borderRadius: 8,
-              background: 'rgba(239,68,68,0.12)', color: 'rgba(239,68,68,0.85)',
-              fontSize: 12, fontWeight: 600, cursor: 'pointer',
+              height: 32, padding: '0 16px', borderRadius: 8,
+              background: 'rgba(239,68,68,0.1)', color: '#f87171',
+              fontSize: 12.5, fontWeight: 600, cursor: 'pointer',
               display: 'flex', alignItems: 'center', gap: 6,
-              border: '1px solid rgba(239,68,68,0.22)', transition: 'all 0.15s',
+              border: '1px solid rgba(239,68,68,0.4)', transition: 'all 0.15s',
             }}
-            onMouseEnter={e => e.currentTarget.style.background = 'rgba(239,68,68,0.22)'}
-            onMouseLeave={e => e.currentTarget.style.background = 'rgba(239,68,68,0.12)'}
+            onMouseEnter={e => e.currentTarget.style.background = 'rgba(239,68,68,0.2)'}
+            onMouseLeave={e => e.currentTarget.style.background = 'rgba(239,68,68,0.1)'}
           >
             <XIcon /> 取消
           </button>
@@ -2027,7 +2138,7 @@ function InterruptCard({ message, onResume }) {
       ) : (
         <span style={{
           fontSize: 12, fontWeight: 500,
-          color: resolved ? 'rgba(34,197,94,0.7)' : 'rgba(239,68,68,0.7)',
+          color: resolved ? '#34d399' : '#f87171',
           display: 'flex', alignItems: 'center', gap: 5,
         }}>
           {resolved ? <CheckIcon /> : <XIcon />}

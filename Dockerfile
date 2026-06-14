@@ -35,7 +35,7 @@ COPY --from=builder /usr/local/bin /usr/local/bin
 COPY --from=builder /app/.cache/fastembed /app/.cache/fastembed
 
 # 复制项目代码
-COPY agent_lab/ ./agent_lab/
+COPY mirage/ ./mirage/
 
 # FastEmbed 模型缓存目录与 HuggingFace 离线模式限制
 ENV FASTEMBED_CACHE_PATH=/app/.cache/fastembed
@@ -48,7 +48,7 @@ USER appuser
 EXPOSE 8000
 
 # 生产用 --workers 4，开发用 --reload
-CMD ["uvicorn", "agent_lab.main_api:app", \
+CMD ["uvicorn", "mirage.main_api:app", \
      "--host", "0.0.0.0", \
      "--port", "8000", \
      "--workers", "1"]

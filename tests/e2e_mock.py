@@ -25,7 +25,7 @@ _PNG = bytes.fromhex(
 
 def make_mp4(path: str, seconds: float = 1.0, color: str = "red") -> str:
     """用 ffmpeg 色块源造一段小视频（代替 GPU 出片产物）。"""
-    from agent_lab.app.pipeline.assembler import _ffmpeg, _run
+    from mirage.app.pipeline.assembler import _ffmpeg, _run
     os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
     res = _run([_ffmpeg(), "-y", "-hide_banner",
                 "-f", "lavfi", "-i", f"color=c={color}:s=320x576:r=24:d={seconds}",
@@ -87,11 +87,11 @@ def main() -> int:
     print(f"[e2e] 临时工作目录: {ws}")
 
     import importlib
-    from agent_lab.app.pipeline import runtime
+    from mirage.app.pipeline import runtime
     # 包 __init__ 导出了同名列表 pipeline_tools，会遮蔽子模块名，必须用 importlib 取真模块
-    pt = importlib.import_module("agent_lab.app.pipeline.pipeline_tools")
-    from agent_lab.app.pipeline.providers import video_provider_registry
-    from agent_lab.app.pipeline import assembler
+    pt = importlib.import_module("mirage.app.pipeline.pipeline_tools")
+    from mirage.app.pipeline.providers import video_provider_registry
+    from mirage.app.pipeline import assembler
 
     runtime.set_workspace(ws)
     fake = FakeGpu()
@@ -113,7 +113,7 @@ def main() -> int:
     for sid in sids:
         out = pt.generate_candidates.func(scene_id=sid)
         assert "IMGFILE::" in out, f"出图无 IMGFILE 标记:\n{out}"
-    from agent_lab.app.pipeline.store import get_store
+    from mirage.app.pipeline.store import get_store
     store = get_store()
     for sid in sids:
         assets = store.list_assets(sid, "IMAGE")
@@ -217,7 +217,7 @@ def main() -> int:
     print(f"[e2e] 合成 OK（整集 {assembler._duration(ep):.1f}s）")
 
     # 6) Agent 注册完整性：任何 agent 模块语法/导入错误都会让它从注册表消失（曾真实发生）
-    from agent_lab.app.services.agent_registry import agent_registry
+    from mirage.app.services.agent_registry import agent_registry
     agent_registry.discover_agents() if hasattr(agent_registry, "discover_agents") else None
     registered = set(agent_registry.get_valid_agents())
     for must in ("video", "general", "code", "file", "shell", "batch"):
@@ -225,7 +225,7 @@ def main() -> int:
     print(f"[e2e] agent 注册 OK（{sorted(registered)}）")
 
     # 7) 消息清洗（防 400）回归
-    from agent_lab.app.services.msg_utils import sanitize_messages
+    from mirage.app.services.msg_utils import sanitize_messages
     from langchain_core.messages import AIMessage, ToolMessage, HumanMessage
     bad = [HumanMessage("hi"),
            AIMessage(content="", tool_calls=[{"id": "x", "name": "t", "args": {}}])]

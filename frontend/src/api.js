@@ -21,28 +21,10 @@ function getAgentConfigs() {
   }
 }
 
-// ── RAG 状态 ─────────────────────────────────────────────────
+// ── 应用状态（当前模型 / 模式）────────────────────────────────
 
 export async function getStatus() {
-  const r = await fetch(`${getBase()}/rag/status`)
-  if (!r.ok) throw new Error(`status ${r.status}`)
-  return r.json()
-}
-
-// ── 知识库导入 ────────────────────────────────────────────────
-
-export async function ingestText(content, sourceName = 'inline', projectId = 'default') {
-  const body = new URLSearchParams({ content, source_name: sourceName, project_id: projectId })
-  const r = await fetch(`${getBase()}/rag/ingest/text`, { method: 'POST', body })
-  if (!r.ok) throw new Error(`status ${r.status}`)
-  return r.json()
-}
-
-export async function ingestFile(file, projectId = 'default') {
-  const form = new FormData()
-  form.append('file', file)
-  form.append('project_id', projectId)
-  const r = await fetch(`${getBase()}/rag/ingest/file`, { method: 'POST', body: form })
+  const r = await fetch(`${getBase()}/status`)
   if (!r.ok) throw new Error(`status ${r.status}`)
   return r.json()
 }
@@ -294,6 +276,24 @@ export async function autoStoryboard(projectId, novelText, scenes, replace, work
   if (!r.ok) throw new Error(`status ${r.status}`)
   return r.json()
 }
+// 一键 AI 分析小说 → 自动填角色(+空 LoRA)/风格/分镜
+export async function autoFill(projectId, novelText, scenes, replace, workspace = null) {
+  const r = await fetch(`${getBase()}/pipeline/auto_fill`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ project_id: projectId, novel_text: novelText, scenes, replace, workspace }),
+  })
+  if (!r.ok) throw new Error(`status ${r.status}`)
+  return r.json()
+}
+// 可复用模板库（per-workspace）：action=list/add/delete；kind=style/motion/prompt
+export async function templatesApi(action, fields = {}, workspace = null) {
+  const r = await fetch(`${getBase()}/pipeline/templates`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action, workspace, ...fields }),
+  })
+  if (!r.ok) throw new Error(`status ${r.status}`)
+  return r.json()
+}
 // 角色/声音圣经：action=list/add/update/delete
 export async function characters(projectId, action, fields = {}, workspace = null) {
   const r = await fetch(`${getBase()}/pipeline/characters`, {
@@ -312,10 +312,10 @@ export async function loraCreate(projectId, name, triggerWord, charId, workspace
   })
   if (!r.ok) throw new Error(`status ${r.status}`); return r.json()
 }
-export async function loraAction(projectId, action, trainingId = null, workspace = null) {
+export async function loraAction(projectId, action, trainingId = null, workspace = null, extra = {}) {
   const r = await fetch(`${getBase()}/pipeline/lora_trainings`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ project_id: projectId, action, training_id: trainingId, workspace }),
+    body: JSON.stringify({ project_id: projectId, action, training_id: trainingId, workspace, ...extra }),
   })
   if (!r.ok) throw new Error(`status ${r.status}`); return r.json()
 }

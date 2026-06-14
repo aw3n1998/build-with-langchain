@@ -16,8 +16,8 @@ import tempfile
 # 用临时 DB，避免污染工作区
 os.environ.setdefault("NP2V_DB_PATH", os.path.join(tempfile.gettempdir(), "np2v_demo.db"))
 
-from agent_lab.app.pipeline.store import SceneState, get_store
-from agent_lab.app.pipeline.pipeline_tools import pipeline_tools  # 校验工具无语法/依赖问题
+from mirage.app.pipeline.store import SceneState, get_store
+from mirage.app.pipeline.pipeline_tools import pipeline_tools  # 校验工具无语法/依赖问题
 
 
 def main() -> None:

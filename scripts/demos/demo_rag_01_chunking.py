@@ -13,7 +13,7 @@ RAG 学习 - 第1步：分片策略可视化
 import sys, io
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
 
-from agent_lab.app.rag.chunker import split_text
+from mirage.app.rag.chunker import split_text
 
 # ── 模拟工程文档内容 ─────────────────────────────────────────
 SAMPLE_DOC = """

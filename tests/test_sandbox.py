@@ -1,5 +1,5 @@
-from agent_lab.app.services.sandbox import execute_sandboxed
-from agent_lab.app.services.tools import run_shell_command
+from mirage.app.services.sandbox import execute_sandboxed
+from mirage.app.services.tools import run_shell_command
 
 print("=== Test 1: 正常数学代码 ===")
 print(execute_sandboxed("print(sum(range(10)))\nprint([x**2 for x in range(5)])"))

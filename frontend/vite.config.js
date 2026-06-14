@@ -15,8 +15,8 @@ export default defineConfig({
     },
   },
   build: {
-    // 生产构建输出到 agent_lab/static，FastAPI 直接托管
-    outDir: '../agent_lab/static',
+    // 生产构建输出到 mirage/static，FastAPI 直接托管
+    outDir: '../mirage/static',
     emptyOutDir: true,
   },
 })

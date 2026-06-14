@@ -137,8 +137,8 @@ def _ssh_sampler(gpu):
 
 def _run_comfy(args) -> dict:
     """ComfyUI 后端：本地图 → ComfyUI → 本地 mp4。"""
-    from agent_lab.app.core.config import settings
-    from agent_lab.app.pipeline.providers.comfyui import ComfyUIProvider
+    from mirage.app.core.config import settings
+    from mirage.app.pipeline.providers.comfyui import ComfyUIProvider
 
     if not settings.COMFYUI_BASE_URL:
         return {"backend": "ComfyUI", "skipped": "未配置 COMFYUI_BASE_URL"}
@@ -166,10 +166,10 @@ def _run_comfy(args) -> dict:
 
 def _run_ssh(args) -> dict:
     """SSH 后端：上传图 → 远程出片 → 下载。复刻 do_render_scene_video 的 SSH 路径精简版。"""
-    from agent_lab.app.core.config import settings
-    from agent_lab.app.pipeline.gpu_client import GpuConfigError, get_gpu_client
-    from agent_lab.app.pipeline.providers.ltx import LtxProvider
-    from agent_lab.app.pipeline.providers.wan22 import Wan22Provider
+    from mirage.app.core.config import settings
+    from mirage.app.pipeline.gpu_client import GpuConfigError, get_gpu_client
+    from mirage.app.pipeline.providers.ltx import LtxProvider
+    from mirage.app.pipeline.providers.wan22 import Wan22Provider
 
     prov = LtxProvider() if args.model == "ltx" else Wan22Provider()
     try:
@@ -261,7 +261,7 @@ def main() -> int:
     if not os.path.isfile(args.image):
         print(f"参考图不存在: {args.image}"); return 2
     if not args.model:
-        from agent_lab.app.core.config import settings
+        from mirage.app.core.config import settings
         args.model = settings.VIDEO_PROVIDER_DEFAULT or "ltx"
     os.makedirs(args.out_dir, exist_ok=True)
 
