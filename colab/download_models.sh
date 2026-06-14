@@ -3,7 +3,7 @@
 # FLUX.1-dev / ae 是 gated：先 `hf auth login`(或设 HF_TOKEN 环境变量)。huggingface-cli 已废弃。
 set -e
 M=/content/ComfyUI/models
-mkdir -p "$M"/{unet,checkpoints,clip,vae,audio_encoders,loras,pulid,insightface,diffusion_models,text_encoders}
+mkdir -p "$M"/{unet,checkpoints,clip,vae,audio_encoders,loras,pulid,insightface,diffusion_models,text_encoders,upscale_models}
 
 # 跳过闸只认扁平路径 $3/$base；hf 会按 repo 子目录(HighNoise/、split_files/..)存，
 # 故下完立刻把文件挪到 $3/$base。即时扁平 = 中途被回收/打断时已下的也已就位，下次必 [skip]。
@@ -79,6 +79,9 @@ fi
 # ── Wan2.2-Lightning 4步加速 LoRA(极速档用;i2v 高/低噪各一个,放 loras/)。各 ~0.7G。不用极速档可注释这两行。──
 get lightx2v/Wan2.2-Distill-Loras wan2.2_i2v_A14b_high_noise_lora_rank64_lightx2v_4step_1022.safetensors "$M/loras"
 get lightx2v/Wan2.2-Distill-Loras wan2.2_i2v_A14b_low_noise_lora_rank64_lightx2v_4step_1022.safetensors  "$M/loras"
+
+# ── 画质增强:RealESRGAN_x2 视频放大模型(COMFYUI_WORKFLOW_POST=post_upscale 才用;~64MB)。不放大可注释。──
+get ai-forever/Real-ESRGAN RealESRGAN_x2.pth "$M/upscale_models"
 
 # ── 兜底校验：get() 已逐个即时扁平；这里再扫一遍，发现仍埋在子目录的(如旧会话遗留)补挪并报警 ──
 # ★find -L：models/<sub> 是软链到 Drive，不加 -L 扫不进软链 → 漏掉 split_files/ 里的文件（本次大坑根因）。

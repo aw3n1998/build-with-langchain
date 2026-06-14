@@ -756,6 +756,12 @@ def do_render_scene_video(
             store.set_scene_state(scene_id, SceneState.FAILED, force=True)
             return f"接续段拼接失败: {e}"
 
+    # 可选画质增强(RealESRGAN 放大;COMFYUI_WORKFLOW_POST 配了才跑,默认关)。就地替换,失败保原片、不阻断。
+    try:
+        from mirage.app.pipeline.postprocess import maybe_postprocess
+        maybe_postprocess(final_local, fps=int(merged.get("fps") or settings.COMFYUI_FPS))
+    except Exception:  # noqa: BLE001
+        logger.warning("[render] 画质增强跳过(出错,保原片) scene=%s", scene_id)
     # 存本地最终成片路径 final_local；此前 SSH 单段误存远程 GPU 路径 out_remote，
     # 导致信任 scenes.video_path 的删除/状态逻辑拿到不存在的本地路径。
     store.set_scene_video(scene_id, final_local)
