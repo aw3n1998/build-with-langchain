@@ -20,7 +20,7 @@ import { fileUrl, getVideoProviders, getImageProviders, getProject, batchGenerat
          pipelineSelect, streamJobEvents, uploadCandidate, updateScenePrompts,
          deleteCandidate, deleteSceneVideo, sceneUndoAppend, deleteEpisode, suggestSegmentPrompts,
          autoStoryboard, autoFill, characters as charactersApi, templatesApi,
-         loraCreate, loraAction, loraUploadImage,
+         loraCreate, loraAction, loraUploadImage, loraUploadRef,
          suggestContinuation, sceneGenerate, sceneRender, sceneAppend,
          cancelJob, listActiveJobs,
          projectStyle, sceneAdd, sceneDelete } from '../api'
@@ -925,6 +925,28 @@ export function ProductionPanel({ message, workspace, sessionId }) {
     catch (e) { setProgress('传图失败：' + String(e.message || e)) }
     finally { setLoraBusy(false) }
   }
+  // 免上传自训：每张卡的模式/张数本地态 + 上传参考脸 + 造图(+造完即训)
+  const [loraBoot, setLoraBoot] = useState({})   // {tid:{mode,count}}
+  const bootOf = (tid) => loraBoot[tid] || { mode: 'text', count: 16 }
+  const setBootOf = (tid, patch) => setLoraBoot(b => ({ ...b, [tid]: { ...bootOf(tid), ...patch } }))
+  const loraUploadRefFile = async (tid, file) => {
+    if (!file) return
+    setLoraBusy(true)
+    try { await loraUploadRef(tid, file, workspace); await load(); setProgress('参考脸已上传，可点「造图+开训」') }
+    catch (e) { setProgress('传参考脸失败：' + String(e.message || e)) }
+    finally { setLoraBusy(false) }
+  }
+  const loraBootstrap = async (tid) => {
+    const { mode, count } = bootOf(tid)
+    setLoraBusy(true)
+    try {
+      const r = await loraAction(pid, 'bootstrap', tid, workspace, { mode, count: Number(count) || 0, auto_train: true })
+      await load()
+      const t = (r.trainings || []).find(x => x.id === tid)
+      setProgress(t?.message || '自动造训练集已启动…造完会自动开训，进度看这张卡的状态。')
+    } catch (e) { setProgress('自动造训练集失败：' + String(e.message || e)) }
+    finally { setLoraBusy(false) }
+  }
 
   // 自助新增 / 删除分镜（不绕 agent）
   const addScene = async () => {
@@ -1181,8 +1203,8 @@ export function ProductionPanel({ message, workspace, sessionId }) {
 
         <div style={subBox}>
           <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 8 }}>
-            人物 LoRA 训练 —— 传同一人物 10-20 张清晰照，训出专属 LoRA，出图锁定这张脸（最稳的人物一致）。
-            <span style={{ color: '#ffb454' }}>（训练后端待接入 GPU/Colab；现可先建任务、传图、存配置。）</span>
+            人物 LoRA 训练 —— 训出专属 LoRA、出图锁定这张脸（最稳的人物一致）。可手动传 10-20 张，
+            也可<b style={{ color: '#5fe8de' }}>免上传自训</b>：纯文字零图，或传 1 张脸用 PuLID 批量造同人图，造完自动开训。
           </div>
           {(proj?.lora_trainings || []).map(t => (
             <div key={t.id} style={{ border: '1px solid var(--border)', borderRadius: 6, padding: 8, marginBottom: 6 }}>
@@ -1205,6 +1227,25 @@ export function ProductionPanel({ message, workspace, sessionId }) {
                     onChange={e => { loraUpload(t.id, Array.from(e.target.files || [])); e.target.value = '' }} />
                 </label>
                 <button onClick={() => loraOp('train', t.id)} disabled={loraBusy} style={panelBtn(loraBusy)}>开始训练</button>
+              </div>
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 6, flexWrap: 'wrap' }}>
+                <span style={{ fontSize: 10.5, color: '#5fe8de', whiteSpace: 'nowrap' }}>免上传自训：</span>
+                <select value={bootOf(t.id).mode} onChange={e => setBootOf(t.id, { mode: e.target.value })}
+                  style={{ ...inputStyle, height: 26, width: 'auto' }}>
+                  <option value="text">纯文字零图</option>
+                  <option value="pulid">单张脸图(PuLID)</option>
+                </select>
+                {bootOf(t.id).mode === 'pulid' && (
+                  <label style={{ ...miniBtn2, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                    <Icon.Plus size={12} />传参考脸
+                    <input type="file" accept="image/*" style={{ display: 'none' }}
+                      onChange={e => { loraUploadRefFile(t.id, (e.target.files || [])[0]); e.target.value = '' }} />
+                  </label>
+                )}
+                <input type="number" min={5} value={bootOf(t.id).count}
+                  onChange={e => setBootOf(t.id, { count: e.target.value })} title="自动生成张数(建议 12-20)"
+                  style={{ ...inputStyle, height: 26, width: 56 }} />
+                <button onClick={() => loraBootstrap(t.id)} disabled={loraBusy} style={panelBtn(loraBusy)}>造图+开训</button>
               </div>
             </div>
           ))}

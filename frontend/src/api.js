@@ -325,6 +325,13 @@ export async function loraUploadImage(trainingId, file, workspace = null) {
   const r = await fetch(`${getBase()}/pipeline/lora_upload_image`, { method: 'POST', body: fd })
   if (!r.ok) throw new Error(`status ${r.status}`); return r.json()
 }
+// PuLID 单脸自举：上传 1 张参考脸（存 _ref/，不计入训练图数）
+export async function loraUploadRef(trainingId, file, workspace = null) {
+  const fd = new FormData()
+  fd.append('training_id', trainingId); fd.append('workspace', workspace || ''); fd.append('file', file)
+  const r = await fetch(`${getBase()}/pipeline/lora_upload_ref`, { method: 'POST', body: fd })
+  if (!r.ok) throw new Error(`status ${r.status}`); return r.json()
+}
 
 // 更新分镜提示词/旁白（AI 写的提示词可见可改）
 export async function updateScenePrompts(sceneId, fields, workspace = null) {
