@@ -4,7 +4,7 @@
     "_meta": { "title": "高噪专家 fp8_scaled(A100 原生FP8,免反量化,比GGUF快数倍)" },
     "inputs": {
       "unet_name": "wan2.2_i2v_high_noise_14B_fp8_scaled.safetensors",
-      "weight_dtype": "fp8_e4m3fn_fast"
+      "weight_dtype": "fp8_e4m3fn"
     }
   },
   "41": {
@@ -12,7 +12,7 @@
     "_meta": { "title": "低噪专家 fp8_scaled (weight_dtype 报错就改 fp8_e4m3fn 或 default)" },
     "inputs": {
       "unet_name": "wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors",
-      "weight_dtype": "fp8_e4m3fn_fast"
+      "weight_dtype": "fp8_e4m3fn"
     }
   },
   "65": {
