@@ -3,8 +3,17 @@
 # Wan2.2 的 WanImageToVideo / WanSoundImageToVideo / AudioEncoder* 近版 ComfyUI 核心自带，无需 WanVideoWrapper。
 set -e
 cd /content
-# 自愈：只有 ComfyUI/main.py 在才算装好；否则(空壳/残缺)清掉重 clone
-[ -f ComfyUI/main.py ] || { rm -rf ComfyUI; git clone --depth 1 https://github.com/comfyanonymous/ComfyUI; }
+# ComfyUI 钉版本(关键):主线(v0.4+/v0.8+)依赖 comfy_kitchen,要 torch≥2.4(torch.library.custom_op)，
+# 在 Colab 原装 torch 上 import 直接崩。v0.3.75(2025-11-26)已含 Wan2.2 i2v/s2v 原生节点 +
+# fp8/GGUF/Lightning 全支持，且其 quant_ops 不用 custom_op、不依赖 comfy_kitchen → 用原装 torch 即可跑。
+# 要升级新 ComfyUI:先确保 torch≥2.4，再 export COMFY_REF=master(或某新 tag) 覆盖本默认。
+COMFY_REF="${COMFY_REF:-v0.3.75}"
+_cur="$( [ -f ComfyUI/main.py ] && (cd ComfyUI && git describe --tags --always 2>/dev/null) || echo none )"
+if [ "$_cur" != "$COMFY_REF" ]; then
+  echo "[setup] ComfyUI → 钉定 $COMFY_REF (当前: $_cur)"
+  rm -rf ComfyUI
+  git clone --depth 1 --branch "$COMFY_REF" https://github.com/comfyanonymous/ComfyUI
+fi
 pip -q install -r ComfyUI/requirements.txt
 
 cd ComfyUI/custom_nodes
