@@ -32,9 +32,10 @@ class Wan22Provider(VideoProvider):
     capabilities = {"i2v"}
 
     def param_schema(self) -> list[dict]:
-        # 字段与 ComfyUI provider 对齐(frames/fps/steps/negative/seed)，保证 SSH/ComfyUI 两条后端
-        # 参数卡完全一致——避免「Colab 4 个、本地 2 个」的混乱。generate() 内部把 frames→--frame_num、
-        # steps→--sample_steps 映射回 SSH 脚本参数(并兼容旧键 frame_num/sample_steps)。
+        # 字段尽量与 ComfyUI provider 对齐(frames/fps/steps/seed)。注:Wan2.2 generate.py 无负向词
+        # CLI 参数(负向走模型内置)，故 SSH 档不暴露 negative，免得给用户一个无效旋钮(要自定义负向词
+        # 用 ComfyUI 后端)。generate() 把 frames→--frame_num、steps→--sample_steps、seed→--base_seed
+        # 映射回 SSH 脚本(并兼容旧键 frame_num/sample_steps)。
         return [
             {
                 "key": "size", "label": "分辨率(宽*高)", "type": "select",
@@ -53,11 +54,8 @@ class Wan22Provider(VideoProvider):
              "help": "每秒帧数。Wan 系常用 16。"},
             {"key": "steps", "label": "采样步数", "type": "number", "default": settings.WAN_SAMPLE_STEPS,
              "advanced": True, "help": "去噪步数。越大越精细越慢，一般 20-30。"},
-            {"key": "negative", "label": "负向提示词", "type": "text",
-             "default": "lowres, blurry, deformed, extra limbs, watermark, text",
-             "advanced": True, "help": "不想要的内容（避免畸形/水印等）。"},
             {"key": "seed", "label": "seed(-1随机)", "type": "number", "default": -1,
-             "advanced": True, "help": "随机种子。-1 每次不同；固定可复现。"},
+             "advanced": True, "help": "随机种子。-1 每次不同；固定可复现(SSH 走 --base_seed)。"},
         ]
 
     def generate(self, gpu: "GpuClient", *, image_path: str, prompt: str,
@@ -69,6 +67,12 @@ class Wan22Provider(VideoProvider):
         # 统一字段 frames/steps → SSH 脚本的 --frame_num/--sample_steps(兼容旧键)
         frame_num = int(params.get("frames") or params.get("frame_num") or settings.WAN_FRAME_NUM)
         sample_steps = int(params.get("steps") or params.get("sample_steps") or settings.WAN_SAMPLE_STEPS)
+        # seed→--base_seed：>=0 才固定(可复现)；<0/缺省让 generate.py 自取随机种子。seed 为 int，无注入风险。
+        try:
+            seed = int(params.get("seed", -1))
+        except (TypeError, ValueError):
+            seed = -1
+        seed_arg = f"--base_seed {seed} " if seed >= 0 else ""
 
         cmd = (
             f"cd {shlex.quote(repo)} && {shlex.quote(py)} generate.py "
@@ -77,6 +81,7 @@ class Wan22Provider(VideoProvider):
             # A14B 双专家：A100-40G 用 offload 交换高/低噪专家以放下；80G 可去掉 offload 提速
             f"--offload_model True --convert_model_dtype "
             f"--frame_num {frame_num} --sample_steps {sample_steps} "
+            f"{seed_arg}"
             f"--image {shlex.quote(image_path)} "
             f"--prompt {shlex.quote(prompt)} "
             f"--save_file {shlex.quote(out_remote)}"
