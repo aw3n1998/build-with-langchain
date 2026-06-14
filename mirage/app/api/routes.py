@@ -1410,9 +1410,14 @@ class LoraActionRequest(BaseModel):
     workspace: str | None = None
     project_id: str
     training_id: str | None = None
-    action: str = "list"          # list / train / delete / update
+    action: str = "list"          # list / train / delete / update / bootstrap
     name: str | None = None       # update 用：改名
     trigger_word: str | None = None  # update 用：改触发词
+    # bootstrap 用：免上传自训。mode=text(零图)/pulid(单脸)；count=造几张；appearance=外貌(空则取绑定角色)；
+    mode: str | None = None
+    count: int | None = None
+    appearance: str | None = None
+    auto_train: bool = True       # 造完即训(一键免上传自训)
 
 
 @router.post("/pipeline/lora_trainings")
@@ -1445,6 +1450,19 @@ async def pipeline_lora_trainings(req: LoraActionRequest):
         else:
             # 本地 ai-toolkit 子进程(默认)或远程派发(LORA_TRAIN_ENDPOINT 非空)，执行器内部判定
             lora_train.start_training(store, req.training_id, ddir)
+    elif act == "bootstrap" and req.training_id:
+        # 免上传自训：系统自己造训练集(text=零图 / pulid=单脸)，造完可自动开训
+        t = store.get_lora_training(req.training_id)
+        if not t:
+            raise HTTPException(status_code=404, detail="训练任务不存在")
+        from mirage.app.pipeline import lora_bootstrap
+        ddir = _lora_dir(req.training_id)
+        appearance = req.appearance or ""
+        if not appearance and t.get("char_id"):
+            appearance = (store.get_character(t["char_id"]) or {}).get("appearance") or ""
+        lora_bootstrap.start_bootstrap(store, req.training_id, ddir, mode=(req.mode or "text"),
+                                       appearance=appearance, count=(req.count or 0),
+                                       auto_train=bool(req.auto_train))
     return {"project_id": req.project_id, "trainings": store.list_lora_trainings(req.project_id)}
 
 
