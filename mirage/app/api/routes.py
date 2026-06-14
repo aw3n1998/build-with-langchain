@@ -1406,6 +1406,31 @@ async def pipeline_lora_upload_image(training_id: str = Form(...), workspace: st
             "url": f"/api/file?path={_quote(os.path.join(d, name))}"}
 
 
+@router.post("/pipeline/lora_upload_ref")
+async def pipeline_lora_upload_ref(training_id: str = Form(...), workspace: str = Form(default=""),
+                                   file: UploadFile = File(...)):
+    """PuLID 单脸自举：上传 1 张参考脸图（存 _ref/，不计入训练图数；自举时锁这张脸的 ID 批量出同人图）。"""
+    import pathlib
+    suffix = pathlib.Path(file.filename or "").suffix.lower()
+    if suffix not in {".png", ".jpg", ".jpeg", ".webp"}:
+        raise HTTPException(status_code=400, detail=f"不支持的图片类型 {suffix}（png/jpg/webp）")
+    store = _ws_store(workspace or None)
+    if not store.get_lora_training(training_id):
+        raise HTTPException(status_code=404, detail="训练任务不存在")
+    d = os.path.join(_lora_dir(training_id), "_ref")
+    os.makedirs(d, exist_ok=True)
+    for old in os.listdir(d):                       # 只留一张参考脸
+        try:
+            os.remove(os.path.join(d, old))
+        except Exception:  # noqa: BLE001
+            pass
+    path = os.path.join(d, f"face{suffix}")
+    with open(path, "wb") as f:
+        f.write(await file.read())
+    from urllib.parse import quote as _quote
+    return {"training_id": training_id, "ref": f"/api/file?path={_quote(path)}"}
+
+
 class LoraActionRequest(BaseModel):
     workspace: str | None = None
     project_id: str

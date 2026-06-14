@@ -103,17 +103,105 @@ def bootstrap_text(store, training: dict, dataset_dir: str, *, appearance: str, 
     return made
 
 
+def _find_ref_face(dataset_dir: str) -> Optional[str]:
+    """PuLID 参考脸：取 {dataset_dir}/_ref/ 下第一张图（上传时存这，不计入训练图数）。"""
+    rd = os.path.join(dataset_dir, "_ref")
+    if os.path.isdir(rd):
+        for fn in sorted(os.listdir(rd)):
+            if fn.lower().endswith(_IMG_EXTS):
+                return os.path.join(rd, fn)
+    return None
+
+
+def bootstrap_pulid(store, training: dict, dataset_dir: str, *, appearance: str, trigger: str,
+                    count: int, ref_image: Optional[str] = None, size: Optional[str] = None,
+                    steps: Optional[int] = None, seed: Optional[int] = None) -> list[str]:
+    """单张脸图自举：PuLID 锁参考脸 ID，批量生成同一身份多张(换姿势/景别/光照)，落盘 + 打标。"""
+    import shutil
+
+    import httpx
+
+    from mirage.app.pipeline import comfy_http as ch
+
+    ref = ref_image or _find_ref_face(dataset_dir)
+    if not ref or not os.path.exists(ref):
+        raise RuntimeError("PuLID 单脸自举需要先上传 1 张参考脸图。")
+    base = ch.base_url()
+    template = ch.load_workflow(settings.COMFYUI_WORKFLOW_PULID, "pulid_t2i_template.json", "pulid-t2i")
+    size = size or settings.COMFYUI_T2I_SIZE
+    try:
+        width, height = (int(x) for x in str(size).replace("x", "*").split("*"))
+    except ValueError:
+        width, height = 768, 1024
+    app_en = _maybe_en(appearance or "") or trigger
+    base_seed = seed if (seed is not None and seed >= 0) else int(time.time_ns() % 2_000_000_000)
+    made: list[str] = []
+    os.makedirs(dataset_dir, exist_ok=True)
+    with httpx.Client() as client:
+        face_name = ch.upload_image(client, base, ref)        # 参考脸传到 ComfyUI input 区
+        client_id = f"mirage-pulid-{os.getpid()}-{int(time.time())}"
+        for i in range(max(1, int(count))):
+            var = _VARIATIONS[i % len(_VARIATIONS)]
+            prompt = f"{app_en}, {var}, photorealistic, high detail, solo, one person"
+            mapping = {
+                "%UNET%": settings.COMFYUI_FLUX_UNET or "flux1-dev.safetensors",
+                "%PULID_MODEL%": settings.PULID_MODEL,
+                "%FACE%": face_name,
+                "%PULID_WEIGHT%": float(settings.PULID_WEIGHT),
+                "%PROMPT%": prompt,
+                "%NEG_PROMPT%": _NEG,
+                "%GUIDANCE%": float(settings.PULID_GUIDANCE),
+                "%WIDTH%": width, "%HEIGHT%": height,
+                "%STEPS%": int(steps or settings.COMFYUI_T2I_STEPS),
+                "%SEED%": (base_seed + i) % 2_000_000_000,
+            }
+            graph = ch.fill_template(template, mapping)
+            try:
+                pid = ch.submit(client, base, graph, client_id)
+                outs = ch.wait(client, base, pid, label="pulid")
+            except Exception as e:  # noqa: BLE001
+                logger.warning("PuLID 自举第 %d 张失败：%s", i + 1, e)
+                continue
+            for it in ch.collect_outputs(outs):
+                fn = it.get("filename", "")
+                if fn.lower().endswith(ch.IMAGE_EXTS):
+                    out_path = os.path.join(dataset_dir, f"pulid_{i:02d}_{fn}")
+                    try:
+                        ch.download_view(client, base, it, out_path)
+                        _write_caption(out_path, f"{trigger}, {var}")
+                        made.append(out_path)
+                    except Exception as e:  # noqa: BLE001
+                        logger.warning("PuLID 下载第 %d 张失败：%s", i + 1, e)
+                    break
+            store.update_lora_training(training["id"], image_count=lora_train.count_images(dataset_dir),
+                                       message=f"PuLID 单脸自举中…已 {len(made)}/{count} 张")
+    # 真实参考脸也纳入训练集(它是该角色的真图，有助一致性)
+    try:
+        ext = os.path.splitext(ref)[1].lower() or ".png"
+        dst = os.path.join(dataset_dir, f"ref_face{ext}")
+        if not os.path.exists(dst):
+            shutil.copy(ref, dst)
+            _write_caption(dst, f"{trigger}, portrait, reference")
+    except Exception:  # noqa: BLE001
+        pass
+    cnt = lora_train.count_images(dataset_dir)
+    store.update_lora_training(training["id"], image_count=cnt,
+                               message=f"PuLID 单脸自举完成：生成 {len(made)} 张（目录共 {cnt} 张）。可点开训。")
+    logger.info("PuLID 自举完成 tid=%s 生成 %d 张", training["id"], len(made))
+    return made
+
+
 def bootstrap(store, training: dict, dataset_dir: str, *, mode: str = "text",
               appearance: str = "", trigger: str = "", count: int = 0,
               ref_image: Optional[str] = None, size: Optional[str] = None,
               steps: Optional[int] = None, seed: Optional[int] = None) -> list[str]:
-    """自举调度。mode=text(零图) / pulid(单脸，task#27)。返回新图路径。"""
+    """自举调度。mode=text(零图) / pulid(单脸)。返回新图路径。"""
     trigger = trigger or lora_train._slug(training.get("trigger_word") or training.get("name"))
     count = int(count or settings.LORA_BOOTSTRAP_COUNT)
     mode = (mode or "text").lower()
     if mode == "pulid":
-        # task#27 接入：PuLID 单脸自举。现明确报错而非静默回退，免得误以为锁了脸。
-        raise RuntimeError("PuLID 单脸自举尚未接入（下一步）。先用 text 模式，或手动上传参考图。")
+        return bootstrap_pulid(store, training, dataset_dir, appearance=appearance, trigger=trigger,
+                               count=count, ref_image=ref_image, size=size, steps=steps, seed=seed)
     return bootstrap_text(store, training, dataset_dir, appearance=appearance, trigger=trigger,
                           count=count, size=size, steps=steps, seed=seed)
 

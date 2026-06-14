@@ -3,7 +3,7 @@
 # FLUX.1-dev / ae 是 gated：先 `hf auth login`(或设 HF_TOKEN 环境变量)。huggingface-cli 已废弃。
 set -e
 M=/content/ComfyUI/models
-mkdir -p "$M"/{unet,checkpoints,clip,vae,audio_encoders,loras,pulid,diffusion_models,text_encoders}
+mkdir -p "$M"/{unet,checkpoints,clip,vae,audio_encoders,loras,pulid,insightface,diffusion_models,text_encoders}
 
 # 跳过闸只认扁平路径 $3/$base；hf 会按 repo 子目录(HighNoise/、split_files/..)存，
 # 故下完立刻把文件挪到 $3/$base。即时扁平 = 中途被回收/打断时已下的也已就位，下次必 [skip]。
@@ -62,6 +62,14 @@ get Comfy-Org/Wan_2.2_ComfyUI_Repackaged split_files/vae/wan2.2_vae.safetensors 
 get Comfy-Org/Wan_2.2_ComfyUI_Repackaged split_files/diffusion_models/wan2.2_s2v_14B_fp8_scaled.safetensors "$M/unet"
 get Comfy-Org/Wan_2.2_ComfyUI_Repackaged split_files/vae/wan_2.1_vae.safetensors "$M/vae"
 get Comfy-Org/Wan_2.2_ComfyUI_Repackaged split_files/audio_encoders/wav2vec2_large_english_fp16.safetensors "$M/audio_encoders"
+
+# ── PuLID-Flux 单脸自举(免上传训 LoRA：1 张脸→批量同人图)。EVA-CLIP / insightface antelopev2
+#    由 ComfyUI_PuLID_Flux_ll 节点首跑自动拉，这里只下 pulid_flux 权重(~1.1G，幂等)。不做单脸自举可注释。──
+PW="$M/pulid/pulid_flux_v0.9.1.safetensors"
+if [ -s "$PW" ]; then echo "[skip] pulid_flux_v0.9.1.safetensors"; else
+  echo "[get ] pulid_flux_v0.9.1.safetensors"
+  wget -q -O "$PW" https://huggingface.co/guozinan/PuLID/resolve/main/pulid_flux_v0.9.1.safetensors || echo "[warn] PuLID 权重下载失败(单脸自举才需要，可忽略)"
+fi
 
 # ── 兜底校验：get() 已逐个即时扁平；这里再扫一遍，发现仍埋在子目录的(如旧会话遗留)补挪并报警 ──
 # ★find -L：models/<sub> 是软链到 Drive，不加 -L 扫不进软链 → 漏掉 split_files/ 里的文件（本次大坑根因）。

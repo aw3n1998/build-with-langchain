@@ -1,23 +1,27 @@
 {
   "10": {
-    "class_type": "UnetLoaderGGUF",
-    "inputs": { "unet_name": "flux1-dev-Q4_K_S.gguf" }
+    "class_type": "UNETLoader",
+    "_meta": { "title": "底模 UNET(与出图/训练同源) %UNET%" },
+    "inputs": { "unet_name": "%UNET%", "weight_dtype": "default" }
   },
   "11": {
-    "class_type": "DualCLIPLoaderGGUF",
+    "class_type": "DualCLIPLoader",
+    "_meta": { "title": "文本编码器 t5xxl + clip_l(flux)" },
     "inputs": {
-      "clip_name1": "t5-v1_1-xxl-encoder-Q5_K_M.gguf",
+      "clip_name1": "t5xxl_fp16.safetensors",
       "clip_name2": "clip_l.safetensors",
       "type": "flux"
     }
   },
   "12": {
     "class_type": "VAELoader",
+    "_meta": { "title": "VAE ae(flux)" },
     "inputs": { "vae_name": "ae.safetensors" }
   },
   "30": {
     "class_type": "PulidFluxModelLoader",
-    "inputs": { "pulid_file": "pulid_flux_v0.9.1.safetensors" }
+    "_meta": { "title": "PuLID-Flux 模型(需装 ComfyUI_PuLID_Flux_ll)" },
+    "inputs": { "pulid_file": "%PULID_MODEL%" }
   },
   "31": { "class_type": "PulidFluxEvaClipLoader", "inputs": {} },
   "32": {
@@ -26,10 +30,12 @@
   },
   "33": {
     "class_type": "LoadImage",
+    "_meta": { "title": "参考脸图(已上传到 ComfyUI input) %FACE%" },
     "inputs": { "image": "%FACE%" }
   },
   "34": {
     "class_type": "ApplyPulidFlux",
+    "_meta": { "title": "把参考脸 ID 融进底模" },
     "inputs": {
       "weight": "%PULID_WEIGHT%",
       "start_at": 0.0,
@@ -43,10 +49,12 @@
   },
   "6": {
     "class_type": "CLIPTextEncode",
+    "_meta": { "title": "正向提示词 %PROMPT%" },
     "inputs": { "text": "%PROMPT%", "clip": ["11", 0] }
   },
   "7": {
     "class_type": "CLIPTextEncode",
+    "_meta": { "title": "负向提示词" },
     "inputs": { "text": "%NEG_PROMPT%", "clip": ["11", 0] }
   },
   "22": {
@@ -78,6 +86,6 @@
   },
   "9": {
     "class_type": "SaveImage",
-    "inputs": { "filename_prefix": "agentlab_pulid", "images": ["8", 0] }
+    "inputs": { "filename_prefix": "mirage_pulid", "images": ["8", 0] }
   }
 }

@@ -81,6 +81,8 @@ class Settings(BaseSettings):
     PULID_ENABLED: bool = True           # 单脸自举开关(需 ComfyUI 装 PuLID_Flux + 下配套模型)
     PULID_WEIGHT: float = 0.9            # PuLID 人脸特征注入权重
     PULID_MODEL: str = "pulid_flux_v0.9.1.safetensors"  # PuLID 权重(notebook L1 已下到 models/pulid)
+    COMFYUI_WORKFLOW_PULID: str = ""     # PuLID t2i 模板路径；空=用仓库自带 pulid_t2i_template.json
+    PULID_GUIDANCE: float = 3.5          # PuLID 出图 FluxGuidance
     # 出图前把中文 image_prompt 自动翻成英文（FLUX-dev 读不懂中文，会退化成动漫人像）。
     # 仅对 prompt_lang=="en" 的出图模型生效；对用户隐形。要关：.env 里设 IMAGE_PROMPT_AUTOTRANSLATE=false
     IMAGE_PROMPT_AUTOTRANSLATE: bool = True
