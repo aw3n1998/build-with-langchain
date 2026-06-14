@@ -13,7 +13,9 @@ get() {  # repo  repo内路径  目标models子目录
   echo "[get ] $base"
   hf download "$1" "$2" --local-dir "$3" >/dev/null   # huggingface-cli 已废弃，用 hf
   if [ ! -s "$3/$base" ]; then                         # hf 存进了子目录 → 就地挪平
-    local got; got=$(find "$3" -type f -name "$base" 2>/dev/null | head -1)
+    # ★必须 find -L：models/<sub> 多是软链到 Drive，不加 -L 的 find 不会进软链目录，
+    #   split_files/ 永远扁不平 → ComfyUI 列成 split_files/.. → 工作流名对不上 → 出片假跑超时。
+    local got; got=$(find -L "$3" -type f -name "$base" 2>/dev/null | head -1)
     [ -n "$got" ] && mv -f "$got" "$3/$base"
   fi
   find "$3" -mindepth 1 -type d -empty -delete 2>/dev/null || true
@@ -62,7 +64,8 @@ get Comfy-Org/Wan_2.2_ComfyUI_Repackaged split_files/vae/wan_2.1_vae.safetensors
 get Comfy-Org/Wan_2.2_ComfyUI_Repackaged split_files/audio_encoders/wav2vec2_large_english_fp16.safetensors "$M/audio_encoders"
 
 # ── 兜底校验：get() 已逐个即时扁平；这里再扫一遍，发现仍埋在子目录的(如旧会话遗留)补挪并报警 ──
-stray=$(find "$M" -mindepth 2 -type f \( -name '*.safetensors' -o -name '*.gguf' \) 2>/dev/null || true)
+# ★find -L：models/<sub> 是软链到 Drive，不加 -L 扫不进软链 → 漏掉 split_files/ 里的文件（本次大坑根因）。
+stray=$(find -L "$M" -mindepth 2 -type f \( -name '*.safetensors' -o -name '*.gguf' \) 2>/dev/null || true)
 if [ -n "$stray" ]; then
   echo "[warn] 仍有模型在子目录，补一次扁平化："
   echo "$stray" | while read -r f; do
