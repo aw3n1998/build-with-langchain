@@ -53,9 +53,9 @@ if [ "$FLUX_BASE_KIND" != "checkpoint" ]; then
 fi
 
 # ── Wan2.2-I2V-A14B 双专家 —— 默认 fp8_scaled(A100 原生 FP8 张量核,免反量化,比 GGUF 快数倍；各 ~14.3G)──
-#    放 diffusion_models/(UNETLoader 从这读)；走 i2v_fp8_template.json。
-get Comfy-Org/Wan_2.2_ComfyUI_Repackaged split_files/diffusion_models/wan2.2_i2v_high_noise_14B_fp8_scaled.safetensors "$M/diffusion_models"
-get Comfy-Org/Wan_2.2_ComfyUI_Repackaged split_files/diffusion_models/wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors  "$M/diffusion_models"
+#    放 unet/(与 s2v fp8 同目录;UNETLoader 必认——diffusion_models/ 个别 ComfyUI 版不列)；走 i2v_fp8_template.json。
+get Comfy-Org/Wan_2.2_ComfyUI_Repackaged split_files/diffusion_models/wan2.2_i2v_high_noise_14B_fp8_scaled.safetensors "$M/unet"
+get Comfy-Org/Wan_2.2_ComfyUI_Repackaged split_files/diffusion_models/wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors  "$M/unet"
 # 低显存卡(<24G)才用 GGUF Q5_K_M(各~10.8G,逐步反量化、慢;40G A100 别用)。
 # 要用就取消下两行注释 + 把 COMFYUI_WORKFLOW_I2V 指回 i2v_gguf_template.json：
 # get QuantStack/Wan2.2-I2V-A14B-GGUF HighNoise/Wan2.2-I2V-A14B-HighNoise-Q5_K_M.gguf "$M/unet"
