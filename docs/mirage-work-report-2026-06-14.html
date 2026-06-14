@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>蜃景/Mirage 工作日报 · 2026-06-14</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#fff; --ink:#1c2330; --muted:#5b6677; --line:#e3e7ee;
+    --accent:#3b5bdb; --accent2:#0c8599; --hi:#e03131; --med:#e8893b; --low:#f2b705; --ok:#2f9e44;
+    --mono:'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Microsoft YaHei',sans-serif;
+    line-height:1.6;font-size:15px}
+  .wrap{max-width:1000px;margin:0 auto;padding:32px 22px 80px}
+  header.top{background:linear-gradient(135deg,#1f2a44,#243b55);color:#fff;border-radius:16px;
+    padding:28px 30px;margin-bottom:22px}
+  header.top h1{margin:0 0 6px;font-size:25px;letter-spacing:.5px}
+  header.top .sub{opacity:.85;font-size:13.5px}
+  header.top .meta{margin-top:14px;font-size:12.5px;opacity:.8;font-family:var(--mono)}
+  .stats{display:flex;flex-wrap:wrap;gap:12px;margin:18px 0 26px}
+  .stat{flex:1 1 150px;background:var(--card);border:1px solid var(--line);border-radius:12px;
+    padding:14px 16px;text-align:center}
+  .stat .n{font-size:26px;font-weight:700;color:var(--accent)}
+  .stat .l{font-size:12px;color:var(--muted);margin-top:2px}
+  h2{font-size:18px;margin:34px 0 12px;padding-left:11px;border-left:4px solid var(--accent)}
+  h3{font-size:15px;margin:20px 0 8px;color:var(--accent2)}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin:12px 0}
+  p{margin:8px 0}
+  table{width:100%;border-collapse:collapse;font-size:13.5px;margin:10px 0;background:var(--card);
+    border:1px solid var(--line);border-radius:10px;overflow:hidden}
+  th,td{text-align:left;padding:9px 11px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{background:#eef1f6;font-weight:600;font-size:12.5px}
+  tr:last-child td{border-bottom:none}
+  code,.hash{font-family:var(--mono);font-size:12.5px;background:#eef1f6;padding:1px 6px;border-radius:5px}
+  .hash{color:var(--accent)}
+  .badge{display:inline-block;font-size:11px;font-weight:700;color:#fff;border-radius:5px;padding:1px 7px;white-space:nowrap}
+  .b-hi{background:var(--hi)} .b-med{background:var(--med)} .b-low{background:var(--low);color:#5a4500}
+  .b-ok{background:var(--ok)} .b-feat{background:var(--accent)} .b-fix{background:var(--accent2)}
+  ul{margin:8px 0;padding-left:22px} li{margin:4px 0}
+  .tl{list-style:none;padding:0;margin:0}
+  .tl li{position:relative;padding:0 0 14px 22px;border-left:2px solid var(--line);margin-left:6px}
+  .tl li:last-child{border-left-color:transparent}
+  .tl li::before{content:'';position:absolute;left:-7px;top:4px;width:12px;height:12px;border-radius:50%;
+    background:var(--accent);border:2px solid #fff}
+  .tl b{color:var(--ink)}
+  .muted{color:var(--muted)}
+  .pill{display:inline-block;background:#eef1f6;border:1px solid var(--line);border-radius:20px;
+    padding:2px 10px;font-size:12px;margin:2px 4px 2px 0;font-family:var(--mono)}
+  a{color:var(--accent);word-break:break-all}
+  .note{background:#fff8e6;border:1px solid #ffe08a;border-radius:10px;padding:10px 14px;font-size:13px;margin:10px 0}
+  footer{margin-top:40px;padding-top:16px;border-top:1px solid var(--line);font-size:12px;color:var(--muted);text-align:center}
+  @media print{body{background:#fff}.wrap{max-width:none}header.top{background:#243b55!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}.badge{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="top">
+  <h1>蜃景 / Mirage · 工作日报</h1>
+  <div class="sub">小说→短剧 视频生成流水线 · 出片质量 / Bug 审计 / Colab 流水线攻坚</div>
+  <div class="meta">日期 2026-06-14（延续至 06-15 00:28） · 仓库 github.com/aw3n1998/build-with-langchain · 分支 main · 全部已推送（origin/main = 2023823）</div>
+</header>
+
+<div class="stats">
+  <div class="stat"><div class="n">14</div><div class="l">提交（全部已推送 main）</div></div>
+  <div class="stat"><div class="n">10</div><div class="l">已修 Bug（7 审计 + 3 低危）</div></div>
+  <div class="stat"><div class="n">0</div><div class="l">再审计误报（反驳式核实）</div></div>
+  <div class="stat"><div class="n">2</div><div class="l">多智能体调研（25 agent）</div></div>
+  <div class="stat"><div class="n">+43</div><div class="l">拉回的落后提交</div></div>
+</div>
+
+<div class="card">
+  <b>今日总览：</b> 把本地落后 43 个提交的 <code>main</code> 拉到最新；完成 <b>原生最强出片（取消量化、fp16）</b>；对最新代码做了一轮 <b>反驳式多智能体审计</b> 并修掉 10 个 Bug；随后在 Colab 上把出片流水线一路打通——解决 ComfyUI 启动崩、torch CUDA 错位、显存 OOM、fp8 模拟、cloudflared 卡顿等问题；最后把笔记本升级成 <b>按 GPU 自动选档（H100 原生 fp8 快档 / A100 fp16 档）</b>。并针对 A100→80G、FP8 硬件、即梦对比、单卡 H100 产能做了量化分析。
+</div>
+
+<h2>① 代码交付（14 次提交，均已合并 main 并推送）</h2>
+<table>
+  <tr><th>提交</th><th>类型</th><th>内容</th><th>时间</th></tr>
+  <tr><td class="hash">2023823</td><td><span class="badge b-feat">feat</span></td><td>笔记本按 GPU 自动选档（H100 原生 fp8 快档 / A100 fp16 档）；download 按 <code>I2V_PRECISION</code> 下对应权重</td><td class="muted">06-15 00:28</td></tr>
+  <tr><td class="hash">06c71b3</td><td><span class="badge b-fix">fix</span></td><td>cell5 去掉 <code>--highvram</code> → ComfyUI 自动回收显存，治 FLUX↔Wan 切换 OOM</td><td class="muted">06-14 23:25</td></tr>
+  <tr><td class="hash">f6ad921</td><td><span class="badge b-fix">fix</span></td><td>cloudflared 格幂等 + 轮询到公网地址即刻打印（秒级见 URL，不再 Text file busy / 盲等）</td><td class="muted">06-14 22:37</td></tr>
+  <tr><td class="hash">50ce828</td><td><span class="badge b-fix">fix</span></td><td>ComfyUI 钉定 <code>v0.3.75</code>，避开 comfy_kitchen（需 torch≥2.4）导致 Colab 原装 torch 启动崩</td><td class="muted">06-14 22:25</td></tr>
+  <tr><td class="hash">bd4dc04</td><td><span class="badge b-fix">fix</span></td><td>storyboard 稳健解析 <code>lipsync</code> 布尔，防字符串 "false" 被当成 True</td><td class="muted">06-14 20:53</td></tr>
+  <tr><td class="hash">2712172</td><td><span class="badge b-fix">fix</span></td><td>store <code>set_scene_state</code> 读取+校验+写入纳入同一把锁，消除 TOCTOU 竞态</td><td class="muted">06-14 20:51</td></tr>
+  <tr><td class="hash">15869c7</td><td><span class="badge b-fix">fix</span></td><td>store <code>update_scene_prompts</code> 用 <code>_now()</code>（UTC+Z）统一时间戳</td><td class="muted">06-14 20:51</td></tr>
+  <tr><td class="hash">76a45f8</td><td><span class="badge b-fix">fix</span></td><td>postprocess 用原子 <code>os.replace</code> 替换成片，避免 move 失败丢片（#7）</td><td class="muted">06-14 21:36</td></tr>
+  <tr><td class="hash">29c1e9f</td><td><span class="badge b-fix">fix</span></td><td>lora 开训登记+状态写+start 纳入同一把锁，消除重复开训竞态（#6）</td><td class="muted">06-14 21:36</td></tr>
+  <tr><td class="hash">f43dac8</td><td><span class="badge b-fix">fix</span></td><td>wan22 SSH 接 <code>--base_seed</code> + 移除 generate.py 不支持的负向词字段（#4）</td><td class="muted">06-14 21:36</td></tr>
+  <tr><td class="hash">36bdff4</td><td><span class="badge b-fix">fix</span></td><td>出片参数合并保留数值 0（<code>seed=0</code> 可复现，不再被吞）（#5）</td><td class="muted">06-14 21:36</td></tr>
+  <tr><td class="hash">0c40db7</td><td><span class="badge b-fix">fix</span></td><td>comfyui schema 默认修正——官方负向词生效 + 极速档可逐镜关（#2/#3）</td><td class="muted">06-14 21:36</td></tr>
+  <tr><td class="hash">90dc724</td><td><span class="badge b-fix">fix</span></td><td>lora 定义 <code>_IMG_EXTS</code>，修 PuLID 单脸自举 NameError 必崩（#1）+ 回归测试</td><td class="muted">06-14 21:36</td></tr>
+  <tr><td class="hash">9291fef</td><td><span class="badge b-feat">feat</span></td><td>A100-80G 原生 fp16 出片（取消量化）+ 默认切到 fp16（新增 i2v_bf16_template.json）</td><td class="muted">06-14 21:18</td></tr>
+</table>
+
+<h2>② Bug 审计与修复</h2>
+<p>对最新代码（HEAD <code>6fb64e4</code>）跑了一轮 <b>反驳式多智能体审计</b>（每条候选回源码逐行核实、默认当误报）：<b>10 候选 → 7 个真 Bug，0 误报</b>。另把首轮审计在旧代码上发现、当前仍有效的 3 个低危一并 cherry-pick 修复。共修 10 个。</p>
+
+<h3>本轮审计确认并修复（7）</h3>
+<table>
+  <tr><th>级别</th><th>位置</th><th>问题</th><th>修复</th></tr>
+  <tr><td><span class="badge b-hi">HIGH</span></td><td><code>lora_bootstrap.py:111</code></td><td><code>_IMG_EXTS</code> 未定义/未导入（只 import 了 lora_train 模块）→ 上传参考脸后 PuLID 单脸自举 100% NameError 崩。3 个 agent 独立发现。</td><td class="hash">90dc724</td></tr>
+  <tr><td><span class="badge b-med">MED</span></td><td><code>comfyui.py:96</code></td><td>negative 的 schema 默认是非空英文串 → 永远顶掉官方中文负向词 <code>WAN_VIDEO_NEGATIVE</code>，压不住静止/过曝/畸形。</td><td class="hash">0c40db7</td></tr>
+  <tr><td><span class="badge b-med">MED</span></td><td><code>pipeline_tools.py:650</code></td><td><code>WAN_LIGHTNING=true</code> 时面板「关·精修」关不掉极速档（空串被参数合并吞掉）。</td><td class="hash">0c40db7</td></tr>
+  <tr><td><span class="badge b-med">MED</span></td><td><code>wan22.py</code></td><td>SSH provider 暴露 negative/seed 但 generate() 从不读取 → 静默失效、seed 不可复现。</td><td class="hash">f43dac8</td></tr>
+  <tr><td><span class="badge b-low">LOW</span></td><td><code>pipeline_tools.py:650</code></td><td>合并过滤把数值 <code>0</code> 当空丢弃 → <code>seed=0</code> 复现失效、回退随机。</td><td class="hash">36bdff4</td></tr>
+  <tr><td><span class="badge b-low">LOW</span></td><td><code>lora_train.py:227</code></td><td>开训"登记进 _RUNNING"与"start()"之间有竞态窗口 → 自举自动训与手动开训可起两个子进程。</td><td class="hash">29c1e9f</td></tr>
+  <tr><td><span class="badge b-low">LOW</span></td><td><code>postprocess.py:76</code></td><td>先 <code>os.remove</code> 原片再 <code>shutil.move</code>，move 失败两头落空丢成片（违背"失败保留原片"）。</td><td class="hash">76a45f8</td></tr>
+</table>
+
+<h3>首轮审计、当前仍有效（3，cherry-pick 修复）</h3>
+<table>
+  <tr><th>级别</th><th>位置</th><th>问题</th><th>修复</th></tr>
+  <tr><td><span class="badge b-low">LOW</span></td><td><code>store.py</code> update_scene_prompts</td><td><code>datetime.now()</code>（本地、无 Z）与全表 <code>_now()</code>（UTC+Z）不一致。</td><td class="hash">15869c7</td></tr>
+  <tr><td><span class="badge b-low">LOW</span></td><td><code>store.py</code> set_scene_state</td><td>读取+状态校验在锁外、仅 UPDATE 在锁内 → TOCTOU，可绕过状态机。</td><td class="hash">2712172</td></tr>
+  <tr><td><span class="badge b-low">LOW</span></td><td><code>storyboard.py:69</code></td><td><code>bool(it.get("lipsync"))</code>：LLM 返回字符串 "false" 被当 True → 误走对口型。</td><td class="hash">bd4dc04</td></tr>
+</table>
+<div class="note"><b>方法论留痕：</b>首轮（在旧代码上、子代理直接报）出现多个<b>误报</b>（忽略了紧邻的守卫，如 <code>items[-1]</code> 上方已有 <code>if not items: raise</code>）。改用<b>反驳式核实</b>（每条回源码验证、默认误报）后，本轮 <b>0 误报</b>。验证：<code>tests/</code> 新增 2 个回归测试，相关用例 13 passed / 0 failed。</div>
+
+<h2>③ 关键分析与决策</h2>
+
+<h3>A100 40G → 80G：还要不要量化？</h3>
+<p><b>结论：基本可彻底不量化。</b> A100（Ampere sm8.0）<b>没有 FP8 张量核</b>，量化只为"塞得下"、不加速。80G 显存足以原生 bf16/fp16 跑 Wan2.2-I2V-A14B（双专家各 ~28G），故<b>直接 fp16 原生</b>即上限最优；fp8 仅在显存不足时才有意义。据此把出片默认从 fp8 切到 fp16（提交 <code>9291fef</code>）。</p>
+
+<h3>为什么"不能 FP8"（硬件根因）</h3>
+<p>FP8 的硬件加速从 <b>Hopper（H100，sm9.0）</b>起才有，<b>Ada（sm8.9，4090/L4）</b>亦有；<b>A100（sm8.0）没有</b>。所以 A100 上加载 fp8 权重能省显存，但运算只能"反量化成 fp16 再算"（日志里的 <code>emulated ops / manual cast</code>）→ 不快、反因开销更慢、还撞 OOM。这是硬件代差，非配置开关。</p>
+
+<h3>即梦（Dreamina / Seedance）为何那么快</h3>
+<p>字节自研 <b>Seedance</b>，生产级集群：<b>H100+ 原生 FP8 + 蒸馏少步专用模型 + 模型常驻零加载 + 千卡并行 + 定制推理栈（TensorRT/FA3/缓存）+ 低清→超分</b>。公开口径：Seedance 2.0 Fast 出 5–10s 视频仅 30–60s，约 1 元/秒。与"单卡自托管研究档"是两个量级；自托管的价值在<b>无审查 + 自有角色 LoRA + 免费不限量 + 完全可控</b>。</p>
+
+<h3>单卡 H100 做短剧 · 产能估算</h3>
+<table>
+  <tr><th>档位</th><th>单镜(5s) GPU 耗时</th><th>镜头/天</th><th>成片分钟/天</th><th>1 分钟短剧/天</th></tr>
+  <tr><td>精修档（fp8,20 步）</td><td>~1.5–2.5 min</td><td>~500–700</td><td>~45–60 min</td><td><b>~30–50 集</b></td></tr>
+  <tr><td>极速档（Lightning 4 步）</td><td>~0.5–1 min</td><td>~1200–1800</td><td>~100–150 min</td><td><b>~60–120 集</b></td></tr>
+</table>
+<p class="muted">假设全自动批量、模型常驻、~20h 有效、留 ~30% 余量给失败/切模型。单条 1 分钟短剧成本：精修 ~$0.5–1、极速 ~$0.1–0.2，比即梦（~$8/min）便宜约 10–50 倍。属估算，待真机校准。</p>
+
+<h2>④ Colab 出片流水线攻坚（问题 → 处置 时间线）</h2>
+<ul class="tl">
+  <li><b>拉取最新 main：</b>本地落后远端 <b>43 个提交</b>，快进 <code>0c051b3 → 6fb64e4</code>（其中 <code>54d24af</code> 已实现旧 A+B 方案、<code>03aa8c1</code> 已修 OPENAI_API_KEY）。</li>
+  <li><b>取消量化：</b>新增 <code>i2v_bf16_template.json</code>，<code>.env.colab</code> 指向它，<code>download_models.sh</code> 改下 fp16 权重。</li>
+  <li><b>ComfyUI 启动崩：</b><code>torch.library.custom_op</code> 缺失 → 主线 ComfyUI 依赖 comfy_kitchen（需 torch≥2.4）。处置：把 ComfyUI 钉到 <b>v0.3.75</b>（含 Wan2.2 节点、无 comfy_kitchen）。</li>
+  <li><b>torch 升级反噬：</b>手动升 torch 导致 <code>torch=cu13.0 / torchaudio=cu12.8</code> CUDA 错位。教训：Colab 自带 torch 2.10 自洽，<b>切勿手动单独重装</b>。</li>
+  <li><b>冷加载慢：</b>模型软链在 Google Drive，读 27G 走 FUSE 慢（"Model Initializing"久）。</li>
+  <li><b>出图 OOM：</b>80G 被占满、跑 10 分钟才崩 → 根因 <code>--highvram</code>（模型常驻不卸）+ fp8 模拟。处置：<b>去掉 --highvram</b>，让 ComfyUI 自动回收显存。</li>
+  <li><b>fp8 在 A100 是模拟：</b>日志 <code>emulated ops: float8_e4m3fn</code> 实证 → 改 fp16 原生（无模拟）。</li>
+  <li><b>Lightning LoRA 没套全：</b>刷屏 <code>lora key not loaded ...diff_m</code> → 极速档蒸馏 LoRA 与 ComfyUI 原生节点 key 不齐；建议 80G 上关极速档跑满档。</li>
+  <li><b>cloudflared 卡：</b>每跑覆盖二进制（Text file busy）+ 盲等 12s。处置：杀旧隧道 + 缺才下 + 轮询日志，<b>秒级出公网地址</b>。</li>
+  <li><b>收口：GPU 自动选档</b>——笔记本开机探测算力/显存：H100/Ada→fp8 快档+highvram+关 sage；A100-80G→fp16 档；&lt;70G→回退+告警。给啥卡都不配错。</li>
+</ul>
+
+<h2>⑤ 多智能体调研（2 个工作流，25 个 agent）</h2>
+<div class="card">
+  <h3>再审计（wczngjqs1，22 agent）</h3>
+  <p>测绘 7 条流水线 + 5 区找 Bug + 逐条反驳式核实 → 10 候选 / 7 真 Bug / 0 误报（见 ② 节）。</p>
+  <h3>H100 配置核准（wm87lcr2l，3 agent）</h3>
+  <ul>
+    <li><b>v0.3.75 在 H100 上即走原生 fp8</b>（由 <code>supports_fp8_compute()</code>：sm≥9 + torch≥2.3，经 <code>torch._scaled_mm</code>）——不需要新版 ComfyUI，且避开新版对 fp8-Wan 的回归 bug。</li>
+    <li><b>Colab 不保证给 H100</b>（官方不承诺型号、常被降级到 L4/V100）→ 笔记本应"探测到才走 fp8"，故做成自动适配而非写死。</li>
+    <li><b>⚠️ <code>--use-sage-attention</code> 在 H100+Wan 上会出纯噪声/黑屏</b>（WanVideoWrapper #1554）→ H100 上关 sage、用 sdpa。</li>
+    <li>Colab 自带 <b>torch 2.10（自洽）</b>，装依赖勿手动重装 torch 系；CUDA 串开机实测。</li>
+    <li>H100 fp8 比 fp16 端到端快 ~1.2–1.4x + 半显存，画质几乎无损 → H100 默认 fp8。</li>
+  </ul>
+  <p class="muted">主要来源：Colab runtime-version-faq、ComfyUI <code>model_management.supports_fp8_compute</code>、ComfyUI #11665/#11217、kijai/ComfyUI-WanVideoWrapper #1554、Seedance/即梦 报道、morphic/voltagepark H100 基准。</p>
+</div>
+
+<h2>⑥ 当前流水线 / 配置状态（main）</h2>
+<p>
+  <span class="pill">ComfyUI=v0.3.75</span>
+  <span class="pill">i2v: H100→fp8 / A100→fp16(自动)</span>
+  <span class="pill">highvram: 仅 H100</span>
+  <span class="pill">sage: A100 用 / H100 关</span>
+  <span class="pill">出图=FLUX(fluxed-up, CivitAI)</span>
+  <span class="pill">SSH 出片=非量化(可选后端)</span>
+  <span class="pill">cloudflared 秒出地址</span>
+</p>
+<p class="muted">出片走 ComfyUI（COMFYUI_VIDEO_AS=auto）；笔记本第 1 格探测 GPU 写 <code>COMFYUI_WORKFLOW_I2V / I2V_PRECISION / MIRAGE_HIGHVRAM / MIRAGE_USE_SAGE</code>，cell4/5/6 据此下载/起服务/写 .env。</p>
+
+<h2>⑦ 未决事项 / 下一步</h2>
+<ul>
+  <li><b>H100 路径待真机实测</b>：自动探测逻辑按调研搭建，未在真 H100 上跑过校准。</li>
+  <li><b>"极速打样 → 精修终渲" 两档开关</b>（批量先极速过、选中再精修重渲）—— 提产能利用率，<span class="muted">待做</span>。</li>
+  <li><b>NSFW 底模</b>：当前 fluxed-up 偏"风格"模型；要稳的无审查能力可换 <b>Chroma1-HD</b>（HF 免 token，仓库已有 <code>t2i_chroma_template.json</code>）。注意 Chroma 与 FLUX-dev LoRA 不通用。<span class="muted">用户暂"不换了"</span>。</li>
+  <li><b>大模型从 Drive 加载慢</b>：可加 <code>stage_local</code>（Drive 持久 + 本地快读）消除每次冷加载。<span class="muted">待做</span>。</li>
+  <li><b>清理本地临时分支</b>（已并入 main 的多条 fix/feat 分支）。<span class="muted">待做</span>。</li>
+  <li>小遗留：<code>store._now()</code> 仍用 <code>datetime.utcnow()</code>（3.12 deprecation 告警，无害）。</li>
+</ul>
+
+<footer>
+  蜃景 / Mirage 工作日报 · 生成于 2026-06-15 · 自包含离线 HTML（双击可开，无外部依赖）<br>
+  仓库 origin/main 已同步至 2023823 · 由 Claude Code 协助生成
+</footer>
+
+</div>
+</body>
+</html>
