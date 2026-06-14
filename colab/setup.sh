@@ -17,6 +17,6 @@ clone_or_pull https://github.com/lldacing/ComfyUI_PuLID_Flux_ll
 for r in ComfyUI-GGUF ComfyUI-VideoHelperSuite ComfyUI_PuLID_Flux_ll; do
   [ -f "$r/requirements.txt" ] && pip -q install -r "$r/requirements.txt" || true
 done
-pip -q install facexlib onnxruntime-gpu insightface || true   # PuLID 依赖(可选)
+pip -q install facexlib onnxruntime-gpu insightface facenet_pytorch || true   # PuLID 依赖(可选;facenet_pytorch 给 lldacing 版的 MTCNN)
 
 echo "[setup] ComfyUI + 节点就绪"
