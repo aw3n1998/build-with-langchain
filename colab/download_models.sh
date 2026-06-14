@@ -76,6 +76,10 @@ if [ -s "$PW" ]; then echo "[skip] pulid_flux_v0.9.1.safetensors"; else
   wget -q -O "$PW" https://huggingface.co/guozinan/PuLID/resolve/main/pulid_flux_v0.9.1.safetensors || echo "[warn] PuLID 权重下载失败(单脸自举才需要，可忽略)"
 fi
 
+# ── Wan2.2-Lightning 4步加速 LoRA(极速档用;i2v 高/低噪各一个,放 loras/)。各 ~0.7G。不用极速档可注释这两行。──
+get lightx2v/Wan2.2-Distill-Loras wan2.2_i2v_A14b_high_noise_lora_rank64_lightx2v_4step_1022.safetensors "$M/loras"
+get lightx2v/Wan2.2-Distill-Loras wan2.2_i2v_A14b_low_noise_lora_rank64_lightx2v_4step_1022.safetensors  "$M/loras"
+
 # ── 兜底校验：get() 已逐个即时扁平；这里再扫一遍，发现仍埋在子目录的(如旧会话遗留)补挪并报警 ──
 # ★find -L：models/<sub> 是软链到 Drive，不加 -L 扫不进软链 → 漏掉 split_files/ 里的文件（本次大坑根因）。
 stray=$(find -L "$M" -mindepth 2 -type f \( -name '*.safetensors' -o -name '*.gguf' \) 2>/dev/null || true)

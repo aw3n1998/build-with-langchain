@@ -111,6 +111,13 @@ class Settings(BaseSettings):
     # 接续段拼接处接缝平滑:相邻段交叉淡化秒数(只在 segments≥2 时生效;单段无缝隙不受影响)。
     # 0=关(硬拼,会有尾帧续接的运动跳/色闪);0.2≈3帧淡化,通常净改善。运动跳变极大若起叠影可调小或设 0。
     VIDEO_SEAM_CROSSFADE: float = 0.2
+    # ── Wan2.2-Lightning 极速档(4步蒸馏 LoRA;可逐镜切，关=A14B 满档精修)──
+    # 默认关(精修档)；出片时传 lightning=true(面板「极速档」开关/更多参数)或这里设 true 走极速档。
+    WAN_LIGHTNING: bool = False
+    COMFYUI_WORKFLOW_I2V_LIGHTNING: str = "comfyui_workflows/i2v_fp8_lightning_template.json"
+    # i2v 高/低噪各自的 Lightning LoRA 文件名(放 ComfyUI/models/loras/;★高噪用 high、低噪用 low，别混)。
+    WAN_LIGHTNING_LORA_HIGH: str = "wan2.2_i2v_A14b_high_noise_lora_rank64_lightx2v_4step_1022.safetensors"
+    WAN_LIGHTNING_LORA_LOW: str = "wan2.2_i2v_A14b_low_noise_lora_rank64_lightx2v_4step_1022.safetensors"
     # ── 视频模型解耦：默认 Provider + LTX-Video 配置 ──────────────
     # 默认用哪个视频模型（对应 providers 注册名：wan2.2 / ltx）
     VIDEO_PROVIDER_DEFAULT: str = "wan2.2"

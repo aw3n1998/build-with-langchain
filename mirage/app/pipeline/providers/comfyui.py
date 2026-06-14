@@ -49,6 +49,11 @@ class ComfyUIProvider(VideoProvider):
 
     def param_schema(self) -> list[dict]:
         return [
+            {"key": "lightning", "label": "极速档(Lightning)", "type": "select",
+             "default": "1" if settings.WAN_LIGHTNING else "",
+             "help": "开=4步蒸馏极速(~1-2分/镜，画质≈A14B 略降)；关=A14B 满档 30 步精修(更清更慢)。逐镜可切。",
+             "options": [{"value": "", "label": "关·精修(A14B 满档)"},
+                         {"value": "1", "label": "开·极速(Lightning 4步)"}]},
             {
                 "key": "size", "label": "分辨率(宽*高)", "type": "select",
                 "default": settings.COMFYUI_SIZE,
@@ -98,7 +103,17 @@ class ComfyUIProvider(VideoProvider):
             "%SHIFT%": float(params.get("shift") or settings.WAN_SHIFT),   # ModelSamplingSD3 必需
             "%SEED%": seed,
         }
-        template = ch.load_workflow(settings.COMFYUI_WORKFLOW_I2V, "i2v_gguf_template.json", "i2v")
+        # 极速档:lightning=true(面板「极速档」开关/更多参数)或 settings.WAN_LIGHTNING → 4步蒸馏 LoRA 模板;否则 A14B 满档精修
+        _lv = params.get("lightning", settings.WAN_LIGHTNING)
+        lightning = _lv if isinstance(_lv, bool) else str(_lv).strip().lower() in (
+            "1", "true", "yes", "on", "lightning", "极速")
+        if lightning:
+            mapping["%LIGHT_HI_LORA%"] = settings.WAN_LIGHTNING_LORA_HIGH
+            mapping["%LIGHT_LO_LORA%"] = settings.WAN_LIGHTNING_LORA_LOW
+            template = ch.load_workflow(settings.COMFYUI_WORKFLOW_I2V_LIGHTNING,
+                                        "i2v_fp8_lightning_template.json", "i2v-lightning")
+        else:
+            template = ch.load_workflow(settings.COMFYUI_WORKFLOW_I2V, "i2v_gguf_template.json", "i2v")
         t0 = time.time()
         client_id = f"mirage-{os.getpid()}-{int(t0)}"
         with httpx.Client() as client:
