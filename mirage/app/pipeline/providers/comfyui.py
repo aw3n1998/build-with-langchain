@@ -93,6 +93,8 @@ class ComfyUIProvider(VideoProvider):
             "%FRAMES%": int(params.get("frames") or settings.COMFYUI_FRAMES),
             "%FPS%": int(params.get("fps") or settings.COMFYUI_FPS),
             "%STEPS%": int(params.get("steps") or settings.COMFYUI_STEPS),
+            # 双专家切换步=总步数一半(high 0→boundary, low boundary→end);随 steps 自动折半
+            "%BOUNDARY%": int(params.get("steps") or settings.COMFYUI_STEPS) // 2,
             "%SHIFT%": float(params.get("shift") or settings.WAN_SHIFT),   # ModelSamplingSD3 必需
             "%SEED%": seed,
         }

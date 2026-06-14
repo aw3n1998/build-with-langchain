@@ -72,12 +72,12 @@
       "latent_image": ["55", 2],
       "add_noise": "enable",
       "noise_seed": "%SEED%",
-      "steps": 30,
+      "steps": "%STEPS%",
       "cfg": 3.5,
       "sampler_name": "euler",
       "scheduler": "simple",
       "start_at_step": 0,
-      "end_at_step": 15,
+      "end_at_step": "%BOUNDARY%",
       "return_with_leftover_noise": "enable"
     }
   },
@@ -91,11 +91,11 @@
       "latent_image": ["63", 0],
       "add_noise": "disable",
       "noise_seed": "%SEED%",
-      "steps": 30,
+      "steps": "%STEPS%",
       "cfg": 3.5,
       "sampler_name": "euler",
       "scheduler": "simple",
-      "start_at_step": 15,
+      "start_at_step": "%BOUNDARY%",
       "end_at_step": 10000,
       "return_with_leftover_noise": "disable"
     }
