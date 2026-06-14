@@ -33,14 +33,18 @@ logger = get_logger("pipeline.image_providers.comfyui_image")
 
 
 def _strip_lora_node(graph: dict) -> dict:
-    """没配 LoRA 时：删掉 t2i 模板里的 LoraLoader(节点"13")，并把所有对它的引用
-    回退到原始底模/CLIP —— ["13",0]→["10",0](model)、["13",1]→["11",1?]。
-    LoraLoader 的 clip 输出对应 DualCLIPLoader 的 clip(["11",0])。"""
+    """没配 LoRA 时删掉 LoraLoader(节点"13")，把对它的引用回退到它自己的上游：
+    [13,0]→节点13.inputs.model（底模 MODEL），[13,1]→节点13.inputs.clip（CLIP 来源）。
+    通用：flux 模板 clip 来自 DualCLIP[11,0]、checkpoint 模板 clip 来自 [10,1]，都能正确回退。"""
+    node = graph.get("13", {})
+    inp = node.get("inputs", {}) if isinstance(node, dict) else {}
+    model_ref = inp.get("model", ["10", 0])
+    clip_ref = inp.get("clip", ["11", 0])
     g = {k: v for k, v in graph.items() if k != "13"}
 
     def fix(x):
         if isinstance(x, list) and len(x) == 2 and x[0] == "13":
-            return ["10", 0] if x[1] == 0 else ["11", 0]
+            return list(model_ref) if x[1] == 0 else list(clip_ref)
         if isinstance(x, dict):
             return {k: fix(v) for k, v in x.items()}
         if isinstance(x, list):
@@ -121,8 +125,9 @@ class ComfyUIImageProvider(ImageProvider):
                     "%NEG_PROMPT%": negative,
                     "%WIDTH%": width, "%HEIGHT%": height,
                     "%STEPS%": steps, "%SEED%": seed,
-                    # 出图底模(UNET 文件名)可配：默认无审查 Chroma1-HD（同一底模需对应训练人物 LoRA）
-                    "%UNET%": settings.COMFYUI_FLUX_UNET or "Chroma1-HD.safetensors",
+                    # 出图底模可配：%UNET%=UNET-only 模板用(flux t2i)；%CKPT%=全合一 checkpoint 模板用(CivitAI 如 Fluxed Up)
+                    "%UNET%": settings.COMFYUI_FLUX_UNET or "flux1-dev.safetensors",
+                    "%CKPT%": settings.COMFYUI_FLUX_CKPT or "",
                 }
                 if use_lora:
                     mapping["%LORA%"] = os.path.basename(lora)

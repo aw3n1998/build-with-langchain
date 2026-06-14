@@ -130,6 +130,9 @@ class Settings(BaseSettings):
     # 出图底模(ComfyUI t2i 的 UNET 文件名，放在 ComfyUI/models/unet/ 下)。可插拔：
     # 默认 flux1-dev；换无审查 Fluxed Up 等 FLUX-dev 微调=改成它的 .safetensors 文件名(配自带 flux 模板)。
     COMFYUI_FLUX_UNET: str = "flux1-dev.safetensors"
+    # CivitAI 全合一 FLUX checkpoint(内含 CLIP+VAE，如 Fluxed Up)的文件名(在 ComfyUI/models/checkpoints/ 下)。
+    # 用它=COMFYUI_WORKFLOW_T2I 指 comfyui_workflows/t2i_checkpoint_template.json + 本项设为该文件名。
+    COMFYUI_FLUX_CKPT: str = ""
     # ComfyUI 后处理（放大/补帧）：合成后可选再过一道 workflow；留空=不做后处理
     COMFYUI_WORKFLOW_POST: str = ""       # 后处理 workflow 模板路径（空=关闭后处理）
     # Wan2.2-S2V 对口型（语音驱动）：人物开口说话的镜头用。图+音频→口型同步视频，走 ComfyUI。

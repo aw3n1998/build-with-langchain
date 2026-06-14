@@ -3,7 +3,7 @@
 # FLUX.1-dev / ae 是 gated：先 `hf auth login`(或设 HF_TOKEN 环境变量)。huggingface-cli 已废弃。
 set -e
 M=/content/ComfyUI/models
-mkdir -p "$M"/{unet,clip,vae,audio_encoders,loras,pulid,diffusion_models,text_encoders}
+mkdir -p "$M"/{unet,checkpoints,clip,vae,audio_encoders,loras,pulid,diffusion_models,text_encoders}
 
 # 跳过闸只认扁平路径 $3/$base；hf 会按 repo 子目录(HighNoise/、split_files/..)存，
 # 故下完立刻把文件挪到 $3/$base。即时扁平 = 中途被回收/打断时已下的也已就位，下次必 [skip]。
@@ -20,18 +20,26 @@ get() {  # repo  repo内路径  目标models子目录
 }
 
 # ── 出图底模（可配：换底模只设这几个 env，不改代码）──
-#   HF 模型:          export FLUX_BASE_REPO=org/name   FLUX_BASE_FILE=xxx.safetensors
-#   直链(Civitai 等):  export FLUX_BASE_URL=https://...  FLUX_BASE_FILE=xxx.safetensors
-#   都不设 → 默认下 flux1-dev（兜底）。换无审查 Fluxed Up 就把这几个 env 指向它。
+#   HF UNET-only:     export FLUX_BASE_REPO=org/name  FLUX_BASE_FILE=xxx.safetensors
+#   CivitAI 全合一:    export FLUX_BASE_URL=https://civitai.com/api/download/models/<版本号>?token=<你的CivitaiKey>
+#                      export FLUX_BASE_FILE=xxx.safetensors  FLUX_BASE_KIND=checkpoint
+#   都不设 → 默认下 flux1-dev（UNET-only 兜底）。
 FLUX_BASE_REPO="${FLUX_BASE_REPO:-black-forest-labs/FLUX.1-dev}"
 FLUX_BASE_FILE="${FLUX_BASE_FILE:-flux1-dev.safetensors}"
 FLUX_BASE_URL="${FLUX_BASE_URL:-}"
-if [ -s "$M/unet/$FLUX_BASE_FILE" ]; then
+FLUX_BASE_KIND="${FLUX_BASE_KIND:-unet}"   # unet=UNET-only(flux 模板) | checkpoint=全合一(CivitAI 如 Fluxed Up)
+BASE_DIR="$M/unet"; [ "$FLUX_BASE_KIND" = "checkpoint" ] && BASE_DIR="$M/checkpoints"
+mkdir -p "$BASE_DIR"
+if [ -s "$BASE_DIR/$FLUX_BASE_FILE" ]; then
   echo "[skip] $FLUX_BASE_FILE"
 elif [ -n "$FLUX_BASE_URL" ]; then
-  echo "[get url] $FLUX_BASE_FILE"; wget -q -O "$M/unet/$FLUX_BASE_FILE" "$FLUX_BASE_URL"
+  echo "[get url] $FLUX_BASE_FILE → $FLUX_BASE_KIND"
+  wget -q -O "$BASE_DIR/$FLUX_BASE_FILE" "$FLUX_BASE_URL"
+  # 直链失败常见:存成了 HTML 错误页(token/URL 错)。体积过小就报警。
+  sz=$(stat -c%s "$BASE_DIR/$FLUX_BASE_FILE" 2>/dev/null || echo 0)
+  [ "$sz" -lt 1000000 ] && echo "[warn] $FLUX_BASE_FILE 只有 ${sz}B,八成是 token/URL 错下成了错误页,请核对 FLUX_BASE_URL"
 else
-  get "$FLUX_BASE_REPO" "$FLUX_BASE_FILE" "$M/unet"
+  get "$FLUX_BASE_REPO" "$FLUX_BASE_FILE" "$BASE_DIR"
 fi
 # FLUX 系底模共用的 VAE(ae，gated 需 HF token) + 文本编码器(t5xxl + clip_l，flux t2i 模板用 DualCLIP)
 get black-forest-labs/FLUX.1-dev ae.safetensors        "$M/vae"
