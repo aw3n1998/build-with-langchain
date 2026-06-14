@@ -87,11 +87,13 @@ class ComfyUIProvider(VideoProvider):
             seed = int(time.time_ns() % 2_000_000_000)
         mapping = {
             "%PROMPT%": prompt or "",
-            "%NEG_PROMPT%": str(params.get("negative") or ""),
+            # 负向词没传就用 Wan 官方长串(压静止/过曝/morphing/畸形)——出图通用负向不适合视频。
+            "%NEG_PROMPT%": str(params.get("negative") or settings.WAN_VIDEO_NEGATIVE),
             "%WIDTH%": width, "%HEIGHT%": height,
             "%FRAMES%": int(params.get("frames") or settings.COMFYUI_FRAMES),
             "%FPS%": int(params.get("fps") or settings.COMFYUI_FPS),
             "%STEPS%": int(params.get("steps") or settings.COMFYUI_STEPS),
+            "%SHIFT%": float(params.get("shift") or settings.WAN_SHIFT),   # ModelSamplingSD3 必需
             "%SEED%": seed,
         }
         template = ch.load_workflow(settings.COMFYUI_WORKFLOW_I2V, "i2v_gguf_template.json", "i2v")

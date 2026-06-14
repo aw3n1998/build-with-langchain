@@ -524,6 +524,25 @@ def _s2v_frames_for_audio(seconds: float, fps: int, cap: int = 0, margin: float 
     return frames
 
 
+def _compose_wan_prompt(scene: dict, motion_prompt: str = "") -> str:
+    """把运镜词组装成 Wan2.2 i2v 友好的提示词。
+
+    Wan i2v 首帧已定外观 → prompt 重「运动+运镜+光影」而非复述外观(研究结论)。
+    运镜术语英文更稳(与出图英文管线一致),故英文化;再补镜头质感尾巴、压住「静止」。
+    """
+    base = (motion_prompt or scene.get("motion_prompt") or "").strip().rstrip("。.，,")
+    if not base:
+        base = "slow push-in, gentle natural motion"
+    if settings.IMAGE_PROMPT_AUTOTRANSLATE:
+        try:
+            from mirage.app.pipeline.prompt_gen import translate_to_english
+            base = (translate_to_english(base) or base).strip()
+        except Exception:  # noqa: BLE001
+            pass
+    tail = "smooth natural motion, cinematic lighting, shallow depth of field, film grain, high detail"
+    return f"{base}, {tail}"
+
+
 def _do_render_lipsync_s2v(scene_id, scene, asset, prompt, params) -> str:
     """对口型出片：取该镜旁白(=台词)→TTS→连同选中人物图喂 Wan2.2-S2V，出口型同步片(成片自带人声)。
 
@@ -637,7 +656,7 @@ def do_render_scene_video(
         n_seg = 1
     _cap = settings.MAX_CONTINUATION_SEGMENTS
     segments = min(n_seg, _cap) if _cap and _cap > 0 else n_seg
-    prompt = motion_prompt or scene.get("motion_prompt") or "缓慢推镜，电影质感，自然光影。"
+    prompt = _compose_wan_prompt(scene, motion_prompt)   # Wan i2v 友好:英文化+运镜+光影尾
     # 每段独立提示词（AI 生成的分段运镜）：有则逐段用，缺则回退到统一 prompt
     seg_prompts = merged.pop("motion_prompts", None) or []
     if not isinstance(seg_prompts, list):
@@ -678,7 +697,7 @@ def do_render_scene_video(
 
     try:
         for k in range(segments):
-            prompt_k = seg_prompts[k] if k < len(seg_prompts) and seg_prompts[k] else prompt
+            prompt_k = _compose_wan_prompt(scene, seg_prompts[k]) if (k < len(seg_prompts) and seg_prompts[k]) else prompt
             seg_local = final_local if segments == 1 else os.path.join(
                 local_dir, f"{scene['scene_number']:02d}_{scene_id}_seg{k + 1}.mp4")
             if is_http:
@@ -880,7 +899,7 @@ def append_scene_segment(scene_id: str, motion_prompt: str = "", model: str = ""
     seg_prompts = merged.pop("motion_prompts", None) or []
     if not isinstance(seg_prompts, list):
         seg_prompts = []
-    prompt_default = motion_prompt or scene.get("motion_prompt") or "缓慢推镜，电影质感，自然光影。"
+    prompt_default = _compose_wan_prompt(scene, motion_prompt)   # Wan i2v 友好(同主渲染)
     try:
         count = max(1, int(count or 1))
     except (TypeError, ValueError):
