@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     API_V1_STR: str = "/api/v1"
 
     # OpenAI / DeepSeek 配置 (优先从 .env 读取)
-    OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY")
+    OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY") or ""   # 缺 key 不崩；LLM 调用时才报错(出图/出片不需 LLM)
     OPENAI_API_BASE: str = "https://api.deepseek.com/v1"
     MODEL_NAME: str = "deepseek-chat"
     EMBEDDING_MODEL_NAME: str = "text-embedding-3-small"
