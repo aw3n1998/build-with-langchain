@@ -1341,9 +1341,12 @@ export function ProductionPanel({ message, workspace, sessionId }) {
           <option value={3}>接续×3</option>
         </select>
         <select value={vidSize} disabled={!!busy} onChange={e => setVidSize(e.target.value)}
-          title="出片分辨率" style={{ ...inputStyle, width: 'auto', height: 32 }}>
-          <option value="">默认分辨率</option>
+          title="出片分辨率 —— 480p 快(草稿/走量)，720p 精修(成片)。一键切，不用改 .env。" style={{ ...inputStyle, width: 'auto', height: 32 }}>
+          <option value="">默认(跟随 .env)</option>
+          <option value="480*832">480×832 竖屏·快(草稿)</option>
+          <option value="720*1280">720×1280 竖屏·精修</option>
           <option value="704*1280">704×1280 竖屏</option>
+          <option value="832*480">832×480 横屏·快</option>
           <option value="1280*704">1280×704 横屏</option>
         </select>
         {estSec != null && (
