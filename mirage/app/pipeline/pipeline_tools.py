@@ -750,7 +750,8 @@ def do_render_scene_video(
         # 多段拼接为最终成片：去重边界帧(尾帧接续每段首帧=上段末帧)，消除拼接处的一帧卡顿
         from mirage.app.pipeline.assembler import concat_videos
         try:
-            concat_videos(seg_locals, final_local, dedup_boundary=True)
+            concat_videos(seg_locals, final_local, dedup_boundary=True,
+                          crossfade=settings.VIDEO_SEAM_CROSSFADE)
         except Exception as e:  # noqa: BLE001
             store.set_scene_state(scene_id, SceneState.FAILED, force=True)
             return f"接续段拼接失败: {e}"

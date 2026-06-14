@@ -108,6 +108,9 @@ class Settings(BaseSettings):
         "画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，"
         "杂乱的背景，三条腿，背景人很多，倒着走"
     )
+    # 接续段拼接处接缝平滑:相邻段交叉淡化秒数(只在 segments≥2 时生效;单段无缝隙不受影响)。
+    # 0=关(硬拼,会有尾帧续接的运动跳/色闪);0.2≈3帧淡化,通常净改善。运动跳变极大若起叠影可调小或设 0。
+    VIDEO_SEAM_CROSSFADE: float = 0.2
     # ── 视频模型解耦：默认 Provider + LTX-Video 配置 ──────────────
     # 默认用哪个视频模型（对应 providers 注册名：wan2.2 / ltx）
     VIDEO_PROVIDER_DEFAULT: str = "wan2.2"

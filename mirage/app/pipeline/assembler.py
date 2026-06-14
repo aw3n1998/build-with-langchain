@@ -93,11 +93,15 @@ def extract_last_frame(video_path: str, out_png: str) -> str:
     return out_png
 
 
-def concat_videos(paths: list[str], out_path: str, dedup_boundary: bool = False) -> str:
+def concat_videos(paths: list[str], out_path: str, dedup_boundary: bool = False,
+                  crossfade: float = 0.0) -> str:
     """尾帧接续的多段合一。
 
+    crossfade>0：相邻段做 `xfade` 交叉淡化(重叠 crossfade 秒淡入淡出)，抹平尾帧续接的**运动跳/色闪**
+        ——这是接缝抖动的低成本兜底(短淡化~0.2s 通常净改善；运动跳变极大时可能轻微叠影，设 0 关闭)。
+        治本仍是潜空间多帧上下文续接，但那需换 ComfyUI 工作流；此处是纯 ffmpeg 的成片级平滑。优先于 dedup。
     dedup_boundary=True：尾帧接续里每段(除第一段)的**首帧 == 上一段的末帧**(拿末帧当起点生成的)，
-    直接拼会出现重复帧 → 拼接处一帧冻结、看着"小卡顿"。开启后用 concat 滤镜丢掉后续段的首帧、重编码无缝拼。
+        直接拼会出现重复帧 → 拼接处一帧冻结、看着"小卡顿"。开启后用 concat 滤镜丢掉后续段的首帧、重编码无缝拼。
     dedup_boundary=False：老行为，流复制(-c copy)快速拼，失败回退重编码。
     """
     ff = _ffmpeg()
@@ -105,7 +109,27 @@ def concat_videos(paths: list[str], out_path: str, dedup_boundary: bool = False)
     try:
         tmp_out = os.path.join(work, "out.mp4")
         ok = False
-        if dedup_boundary and len(paths) > 1:
+        if crossfade and crossfade > 0 and len(paths) > 1:
+            # 接缝交叉淡化:相邻段重叠 crossfade 秒淡入淡出。offset 按累计时长滚动计算。
+            durs = [_duration(p) for p in paths]
+            inputs = []
+            for p in paths:
+                inputs += ["-i", p]
+            fc = []
+            prev = "0:v"
+            running = durs[0]
+            for i in range(1, len(paths)):
+                off = max(0.0, running - crossfade)
+                lab = f"xf{i}"
+                fc.append(f"[{prev}][{i}:v]xfade=transition=fade:"
+                          f"duration={crossfade:.3f}:offset={off:.3f}[{lab}]")
+                prev = lab
+                running = running + durs[i] - crossfade
+            res = _run([ff, "-y", "-hide_banner", *inputs, "-filter_complex", ";".join(fc),
+                        "-map", f"[{prev}]", "-c:v", "libx264", "-preset", "veryfast",
+                        "-crf", "20", "-pix_fmt", "yuv420p", tmp_out], timeout=900)
+            ok = res.returncode == 0      # xfade 失败(尺寸/时长异常)→ 退回 dedup/copy
+        if not ok and dedup_boundary and len(paths) > 1:
             inputs = []
             for p in paths:
                 inputs += ["-i", p]
