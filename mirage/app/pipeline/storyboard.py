@@ -46,6 +46,19 @@ _SYSTEM = (
 _FIELDS = ("title", "image_prompt", "motion_prompt", "narration", "subtitle", "lipsync", "character")
 
 
+def _as_bool(v) -> bool:
+    """稳健解析 LLM 给的布尔：真布尔直接用，字符串按字面判定。
+
+    防 `bool("false") == True` 这类坑——LLM 偶尔把布尔写成字符串
+    "false"/"否"，直接 bool() 会因非空串恒真而把该镜误判成对口型。
+    """
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, str):
+        return v.strip().lower() in ("true", "1", "yes", "y", "是", "对", "真")
+    return bool(v)
+
+
 def _coerce_scenes(text: str, n: int, style: str = "") -> list[dict]:
     """把 LLM 输出解析成长度严格为 N 的分镜 dict 列表（健壮容错）。"""
     scenes: list[dict] = []
@@ -66,7 +79,7 @@ def _coerce_scenes(text: str, n: int, style: str = "") -> list[dict]:
                         "motion_prompt": str(it.get("motion_prompt") or "缓慢推近，自然光影").strip(),
                         "narration": str(it.get("narration") or "").strip(),
                         "subtitle": str(it.get("subtitle") or "").strip(),
-                        "lipsync": bool(it.get("lipsync")),
+                        "lipsync": _as_bool(it.get("lipsync")),
                         "character": str(it.get("character") or "").strip(),
                     })
         except Exception as e:  # noqa: BLE001
