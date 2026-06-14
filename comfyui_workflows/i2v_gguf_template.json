@@ -31,10 +31,10 @@
   "39": {
     "class_type": "VAELoader",
     "_meta": {
-      "title": "VAE (wan2.2)"
+      "title": "VAE — A14B(14B) 必用 wan_2.1_vae(16ch latent→拼I2V=36通道); wan2.2_vae 是 5B TI2V 专用,用错会 64≠36 通道崩"
     },
     "inputs": {
-      "vae_name": "wan2.2_vae.safetensors"
+      "vae_name": "wan_2.1_vae.safetensors"
     }
   },
   "6": {
