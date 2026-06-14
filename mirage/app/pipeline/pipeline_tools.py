@@ -525,22 +525,22 @@ def _s2v_frames_for_audio(seconds: float, fps: int, cap: int = 0, margin: float 
 
 
 def _compose_wan_prompt(scene: dict, motion_prompt: str = "") -> str:
-    """把运镜词组装成 Wan2.2 i2v 友好的提示词。
+    """把运镜词整理成 Wan2.2 i2v 提示词(尊重用户原意，不篡改)。
 
-    Wan i2v 首帧已定外观 → prompt 重「运动+运镜+光影」而非复述外观(研究结论)。
-    运镜术语英文更稳(与出图英文管线一致),故英文化;再补镜头质感尾巴、压住「静止」。
+    - **只在含中文时**翻成英文：已是英文的不再丢给 LLM「翻译」(否则会被改写/篡改原意)。
+    - **不追加任何运动描述**：旧版加 'smooth natural motion' 会和用户的 'crash zoom' 等
+      剧烈运动冲突 → 模型收到矛盾指令、出片对不上提示词。只补轻量画质词(不涉及运动)。
     """
     base = (motion_prompt or scene.get("motion_prompt") or "").strip().rstrip("。.，,")
     if not base:
-        base = "slow push-in, gentle natural motion"
-    if settings.IMAGE_PROMPT_AUTOTRANSLATE:
+        base = "slow push-in"
+    if settings.IMAGE_PROMPT_AUTOTRANSLATE and any("一" <= c <= "鿿" for c in base):
         try:
             from mirage.app.pipeline.prompt_gen import translate_to_english
             base = (translate_to_english(base) or base).strip()
         except Exception:  # noqa: BLE001
             pass
-    tail = "smooth natural motion, cinematic lighting, shallow depth of field, film grain, high detail"
-    return f"{base}, {tail}"
+    return f"{base}, cinematic lighting, high detail"
 
 
 def _do_render_lipsync_s2v(scene_id, scene, asset, prompt, params) -> str:
