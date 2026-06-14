@@ -15,6 +15,50 @@
   --accent:        #6366f1;
   --accent-hover:  #5254cc;
   --code-bg:       #0a0a0a;
+
+  /* ── 移动端「短剧工作台」设计系统 token（与桌面端共用底色）── */
+  --surface-card:   #161616;
+  --surface-code:   #0a0a0a;
+  --surface-raised: #1c1c1c;
+  --surface-sunken: #111111;
+  --text-primary:   rgba(255,255,255,0.87);
+  --text-secondary: rgba(255,255,255,0.52);
+  --text-faint:     rgba(255,255,255,0.18);
+  --text-on-accent: #ffffff;
+  --accent-press:   #5254cc;
+  --accent-soft:    rgba(99,102,241,0.16);
+  --accent-border:  rgba(99,102,241,0.40);
+  --logo-grad:      linear-gradient(135deg, #6366f1, #4338ca);
+  --green:  #34d399;  --green-soft:  rgba(52,211,153,0.14);
+  --purple: #c084fc;  --purple-soft: rgba(192,132,252,0.14);
+  --yellow: #eab308;  --yellow-soft: rgba(234,179,8,0.14);
+  --red:    #f87171;  --red-soft:    rgba(248,113,113,0.14);
+  --teal:   #00bdb0;  --teal-bright: #5fe8de;  --teal-soft: rgba(0,189,176,0.14);
+  --neutral-soft: rgba(255,255,255,0.06);
+  --scrim:  rgba(0,0,0,0.62);
+  --focus-ring: rgba(99,102,241,0.55);
+  /* 圆角 / 字体 / 时长 */
+  --r-card: 12px; --r-btn: 8px; --r-chip: 7px; --r-tag: 6px; --r-pill: 999px;
+  --font-sans: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Segoe UI', sans-serif;
+  --font-mono: 'SF Mono', 'Fira Code', ui-monospace, monospace;
+  --dur-fast: .12s; --dur-base: .2s; --dur-slow: .32s;
+  --ease-out: cubic-bezier(.22,.61,.36,1);
+  --shadow-sheet: 0 -8px 40px rgba(0,0,0,0.55);
+  --shadow-fab:   0 8px 24px rgba(67,56,202,0.45);
+  /* 布局 / 安全区（真机用 env()，桌面回退 0）*/
+  --gutter: 16px;
+  --topbar-h: 52px;
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* 隐藏滚动条（TabRail / 横向 chip 行用） */
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+.no-scrollbar::-webkit-scrollbar { display: none; }
+/* 状态徽章转圈 */
+@keyframes mirageSpin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  [style*="mirageSpin"] { animation: none !important; }
 }
 
 /* ── Reset ─────────────────────────────────────────── */
