@@ -1,0 +1,209 @@
+{
+  "37": {
+    "class_type": "UNETLoader",
+    "_meta": {
+      "title": "高噪专家 fp8_scaled(A100 原生FP8,免反量化,比GGUF快数倍)"
+    },
+    "inputs": {
+      "unet_name": "wan2.2_i2v_high_noise_14B_fp8_scaled.safetensors",
+      "weight_dtype": "fp8_e4m3fn_fast"
+    }
+  },
+  "41": {
+    "class_type": "UNETLoader",
+    "_meta": {
+      "title": "低噪专家 fp8_scaled (weight_dtype 报错就改 fp8_e4m3fn 或 default)"
+    },
+    "inputs": {
+      "unet_name": "wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors",
+      "weight_dtype": "fp8_e4m3fn_fast"
+    }
+  },
+  "38": {
+    "class_type": "CLIPLoader",
+    "_meta": {
+      "title": "文本编码器 umt5(fp8)"
+    },
+    "inputs": {
+      "clip_name": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+      "type": "wan",
+      "device": "default"
+    }
+  },
+  "39": {
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "VAE — A14B(14B) 必用 wan_2.1_vae(16ch latent→拼I2V=36通道); wan2.2_vae 是 5B TI2V 专用,用错会 64≠36 通道崩"
+    },
+    "inputs": {
+      "vae_name": "wan_2.1_vae.safetensors"
+    }
+  },
+  "6": {
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "正向提示词 %PROMPT%"
+    },
+    "inputs": {
+      "text": "%PROMPT%",
+      "clip": [
+        "38",
+        0
+      ]
+    }
+  },
+  "7": {
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "负向提示词 %NEG_PROMPT%"
+    },
+    "inputs": {
+      "text": "%NEG_PROMPT%",
+      "clip": [
+        "38",
+        0
+      ]
+    }
+  },
+  "52": {
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "参考图(首帧) %IMAGE%"
+    },
+    "inputs": {
+      "image": "%IMAGE%",
+      "upload": "image"
+    }
+  },
+  "55": {
+    "class_type": "WanImageToVideo",
+    "_meta": {
+      "title": "图生视频 i2v(核心自带,无需 WanVideoWrapper)"
+    },
+    "inputs": {
+      "positive": [
+        "6",
+        0
+      ],
+      "negative": [
+        "7",
+        0
+      ],
+      "vae": [
+        "39",
+        0
+      ],
+      "width": "%WIDTH%",
+      "height": "%HEIGHT%",
+      "length": "%FRAMES%",
+      "batch_size": 1,
+      "start_image": [
+        "52",
+        0
+      ]
+    }
+  },
+  "63": {
+    "class_type": "KSamplerAdvanced",
+    "_meta": {
+      "title": "高噪采样 0→15(add_noise=enable, 余噪传给低噪段; 总步数30)"
+    },
+    "inputs": {
+      "model": [
+        "37",
+        0
+      ],
+      "positive": [
+        "55",
+        0
+      ],
+      "negative": [
+        "55",
+        1
+      ],
+      "latent_image": [
+        "55",
+        2
+      ],
+      "add_noise": "enable",
+      "noise_seed": "%SEED%",
+      "steps": 30,
+      "cfg": 5.0,
+      "sampler_name": "uni_pc",
+      "scheduler": "simple",
+      "start_at_step": 0,
+      "end_at_step": 15,
+      "return_with_leftover_noise": "enable"
+    }
+  },
+  "64": {
+    "class_type": "KSamplerAdvanced",
+    "_meta": {
+      "title": "低噪采样 15→end(add_noise=disable; 总步数30)"
+    },
+    "inputs": {
+      "model": [
+        "41",
+        0
+      ],
+      "positive": [
+        "55",
+        0
+      ],
+      "negative": [
+        "55",
+        1
+      ],
+      "latent_image": [
+        "63",
+        0
+      ],
+      "add_noise": "disable",
+      "noise_seed": "%SEED%",
+      "steps": 30,
+      "cfg": 5.0,
+      "sampler_name": "uni_pc",
+      "scheduler": "simple",
+      "start_at_step": 15,
+      "end_at_step": 10000,
+      "return_with_leftover_noise": "disable"
+    }
+  },
+  "8": {
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "解码"
+    },
+    "inputs": {
+      "samples": [
+        "64",
+        0
+      ],
+      "vae": [
+        "39",
+        0
+      ]
+    }
+  },
+  "57": {
+    "class_type": "VHS_VideoCombine",
+    "_meta": {
+      "title": "合成 mp4 (VideoHelperSuite)"
+    },
+    "inputs": {
+      "images": [
+        "8",
+        0
+      ],
+      "frame_rate": "%FPS%",
+      "loop_count": 0,
+      "filename_prefix": "mirage_i2v_a14b_fp8",
+      "format": "video/h264-mp4",
+      "pix_fmt": "yuv420p",
+      "crf": 19,
+      "save_metadata": true,
+      "pingpong": false,
+      "save_output": true
+    }
+  }
+}

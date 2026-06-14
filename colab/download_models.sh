@@ -52,9 +52,14 @@ if [ "$FLUX_BASE_KIND" != "checkpoint" ]; then
   get comfyanonymous/flux_text_encoders clip_l.safetensors     "$M/clip"
 fi
 
-# ── Wan2.2-I2V-A14B 双专家 GGUF(Q5_K_M，各 ~10.8GB)──
-get QuantStack/Wan2.2-I2V-A14B-GGUF HighNoise/Wan2.2-I2V-A14B-HighNoise-Q5_K_M.gguf "$M/unet"
-get QuantStack/Wan2.2-I2V-A14B-GGUF LowNoise/Wan2.2-I2V-A14B-LowNoise-Q5_K_M.gguf   "$M/unet"
+# ── Wan2.2-I2V-A14B 双专家 —— 默认 fp8_scaled(A100 原生 FP8 张量核,免反量化,比 GGUF 快数倍；各 ~14.3G)──
+#    放 diffusion_models/(UNETLoader 从这读)；走 i2v_fp8_template.json。
+get Comfy-Org/Wan_2.2_ComfyUI_Repackaged split_files/diffusion_models/wan2.2_i2v_high_noise_14B_fp8_scaled.safetensors "$M/diffusion_models"
+get Comfy-Org/Wan_2.2_ComfyUI_Repackaged split_files/diffusion_models/wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors  "$M/diffusion_models"
+# 低显存卡(<24G)才用 GGUF Q5_K_M(各~10.8G,逐步反量化、慢;40G A100 别用)。
+# 要用就取消下两行注释 + 把 COMFYUI_WORKFLOW_I2V 指回 i2v_gguf_template.json：
+# get QuantStack/Wan2.2-I2V-A14B-GGUF HighNoise/Wan2.2-I2V-A14B-HighNoise-Q5_K_M.gguf "$M/unet"
+# get QuantStack/Wan2.2-I2V-A14B-GGUF LowNoise/Wan2.2-I2V-A14B-LowNoise-Q5_K_M.gguf   "$M/unet"
 get Comfy-Org/Wan_2.2_ComfyUI_Repackaged split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors "$M/clip"
 get Comfy-Org/Wan_2.2_ComfyUI_Repackaged split_files/vae/wan2.2_vae.safetensors "$M/vae"
 
