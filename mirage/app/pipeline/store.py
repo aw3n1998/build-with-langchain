@@ -414,14 +414,17 @@ class PipelineStore:
         return [dict(r) for r in rows]
 
     def set_scene_state(self, scene_id: str, new_state: SceneState, *, force: bool = False) -> dict:
-        scene = self.get_scene(scene_id)
-        if not scene:
-            raise ValueError(f"分镜不存在: {scene_id}")
-        cur = SceneState(scene["state"])
         new_state = SceneState(new_state)
-        if not force and new_state not in _ALLOWED_TRANSITIONS.get(cur, set()) and new_state != cur:
-            raise TransitionError(f"非法状态流转: {cur.value} → {new_state.value}")
+        # 读取当前态 + 合法性校验 + 写入 放在同一把锁、同一连接里完成，
+        # 否则"先 get_scene 校验、再开锁更新"之间会有 TOCTOU 窗口：
+        # 并发(或批量出片)时校验通过后状态被别的线程改掉，仍按旧判断写入，可越过状态机。
         with self._lock, self._conn() as conn:
+            row = conn.execute("SELECT state FROM scenes WHERE id=?", (scene_id,)).fetchone()
+            if not row:
+                raise ValueError(f"分镜不存在: {scene_id}")
+            cur = SceneState(row["state"])
+            if not force and new_state not in _ALLOWED_TRANSITIONS.get(cur, set()) and new_state != cur:
+                raise TransitionError(f"非法状态流转: {cur.value} → {new_state.value}")
             conn.execute(
                 "UPDATE scenes SET state=?, updated_at=? WHERE id=?",
                 (new_state.value, _now(), scene_id),
