@@ -41,10 +41,13 @@ elif [ -n "$FLUX_BASE_URL" ]; then
 else
   get "$FLUX_BASE_REPO" "$FLUX_BASE_FILE" "$BASE_DIR"
 fi
-# FLUX 系底模共用的 VAE(ae，gated 需 HF token) + 文本编码器(t5xxl + clip_l，flux t2i 模板用 DualCLIP)
-get black-forest-labs/FLUX.1-dev ae.safetensors        "$M/vae"
-get comfyanonymous/flux_text_encoders t5xxl_fp16.safetensors "$M/clip"
-get comfyanonymous/flux_text_encoders clip_l.safetensors     "$M/clip"
+# UNET-only 模板才需单独的 ae/t5xxl/clip_l(flux t2i 用 DualCLIP+VAELoader)；
+# 全合一 checkpoint(如 Fluxed Up)已内置 CLIP+VAE → 跳过省 ~10G，且省掉 gated 的 ae(可不用 HF_TOKEN)。
+if [ "$FLUX_BASE_KIND" != "checkpoint" ]; then
+  get black-forest-labs/FLUX.1-dev ae.safetensors        "$M/vae"       # gated 需 HF token
+  get comfyanonymous/flux_text_encoders t5xxl_fp16.safetensors "$M/clip"
+  get comfyanonymous/flux_text_encoders clip_l.safetensors     "$M/clip"
+fi
 
 # ── Wan2.2-I2V-A14B 双专家 GGUF(Q5_K_M，各 ~10.8GB)──
 get QuantStack/Wan2.2-I2V-A14B-GGUF HighNoise/Wan2.2-I2V-A14B-HighNoise-Q5_K_M.gguf "$M/unet"
