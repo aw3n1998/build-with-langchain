@@ -104,7 +104,7 @@
   "63": {
     "class_type": "KSamplerAdvanced",
     "_meta": {
-      "title": "高噪采样 0→10(add_noise=enable, 余噪传给低噪段)"
+      "title": "高噪采样 0→15(add_noise=enable, 余噪传给低噪段; 总步数30)"
     },
     "inputs": {
       "model": [
@@ -125,19 +125,19 @@
       ],
       "add_noise": "enable",
       "noise_seed": "%SEED%",
-      "steps": 20,
+      "steps": 30,
       "cfg": 5.0,
       "sampler_name": "uni_pc",
       "scheduler": "simple",
       "start_at_step": 0,
-      "end_at_step": 10,
+      "end_at_step": 15,
       "return_with_leftover_noise": "enable"
     }
   },
   "64": {
     "class_type": "KSamplerAdvanced",
     "_meta": {
-      "title": "低噪采样 10→end(add_noise=disable)"
+      "title": "低噪采样 15→end(add_noise=disable; 总步数30)"
     },
     "inputs": {
       "model": [
@@ -158,11 +158,11 @@
       ],
       "add_noise": "disable",
       "noise_seed": "%SEED%",
-      "steps": 20,
+      "steps": 30,
       "cfg": 5.0,
       "sampler_name": "uni_pc",
       "scheduler": "simple",
-      "start_at_step": 10,
+      "start_at_step": 15,
       "end_at_step": 10000,
       "return_with_leftover_noise": "disable"
     }

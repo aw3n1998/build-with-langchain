@@ -43,7 +43,7 @@ class Settings(BaseSettings):
     # 服务器端路径
     GPU_PYTHON: str = "/root/autodl-tmp/miniconda3/bin/python"
     GPU_WAN_REPO: str = "/root/autodl-tmp/Wan2.2"
-    GPU_WAN_CKPT: str = "/root/autodl-tmp/models/Wan-AI/Wan2.2-TI2V-5B"
+    GPU_WAN_CKPT: str = "/root/autodl-tmp/models/Wan-AI/Wan2.2-I2V-A14B"   # A14B 双专家(5B 已彻底弃用)
     GPU_FLUX_SCRIPT: Optional[str] = None           # 旧版单图脚本（已弃用，保留向后兼容）
     GPU_OUTPUT_DIR: str = "/root/autodl-tmp/pipeline_out"
     GPU_SCENES_DIR: str = "/root/autodl-tmp/cael_scenes"
@@ -66,6 +66,9 @@ class Settings(BaseSettings):
     # 人物 LoRA 训练：门控。空=训练后端未接入(只暂存图片+配置，不真跑)；填了 Colab/服务器训练服务地址才真训。
     LORA_TRAIN_ENDPOINT: str = ""        # 训练后端接入点(等 Colab 起训练服务后填)
     LORA_TRAIN_STEPS: int = 1200         # 默认训练步数
+    # 人物 LoRA 训练底模。务必与出图底模(GPU_FLUX_BASE / COMFYUI_FLUX_UNET)同源，否则训出的 LoRA 不通用。
+    # 强 NSFW：把它指向无审查 FLUX 系底模(HF id 或本地路径)。仅限原创虚构成年角色，遵守合规前置(立项报告第 4 章)。
+    LORA_TRAIN_BASE: str = "black-forest-labs/FLUX.1-dev"
     # 出图前把中文 image_prompt 自动翻成英文（FLUX-dev 读不懂中文，会退化成动漫人像）。
     # 仅对 prompt_lang=="en" 的出图模型生效；对用户隐形。要关：.env 里设 IMAGE_PROMPT_AUTOTRANSLATE=false
     IMAGE_PROMPT_AUTOTRANSLATE: bool = True
@@ -77,10 +80,10 @@ class Settings(BaseSettings):
     VISION_MODEL: str = ""           # 如 qwen-vl-max / gpt-4o
     VISION_API_KEY: str = ""
     VISION_TIMEOUT: int = 60
-    # Wan2.2 已验证可跑通的省显存配置（单卡 24G）
+    # Wan2.2-I2V-A14B 原生最强出片（A100；5B 已彻底弃用）。守住原生 720p 级分辨率，别盲目超分。
     WAN_SIZE: str = "704*1280"
-    WAN_FRAME_NUM: int = 25
-    WAN_SAMPLE_STEPS: int = 25
+    WAN_FRAME_NUM: int = 81           # A14B/A100 单段更长更连贯、少接续缝（旧 24G 的 25 帧上限已取消）
+    WAN_SAMPLE_STEPS: int = 30        # 原生最强：步数提到 30（可上探 40，更慢更稳）
     # ── 视频模型解耦：默认 Provider + LTX-Video 配置 ──────────────
     # 默认用哪个视频模型（对应 providers 注册名：wan2.2 / ltx）
     VIDEO_PROVIDER_DEFAULT: str = "wan2.2"
@@ -110,19 +113,22 @@ class Settings(BaseSettings):
     # 对口型(S2V)单段一口气帧数上限：防 24G OOM/超长。0=不限，帧数完全跟音频走；
     # 若长台词 OOM，可设为如 113（≈7s@16fps），超长会告警并建议拆句/分镜。
     COMFYUI_S2V_MAX_FRAMES: int = 0
-    COMFYUI_STEPS: int = 20               # 默认采样步数
+    COMFYUI_STEPS: int = 30               # 默认采样步数（原生最强；A14B GGUF 模板内步数已同步为 30）
     # ── 合成连贯性 ──
     # 镜间交叉叠化(秒)：0=硬切；0.4 左右让镜头切换更顺、减少"散"。失败自动回退硬切。
     ASSEMBLE_CROSSFADE: float = 0.4
     # 背景音乐文件(本地路径)：设了就在整片下垫一条低音量 BGM(贯穿全集=最便宜的连贯感)；空=不加。
     BGM_PATH: str = ""
     BGM_VOLUME: float = 0.18              # BGM 相对音量(垫在旁白下，别盖过人声)
-    COMFYUI_SIZE: str = "480*832"         # 默认分辨率（宽*高）
+    COMFYUI_SIZE: str = "720*1280"        # 默认分辨率（宽*高）：原生最强守住 720p 竖屏（旧 480*832 是快出档）
     # ComfyUI 文生图（t2i）：把出图也接到 ComfyUI（GGUF Flux / 更好采样器 / LoRA 叠加）
     COMFYUI_WORKFLOW_T2I: str = ""        # t2i workflow 模板路径；空=用仓库自带 comfyui_workflows/t2i_template.json
     COMFYUI_T2I_SIZE: str = "768*1024"    # 出图默认分辨率（宽*高）
     COMFYUI_T2I_STEPS: int = 28           # 出图默认采样步数
     COMFYUI_T2I_N: int = 4                # 一次出几张候选图
+    # 出图底模(ComfyUI t2i 的 UNET 文件名，放在 ComfyUI/models/unet/ 下)。可插拔：
+    # 强 NSFW 把它指向无审查 FLUX 系底模文件即可；同一底模也要做对应人物 LoRA 训练(见 LORA_TRAIN_BASE)。
+    COMFYUI_FLUX_UNET: str = "flux1-dev.safetensors"
     # ComfyUI 后处理（放大/补帧）：合成后可选再过一道 workflow；留空=不做后处理
     COMFYUI_WORKFLOW_POST: str = ""       # 后处理 workflow 模板路径（空=关闭后处理）
     # Wan2.2-S2V 对口型（语音驱动）：人物开口说话的镜头用。图+音频→口型同步视频，走 ComfyUI。

@@ -10,7 +10,7 @@ ComfyUI 出片 Provider（图生视频，i2v）—— 通过 ComfyUI 的 HTTP AP
   - transport = "http"：不走 SSH/GpuClient。do_render_scene_video 检测到后会走「纯本地」分支，
     把本地参考图交给本 Provider，本 Provider 自己 HTTP 上传到 ComfyUI、提交、轮询、下载到本地 out。
   - 不绑死机器：端点由 settings.COMFYUI_BASE_URL 配置，换机器只改这一个地址。
-  - 不硬编码 workflow：读 settings.COMFYUI_WORKFLOW_I2V（或仓库自带 comfyui_workflows/i2v_template.json），
+  - 不硬编码 workflow：读 settings.COMFYUI_WORKFLOW_I2V（或仓库自带 comfyui_workflows/i2v_gguf_template.json，A14B 双专家），
     按占位符 %IMAGE%/%PROMPT%/%NEG_PROMPT%/%WIDTH%/%HEIGHT%/%FRAMES%/%FPS%/%STEPS%/%SEED% 填值后提交。
 
 HTTP 调用（上传/提交/轮询/下载/填模板）统一走 pipeline/comfy_http.py 的共享 helper。
@@ -94,7 +94,7 @@ class ComfyUIProvider(VideoProvider):
             "%STEPS%": int(params.get("steps") or settings.COMFYUI_STEPS),
             "%SEED%": seed,
         }
-        template = ch.load_workflow(settings.COMFYUI_WORKFLOW_I2V, "i2v_template.json", "i2v")
+        template = ch.load_workflow(settings.COMFYUI_WORKFLOW_I2V, "i2v_gguf_template.json", "i2v")
         t0 = time.time()
         client_id = f"mirage-{os.getpid()}-{int(t0)}"
         with httpx.Client() as client:

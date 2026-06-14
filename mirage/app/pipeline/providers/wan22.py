@@ -1,10 +1,12 @@
 """
-Wan2.2-TI2V-5B 视频 Provider —— 把原先写死在 gpu_client.generate_video 的命令搬到这里。
+Wan2.2-I2V-A14B 视频 Provider（SSH 路径；5B 已彻底弃用）。
 
-已验证可跑通的省显存配置（单卡 24G）：
-  generate.py --task ti2v-5B --size 704*1280 --frame_num 25 --sample_steps 25
-  --offload_model True --convert_model_dtype --t5_cpu
-  （env 前缀在 GpuClient.run 里统一注入：OpenSSL legacy / CUDA 碎片化 / nvjitlink 路径）
+A14B 双专家、原生最强出片。A100-40G 用 --offload_model True 交换高/低噪专家以放下
+（80G 可去掉 offload 更快）。
+  generate.py --task i2v-A14B --size 704*1280 --frame_num 81 --sample_steps 30
+  --offload_model True --convert_model_dtype
+  （注：Colab 实际走 ComfyUI 的 A14B GGUF 模板；本 SSH 路径为可选后端。
+   env 前缀在 GpuClient.run 里统一注入：OpenSSL legacy / CUDA 碎片化 / nvjitlink 路径）
 """
 
 from __future__ import annotations
@@ -26,7 +28,7 @@ logger = get_logger("pipeline.providers.wan22")
 
 class Wan22Provider(VideoProvider):
     name = "wan2.2"
-    display_name = "Wan2.2-TI2V-5B"
+    display_name = "Wan2.2-I2V-A14B"
     capabilities = {"i2v"}
 
     def param_schema(self) -> list[dict]:
@@ -41,9 +43,9 @@ class Wan22Provider(VideoProvider):
                     {"value": "960*960", "label": "960×960 方形"},
                 ],
             },
-            {"key": "frame_num", "label": "帧数(≤25稳)", "type": "number",
+            {"key": "frame_num", "label": "帧数", "type": "number",
              "default": settings.WAN_FRAME_NUM,
-             "help": "总帧数，决定视频长度（约 帧数÷24 秒）。越多越长越吃显存，24G 显卡建议不超过 25 帧。"},
+             "help": "总帧数，决定视频长度（约 帧数÷帧率 秒）。A14B/A100 常用 81（≈5 秒）；越多越长越吃时间。"},
             {"key": "sample_steps", "label": "采样步数", "type": "number",
              "default": settings.WAN_SAMPLE_STEPS, "advanced": True,
              "help": "去噪迭代次数。越大画质/稳定性略好但越慢，一般 20-30。"},
@@ -60,9 +62,10 @@ class Wan22Provider(VideoProvider):
 
         cmd = (
             f"cd {shlex.quote(repo)} && {shlex.quote(py)} generate.py "
-            f"--task ti2v-5B --size {shlex.quote(size)} "
+            f"--task i2v-A14B --size {shlex.quote(size)} "
             f"--ckpt_dir {shlex.quote(ckpt)} "
-            f"--offload_model True --convert_model_dtype --t5_cpu "
+            # A14B 双专家：A100-40G 用 offload 交换高/低噪专家以放下；80G 可去掉 offload 提速
+            f"--offload_model True --convert_model_dtype "
             f"--frame_num {frame_num} --sample_steps {sample_steps} "
             f"--image {shlex.quote(image_path)} "
             f"--prompt {shlex.quote(prompt)} "

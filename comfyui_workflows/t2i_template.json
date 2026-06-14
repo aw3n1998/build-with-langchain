@@ -2,7 +2,7 @@
   "10": {
     "class_type": "UNETLoader",
     "inputs": {
-      "unet_name": "flux1-dev.safetensors",
+      "unet_name": "%UNET%",
       "weight_dtype": "default"
     }
   },
