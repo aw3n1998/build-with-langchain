@@ -117,6 +117,27 @@ def _tail(path: str, n: int) -> str:
         return ""
 
 
+def _link_after_train(store, tid: str, trigger: str, final: str) -> None:
+    """训练完成回写：① 绑定角色记下 trained_lora_id(反向链)；
+    ② 项目若还没设出图 LoRA，自动把这枚 LoRA 应用为本剧出图 LoRA(单主角短剧直接生效；
+    不覆盖已有设置，避免抢用户手设的风格)。"""
+    t = store.get_lora_training(tid) or {}
+    cid = t.get("char_id")
+    if cid:
+        try:
+            store.update_character(cid, trained_lora_id=tid)
+        except Exception:  # noqa: BLE001
+            pass
+    pid = t.get("project_id")
+    if pid:
+        try:
+            st = store.get_project_style(pid)
+            if not (st.get("flux_lora") or "").strip():
+                store.update_project_style(pid, flux_lora=os.path.basename(final), trigger_word=trigger)
+        except Exception:  # noqa: BLE001
+            pass
+
+
 def _do_train_local(store, tid: str, dataset_dir: str, trigger: str, name: str,
                     base: str, steps: int) -> None:
     """后台线程：跑 ai-toolkit → 拷贝产物到 loras → 更新 DB 状态。"""
@@ -156,6 +177,10 @@ def _do_train_local(store, tid: str, dataset_dir: str, trigger: str, name: str,
         store.update_lora_training(
             tid, status="DONE", output_path=final, trigger_word=trigger,
             message=f"训练完成 ✓ LoRA → {os.path.basename(final)}（出图按文件名加载，触发词「{trigger}」）")
+        try:
+            _link_after_train(store, tid, trigger, final)
+        except Exception:  # noqa: BLE001
+            logger.warning("训练完成后回写角色/项目失败 tid=%s", tid)
         logger.info("LoRA 训练完成 tid=%s → %s", tid, final)
     except Exception as e:  # noqa: BLE001
         logger.exception("LoRA 训练异常 tid=%s", tid)

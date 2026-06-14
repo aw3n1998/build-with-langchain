@@ -1337,6 +1337,8 @@ class CharacterRequest(BaseModel):
     name: str | None = None
     appearance: str | None = None
     voice: str | None = None      # edge-tts 音色名，如 zh-CN-YunxiNeural
+    ref_image_path: str | None = None   # 参考脸图路径(PuLID 单脸自举/展示)
+    trained_lora_id: str | None = None  # 关联已训 LoRA(lora_trainings.id)
 
 
 @router.post("/pipeline/characters")
@@ -1349,7 +1351,8 @@ async def pipeline_characters(req: CharacterRequest):
     if act == "add":
         store.add_character(req.project_id, req.name or "", req.appearance or "", req.voice or "")
     elif act == "update" and req.char_id:
-        store.update_character(req.char_id, name=req.name, appearance=req.appearance, voice=req.voice)
+        store.update_character(req.char_id, name=req.name, appearance=req.appearance, voice=req.voice,
+                               ref_image_path=req.ref_image_path, trained_lora_id=req.trained_lora_id)
     elif act == "delete" and req.char_id:
         store.delete_character(req.char_id)
     return {"project_id": req.project_id, "characters": store.list_characters(req.project_id)}

@@ -87,6 +87,8 @@ CREATE TABLE IF NOT EXISTS characters (
     name        TEXT NOT NULL DEFAULT '',
     appearance  TEXT NOT NULL DEFAULT '',
     voice       TEXT NOT NULL DEFAULT '',
+    ref_image_path  TEXT NOT NULL DEFAULT '',   -- 参考脸图(PuLID 单脸自举/展示)
+    trained_lora_id TEXT NOT NULL DEFAULT '',   -- 已训 LoRA → lora_trainings.id(反向链)
     created_at  TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_characters_project ON characters(project_id);
@@ -182,6 +184,12 @@ class PipelineStore:
             if col not in pcols:
                 conn.execute(f"ALTER TABLE projects ADD COLUMN {col} TEXT NOT NULL DEFAULT ''")
                 logger.info("[PipelineStore] 迁移：projects 补列 %s", col)
+        # 角色参考脸 + 已训 LoRA 反向链：旧库给 characters 补列
+        ccols = {r[1] for r in conn.execute("PRAGMA table_info(characters)").fetchall()}
+        for col in ("ref_image_path", "trained_lora_id"):
+            if col not in ccols:
+                conn.execute(f"ALTER TABLE characters ADD COLUMN {col} TEXT NOT NULL DEFAULT ''")
+                logger.info("[PipelineStore] 迁移：characters 补列 %s", col)
 
     # ── 项目 ──────────────────────────────────────────────────────
     def create_project(self, title: str, novel_text: str = "") -> dict:
@@ -254,14 +262,17 @@ class PipelineStore:
             ).fetchall()
         return [dict(r) for r in rows]
 
-    def add_character(self, project_id: str, name: str, appearance: str = "", voice: str = "") -> dict:
+    def add_character(self, project_id: str, name: str, appearance: str = "", voice: str = "",
+                      ref_image_path: str = "", trained_lora_id: str = "") -> dict:
         if not self.get_project(project_id):
             raise ValueError(f"项目不存在: {project_id}")
         cid = _uid()
         with self._lock, self._conn() as conn:
             conn.execute(
-                "INSERT INTO characters(id,project_id,name,appearance,voice,created_at) VALUES(?,?,?,?,?,?)",
-                (cid, project_id, name or "", appearance or "", voice or "", _now()),
+                "INSERT INTO characters(id,project_id,name,appearance,voice,ref_image_path,trained_lora_id,created_at) "
+                "VALUES(?,?,?,?,?,?,?,?)",
+                (cid, project_id, name or "", appearance or "", voice or "",
+                 ref_image_path or "", trained_lora_id or "", _now()),
             )
         return self.get_character(cid)
 
@@ -271,9 +282,11 @@ class PipelineStore:
         return dict(row) if row else None
 
     def update_character(self, char_id: str, *, name: str | None = None,
-                         appearance: str | None = None, voice: str | None = None) -> dict:
+                         appearance: str | None = None, voice: str | None = None,
+                         ref_image_path: str | None = None, trained_lora_id: str | None = None) -> dict:
         sets, params = [], []
-        for col, val in (("name", name), ("appearance", appearance), ("voice", voice)):
+        for col, val in (("name", name), ("appearance", appearance), ("voice", voice),
+                         ("ref_image_path", ref_image_path), ("trained_lora_id", trained_lora_id)):
             if val is not None:
                 sets.append(f"{col}=?"); params.append(val)
         if sets:
