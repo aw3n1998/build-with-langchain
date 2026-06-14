@@ -647,7 +647,9 @@ def do_render_scene_video(
 
     provider = video_provider_registry.get(model)
     is_http = getattr(provider, "transport", "ssh") == "http"   # http(ComfyUI)：全程本地，不碰 SSH
-    merged = {**provider.default_params(), **{k: v for k, v in params.items() if v not in (None, "", 0)}}
+    # 只剔除真正"未设置"的(None / 空串)；保留数值 0——seed=0 是合法可复现种子，
+    # 旧的 `not in (None, "", 0)` 会连 0(及 False)一起吞掉，导致 seed=0 落空回退随机。
+    merged = {**provider.default_params(), **{k: v for k, v in params.items() if v is not None and v != ""}}
     # 尾帧接续段数（流水线级参数，不传给模型）：每段取末帧作为下一段输入，拼成连续长镜头。
     # 段数不写死：上限由 settings.MAX_CONTINUATION_SEGMENTS 决定（0=不限）。
     try:
