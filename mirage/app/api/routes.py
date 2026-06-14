@@ -1434,17 +1434,17 @@ async def pipeline_lora_trainings(req: LoraActionRequest):
         t = store.get_lora_training(req.training_id)
         if not t:
             raise HTTPException(status_code=404, detail="训练任务不存在")
-        if int(t.get("image_count") or 0) < 5:
-            store.update_lora_training(req.training_id, status="DRAFT",
-                                       message="参考图太少：至少 5 张，建议 10-20 张同一人物多角度清晰照。")
-        elif not settings.LORA_TRAIN_ENDPOINT:
+        from mirage.app.pipeline import lora_train
+        ddir = _lora_dir(req.training_id)
+        imgs = lora_train.count_images(ddir)        # 以磁盘为准(上传/自举都落这)
+        store.update_lora_training(req.training_id, image_count=imgs)
+        if imgs < 5:
             store.update_lora_training(
-                req.training_id, status="PENDING_BACKEND", steps=settings.LORA_TRAIN_STEPS,
-                message="训练后端未接入（等 Colab）。图片+配置已暂存，Colab 训练服务接好后一键开训。")
+                req.training_id, status="DRAFT",
+                message="参考图太少：至少 5 张。可手动上传，或用『自动造训练集』免上传生成一套。")
         else:
-            # TODO: 真正派发到 LORA_TRAIN_ENDPOINT(Colab 训练服务)；现框架先标 QUEUED
-            store.update_lora_training(req.training_id, status="QUEUED",
-                                       steps=settings.LORA_TRAIN_STEPS, message="已派发到训练后端，排队中。")
+            # 本地 ai-toolkit 子进程(默认)或远程派发(LORA_TRAIN_ENDPOINT 非空)，执行器内部判定
+            lora_train.start_training(store, req.training_id, ddir)
     return {"project_id": req.project_id, "trainings": store.list_lora_trainings(req.project_id)}
 
 
