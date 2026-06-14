@@ -73,11 +73,9 @@ def maybe_postprocess(video_path: str, *, fps: int = 0) -> dict:
             if not vids:
                 raise RuntimeError("后处理完成但没找到视频产物")
             ch.download_view(client, base, vids[0], tmp_out)
-        # 就地替换原片（临时目录可能跨盘，用 move 不用 replace）
-        import shutil
-        if os.path.exists(video_path):
-            os.remove(video_path)
-        shutil.move(tmp_out, video_path)
+        # 就地原子替换：tmp_out 与原片同目录同盘，os.replace 原子覆盖。
+        # 不能"先 remove 原片再 move"——move 万一失败(占用/满盘)会两头落空、丢掉成片。
+        os.replace(tmp_out, video_path)
         logger.info("[postprocess] 后处理完成 %.0fs → %s", time.time() - t0, video_path)
         return {"applied": True, "note": "ok"}
     except Exception as e:  # noqa: BLE001 - 失败安全：保留原片
