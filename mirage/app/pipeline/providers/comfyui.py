@@ -35,7 +35,7 @@ logger = get_logger("pipeline.providers.comfyui")
 
 class ComfyUIProvider(VideoProvider):
     # 默认元信息仅用于独立测试；正式注册时由 providers/__init__ 顶替成公开模型名
-    # （如 name="wan2.2", display_name="Wan2.2-TI2V-5B"），用户因此看不到「ComfyUI」字样。
+    # （如 name="wan2.2", display_name="Wan2.2-I2V-A14B"），用户因此看不到「ComfyUI」字样。
     name = "comfyui"
     display_name = "ComfyUI (i2v)"
     capabilities = {"i2v"}

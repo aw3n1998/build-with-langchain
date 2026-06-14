@@ -32,23 +32,32 @@ class Wan22Provider(VideoProvider):
     capabilities = {"i2v"}
 
     def param_schema(self) -> list[dict]:
+        # 字段与 ComfyUI provider 对齐(frames/fps/steps/negative/seed)，保证 SSH/ComfyUI 两条后端
+        # 参数卡完全一致——避免「Colab 4 个、本地 2 个」的混乱。generate() 内部把 frames→--frame_num、
+        # steps→--sample_steps 映射回 SSH 脚本参数(并兼容旧键 frame_num/sample_steps)。
         return [
             {
-                "key": "size", "label": "分辨率", "type": "select",
+                "key": "size", "label": "分辨率(宽*高)", "type": "select",
                 "default": settings.WAN_SIZE,
-                "help": "成片画面尺寸。竖屏适合手机短视频，横屏适合横版播放。",
+                "help": "成片宽×高。竖屏适合手机；越大越清晰也越慢。",
                 "options": [
-                    {"value": "704*1280", "label": "704×1280 竖屏"},
-                    {"value": "1280*704", "label": "1280×704 横屏"},
-                    {"value": "960*960", "label": "960×960 方形"},
+                    {"value": "480*832", "label": "480×832 竖屏快出"},
+                    {"value": "720*1280", "label": "720×1280 竖屏高清"},
+                    {"value": "832*480", "label": "832×480 横屏快出"},
+                    {"value": "1280*720", "label": "1280×720 横屏高清"},
                 ],
             },
-            {"key": "frame_num", "label": "帧数", "type": "number",
-             "default": settings.WAN_FRAME_NUM,
-             "help": "总帧数，决定视频长度（约 帧数÷帧率 秒）。A14B/A100 常用 81（≈5 秒）；越多越长越吃时间。"},
-            {"key": "sample_steps", "label": "采样步数", "type": "number",
-             "default": settings.WAN_SAMPLE_STEPS, "advanced": True,
-             "help": "去噪迭代次数。越大画质/稳定性略好但越慢，一般 20-30。"},
+            {"key": "frames", "label": "帧数", "type": "number", "default": settings.WAN_FRAME_NUM,
+             "help": "总帧数。时长≈帧数÷帧率。A14B 常用 81（≈5 秒）。"},
+            {"key": "fps", "label": "帧率", "type": "number", "default": settings.COMFYUI_FPS,
+             "help": "每秒帧数。Wan 系常用 16。"},
+            {"key": "steps", "label": "采样步数", "type": "number", "default": settings.WAN_SAMPLE_STEPS,
+             "advanced": True, "help": "去噪步数。越大越精细越慢，一般 20-30。"},
+            {"key": "negative", "label": "负向提示词", "type": "text",
+             "default": "lowres, blurry, deformed, extra limbs, watermark, text",
+             "advanced": True, "help": "不想要的内容（避免畸形/水印等）。"},
+            {"key": "seed", "label": "seed(-1随机)", "type": "number", "default": -1,
+             "advanced": True, "help": "随机种子。-1 每次不同；固定可复现。"},
         ]
 
     def generate(self, gpu: "GpuClient", *, image_path: str, prompt: str,
@@ -57,8 +66,9 @@ class Wan22Provider(VideoProvider):
         repo = settings.GPU_WAN_REPO
         ckpt = settings.GPU_WAN_CKPT
         size = params.get("size") or settings.WAN_SIZE
-        frame_num = int(params.get("frame_num") or settings.WAN_FRAME_NUM)
-        sample_steps = int(params.get("sample_steps") or settings.WAN_SAMPLE_STEPS)
+        # 统一字段 frames/steps → SSH 脚本的 --frame_num/--sample_steps(兼容旧键)
+        frame_num = int(params.get("frames") or params.get("frame_num") or settings.WAN_FRAME_NUM)
+        sample_steps = int(params.get("steps") or params.get("sample_steps") or settings.WAN_SAMPLE_STEPS)
 
         cmd = (
             f"cd {shlex.quote(repo)} && {shlex.quote(py)} generate.py "

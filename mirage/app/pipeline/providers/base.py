@@ -33,7 +33,7 @@ class VideoProvider(ABC):
 
     # 唯一标识（前端/工具用它选模型），如 "wan2.2" / "ltx"
     name: str = ""
-    # 人类可读名（参数卡下拉显示），如 "Wan2.2-TI2V-5B"
+    # 人类可读名（参数卡下拉显示），如 "Wan2.2-I2V-A14B"（5B 已弃用）
     display_name: str = ""
     # 能力声明：{"i2v"} 图生视频 / {"t2v"} 文生视频 / {"s2v"} 语音驱动(对口型)
     capabilities: set[str] = {"i2v"}

@@ -430,20 +430,26 @@ function HelpTip({ text }) {
   )
 }
 
-// 老事件没有 fields 时，用扁平字段合成 Wan2.2 的默认 schema，保证旧会话仍可渲染
+// 老事件没有 fields 时的兜底 schema。与后端 Wan2.2/ComfyUI provider 字段对齐(frames/fps/steps/negative)，
+// 避免旧事件显示成 frame_num(≤25)/sample_steps 那套过时的 2 参数(A14B 早已不是 ≤25/24fps 的旧 5B 档)。
 function legacyVideoFields(params) {
   return [
-    { key: 'size', label: '分辨率', type: 'select', default: params.size || '704*1280',
-      help: '成片画面尺寸。竖屏适合手机短视频，横屏适合横版播放。',
+    { key: 'size', label: '分辨率(宽*高)', type: 'select', default: params.size || '720*1280',
+      help: '成片宽×高。竖屏适合手机；越大越清晰也越慢。',
       options: [
-        { value: '704*1280', label: '704×1280 竖屏' },
-        { value: '1280*704', label: '1280×704 横屏' },
-        { value: '960*960', label: '960×960 方形' },
+        { value: '480*832', label: '480×832 竖屏快出' },
+        { value: '720*1280', label: '720×1280 竖屏高清' },
+        { value: '832*480', label: '832×480 横屏快出' },
+        { value: '1280*720', label: '1280×720 横屏高清' },
       ] },
-    { key: 'frame_num', label: '帧数(≤25稳)', type: 'number', default: params.frame_num ?? 25,
-      help: '总帧数，决定视频长度（约 帧数÷24 秒）。越多越长越吃显存，24G 显卡建议不超过 25 帧。' },
-    { key: 'sample_steps', label: '采样步数', type: 'number', default: params.sample_steps ?? 25,
-      help: '去噪迭代次数。越大画质/稳定性略好但越慢，一般 20-30。' },
+    { key: 'frames', label: '帧数', type: 'number', default: params.frames ?? params.frame_num ?? 81,
+      help: '总帧数。时长≈帧数÷帧率。A14B 常用 81（≈5 秒）。' },
+    { key: 'fps', label: '帧率', type: 'number', default: params.fps ?? 16,
+      help: '每秒帧数。Wan 系常用 16。' },
+    { key: 'steps', label: '采样步数', type: 'number', default: params.steps ?? params.sample_steps ?? 30,
+      help: '去噪步数，一般 20-30。' },
+    { key: 'negative', label: '负向提示词', type: 'text', default: params.negative ?? '',
+      help: '不想要的内容（避免畸形/水印等）。' },
   ]
 }
 
