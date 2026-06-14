@@ -504,7 +504,7 @@ export default function App() {
         if (!m.images) return m
         return { ...m, images: m.images.map(img =>
           img.assetId === assetId ? { ...img, selected: true }
-            : (m.images.some(x => x.assetId === assetId) ? { ...img, selected: false } : img)) }
+            : (img.sceneId === sceneId ? { ...img, selected: false } : img)) }
       }))
       // 选图确认消息：每个分镜只保留一条（重复点选/换选 = 原地替换，不再叠加刷屏）
       const selMsgId = `sel-${sceneId}`

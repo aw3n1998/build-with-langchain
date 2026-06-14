@@ -165,6 +165,14 @@ class JobManager:
             await job._set_status("error", error=msg)
             self._notify(job)
             logger.error("[job] 超时 %s（%ss）", job.id, timeout)
+            # 超时只停了本地协程，远程 GPU 推理仍在跑 → 杀掉远程进程释放显卡，
+            # 避免僵尸进程占卡堆积（与用户主动取消的清理一致）。
+            if job.kind in ("generate", "render", "batch_generate", "batch_finish"):
+                try:
+                    from mirage.app.pipeline.gpu_client import get_gpu_client
+                    await asyncio.to_thread(get_gpu_client().kill_inference)
+                except Exception:  # noqa: BLE001
+                    logger.warning("[job] 超时后远程推理清理失败（不影响超时处理）")
         except Exception as e:  # noqa: BLE001
             msg = f"{type(e).__name__}: {e}"
             await job._emit({"type": "error", "content": msg})

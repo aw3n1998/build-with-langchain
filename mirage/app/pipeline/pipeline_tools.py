@@ -736,7 +736,9 @@ def do_render_scene_video(
             store.set_scene_state(scene_id, SceneState.FAILED, force=True)
             return f"接续段拼接失败: {e}"
 
-    store.set_scene_video(scene_id, out_remote)
+    # 存本地最终成片路径 final_local；此前 SSH 单段误存远程 GPU 路径 out_remote，
+    # 导致信任 scenes.video_path 的删除/状态逻辑拿到不存在的本地路径。
+    store.set_scene_video(scene_id, final_local)
     store.set_scene_state(scene_id, SceneState.COMPLETED)
     seg_note = f"（尾帧接续 {segments} 段连续镜头）" if segments > 1 else ""
     msg = f"{provider.display_name} 出片完成{seg_note}，分镜 {scene_id} 标记 COMPLETED。"

@@ -66,7 +66,7 @@ def build_video_subgraph(llm, registry: SkillRegistry, checkpointer=None):
 
     async def skill_retrieval_node(state: VideoState) -> dict:
         query = next(
-            m.content for m in reversed(state["messages"]) if m.type == "human"
+            (m.content for m in reversed(state["messages"]) if m.type == "human"), ""
         )
         retrieved = await registry.search(query, top_k=6)
         names = []

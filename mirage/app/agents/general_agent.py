@@ -41,7 +41,7 @@ def build_general_subgraph(llm, registry: SkillRegistry, checkpointer=None):
 
     async def skill_retrieval_node(state: GeneralState) -> dict:
         query = next(
-            m.content for m in reversed(state["messages"]) if m.type == "human"
+            (m.content for m in reversed(state["messages"]) if m.type == "human"), ""
         )
         retrieved = await registry.search(query, top_k=5)
         names = [t.name for t in retrieved]
@@ -56,11 +56,22 @@ def build_general_subgraph(llm, registry: SkillRegistry, checkpointer=None):
 
     async def tools_node(state: GeneralState) -> dict:
         last = state["messages"][-1]
-        tools_map = {n: registry.get(n) for n in state["active_tools"]}
         results = []
         for tc in last.tool_calls:
-            logger.info("[GeneralAgent] 执行工具: %s", tc["name"])
-            result = await tools_map[tc["name"]].ainvoke(tc["args"])
+            name = tc["name"]
+            logger.info("[GeneralAgent] 执行工具: %s", name)
+            # LLM 偶尔会调不在 active_tools / 未注册的工具；取不到就返回占位结果，
+            # 避免整图 KeyError 崩溃（与 video_agent 的加固一致）。
+            try:
+                tool = registry.get(name)
+            except KeyError:
+                tool = None
+            if tool is None:
+                msg = f"[工具不可用] 未找到工具 `{name}`，请改用已注册的工具。"
+                logger.warning("[GeneralAgent] %s", msg)
+                results.append(ToolMessage(content=msg, tool_call_id=tc["id"]))
+                continue
+            result = await tool.ainvoke(tc["args"])
             results.append(ToolMessage(content=str(result), tool_call_id=tc["id"]))
         return {"messages": results}
 
