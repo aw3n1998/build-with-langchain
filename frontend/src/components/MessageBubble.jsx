@@ -732,10 +732,17 @@ export function ProductionPanel({ message, workspace, sessionId }) {
     if (showLogs) logEndRef.current?.scrollIntoView({ block: 'nearest' })
   }, [logs, showLogs])
 
-  // 出视频预估时长（秒）= 帧数 ÷ 帧率 × 接续段数。无 fps 字段（Wan）按 24fps。
+  // 出视频预估时长（秒）= 帧数 ÷ 帧率 × 接续段数。
+  // 帧数/帧率优先用「更多参数」覆盖值；没设就回退到所选模型 schema 的默认值
+  // ——这样默认（不开高级参数）也能显示预估，否则 vidParams 为空时永远算不出（功能等于消失）。
+  // 字段名：ComfyUI=frames+fps；Wan2.2=frame_num（无 fps→按 16fps，A14B 原生帧率）；LTX=num_frames+fps。
   const estSec = (() => {
-    const frames = Number(vidParams.frame_num ?? vidParams.num_frames)
-    const fps = Number(vidParams.fps) || 24
+    const flds = (models.find(m => m.name === model) || models[0])?.fields || []
+    const def = (k) => flds.find(f => f.key === k)?.default
+    const frames = Number(
+      vidParams.frame_num ?? vidParams.frames ?? vidParams.num_frames ??
+      def('frame_num') ?? def('frames') ?? def('num_frames'))
+    const fps = Number(vidParams.fps ?? def('fps')) || 16
     if (!frames || !fps) return null
     return (frames / fps) * Math.max(1, segments)
   })()
