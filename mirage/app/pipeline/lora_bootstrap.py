@@ -24,6 +24,9 @@ from mirage.app.pipeline.image_providers import image_provider_registry
 
 logger = get_logger("pipeline.lora_bootstrap")
 
+# 参考脸/图片扩展名(与 lora_train._IMG_EXTS 一致)；_find_ref_face 用。
+_IMG_EXTS = (".png", ".jpg", ".jpeg", ".webp")
+
 # 变体提示词（英文，FLUX 友好；通用摄影变体，仅原创虚构成年角色）。默认列表，可加可减；
 # count 超过列表长度时循环复用并换 seed，保证多样性。不写死张数。
 _VARIATIONS = [
