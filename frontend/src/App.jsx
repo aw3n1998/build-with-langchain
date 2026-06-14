@@ -10,6 +10,8 @@ import { ProductionPanel } from './components/MessageBubble'
 import { Icon } from './components/icons'
 import ProjectSidebar from './components/ProjectSidebar'
 import { useDialog } from './components/Dialog'
+import useIsMobile from './components/mobile/useIsMobile'
+import MobileShell from './components/mobile/MobileShell'
 
 // 每个会话独立的工作目录（互不影响）
 function loadWorkspaceMap() {
@@ -599,6 +601,21 @@ export default function App() {
   // Settings 保存后刷新显示的模型名
   const handleSettingsSaved = () => {
     setDisplayModel(getDisplayModel(ragStatus.model || ''))
+  }
+
+  // ── 手机端自适应：窄屏渲染短剧工作台移动壳(复用全部真功能 handler) ──
+  const isMobile = useIsMobile()
+  if (isMobile) {
+    return (
+      <MobileShell
+        allProjects={allProjects} panelProjectId={panelProjectId} setPanelProjectId={setPanelProjectId}
+        newProject={newProject} workspace={workspace} saveWorkspace={saveWorkspace} sessionId={sessionId}
+        messages={messages} sendMessage={sendMessage} isStreaming={isStreaming} stopGenerating={stopGenerating}
+        handleResume={handleResume} handleGenerate={handleGenerate} handleSelectImage={handleSelectImage}
+        handleRenderVideo={handleRenderVideo} agent={agent} setAgent={setAgent} agentList={agentList}
+        ragStatus={ragStatus} onSettingsSaved={handleSettingsSaved}
+      />
+    )
   }
 
   return (
