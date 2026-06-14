@@ -231,8 +231,10 @@ def start_training(store, tid: str, dataset_dir: str, *, trigger: Optional[str] 
                               args=(store, tid, dataset_dir, trigger, name, base, steps),
                               name=f"loratrain-{tid[:6]}", daemon=True)
         _RUNNING[tid] = th
-    store.update_lora_training(
-        tid, status="TRAINING", steps=steps, trigger_word=trigger,
-        message=f"本地 ai-toolkit 训练中…（{steps} 步，约数十分钟；进度看任务目录 _train.log）")
-    th.start()
+        # 状态写入 + start() 一并纳入同一把锁：消除"已登记进 _RUNNING 但未 start"的
+        # 竞态窗口(此间 is_alive()==False，并发/自举自动训会误判没在训而重复开训)。
+        store.update_lora_training(
+            tid, status="TRAINING", steps=steps, trigger_word=trigger,
+            message=f"本地 ai-toolkit 训练中…（{steps} 步，约数十分钟；进度看任务目录 _train.log）")
+        th.start()
     return store.get_lora_training(tid)
