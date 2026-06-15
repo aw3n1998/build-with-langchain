@@ -17,7 +17,7 @@ function usePersistedState(key, initial) {
 }
 import ReactMarkdown from 'react-markdown'
 import { fileUrl, getVideoProviders, getImageProviders, getProject, batchGenerate, batchFinish,
-         pipelineSelect, streamJobEvents, uploadCandidate, updateScenePrompts,
+         pipelineSelect, streamJobEvents, uploadCandidate, uploadContinueVideo, updateScenePrompts,
          deleteCandidate, deleteSceneVideo, sceneUndoAppend, deleteEpisode, suggestSegmentPrompts,
          autoStoryboard, autoFill, characters as charactersApi, templatesApi,
          loraCreate, loraAction, loraUploadImage, loraUploadRef,
@@ -811,6 +811,23 @@ export function ProductionPanel({ message, workspace, sessionId }) {
       sceneJob.current[sceneId] = jobId
       await consume(jobId)
     } catch { /* ignore */ }
+    finally { delete sceneJob.current[sceneId]; setSceneBusy(p => { const n = { ...p }; delete n[sceneId]; return n }) }
+  }
+
+  // 「上传视频续接」：把你的一段视频拼到该镜成片末尾，再从它的尾帧 AI 续写（复用续段的运镜词/段数）。
+  const runUploadContinue = async (sceneId, file) => {
+    if (busy || sceneBusy[sceneId]) return
+    startAt.current[sceneId] = Date.now()
+    setLogs([]); setShowLogs(true)
+    setSceneBusy(p => ({ ...p, [sceneId]: 'append' }))
+    try {
+      const jobId = await uploadContinueVideo(sceneId, file, {
+        model, motionPrompt: appendPrompt[sceneId] || '', size: vidSize,
+        count: Math.max(1, Number(appendCount[sceneId]) || 1),
+      }, workspace)
+      sceneJob.current[sceneId] = jobId
+      await consume(jobId)
+    } catch (err) { setProgress('上传续接失败：' + String(err.message || err)) }
     finally { delete sceneJob.current[sceneId]; setSceneBusy(p => { const n = { ...p }; delete n[sceneId]; return n }) }
   }
 
@@ -1640,6 +1657,19 @@ export function ProductionPanel({ message, workspace, sessionId }) {
                       style={{ ...miniAct(false, true), display: 'inline-flex', alignItems: 'center', gap: 4 }}>
                       <Icon.Plus size={12} />再续一段{sceneBusy[s.scene_id] === 'append' ? `…${fmtElapsed(s.scene_id)}` : ''}
                     </button>
+                    <label
+                      title="上传你的一段视频接到成片末尾，再从它的尾帧 AI 续写（用上面的运镜提示词和「续 N 段」）"
+                      style={{ ...miniAct(false), display: 'inline-flex', alignItems: 'center', gap: 4,
+                               cursor: (busy || !!sceneBusy[s.scene_id]) ? 'default' : 'pointer',
+                               opacity: (busy || !!sceneBusy[s.scene_id]) ? 0.5 : 1 }}>
+                      <Icon.Plus size={12} />上传视频续接
+                      <input type="file" accept="video/*,.mp4,.mov,.webm,.mkv,.m4v" style={{ display: 'none' }}
+                        disabled={busy || !!sceneBusy[s.scene_id]}
+                        onChange={async e => {
+                          const f = e.target.files?.[0]; e.target.value = ''
+                          if (f) await runUploadContinue(s.scene_id, f)
+                        }} />
+                    </label>
                     <button onClick={() => undoAppend(s.scene_id)} disabled={busy || !!sceneBusy[s.scene_id]}
                       title="撤销最近一次「再续一段」，成片回退到续接之前（可多次回退），然后可重新续"
                       style={{
