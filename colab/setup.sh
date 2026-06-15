@@ -23,6 +23,16 @@ clone_or_pull https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite  # VHS_Vid
 # 以下仅 LoRA 数据集自举(PuLID)用；纯出片主线可不装：
 clone_or_pull https://github.com/lldacing/ComfyUI_PuLID_Flux_ll
 
+# ── (可选) LTX-Video 2.3：与 Wan2.2 并列的「快/音视频一体」出片档。默认关(export SETUP_LTX=1 开)。──
+# ★前提：LTX 2.3 需 ComfyUI v0.16+（强制 torch≥2.4）；本脚本默认 COMFY_REF=v0.3.75 跑不了 LTX。
+#   用 LTX 要先：确保 torch≥2.4 → `export COMFY_REF=v0.16.1`(或更高) 重跑本 setup → `export SETUP_LTX=1`。
+#   基础 i2v 在 v0.16+ 核心自带；这个包是官方增强节点(IC-LoRA/超分/对口型)，按需装。
+if [ "${SETUP_LTX:-0}" = "1" ]; then
+  echo "[setup] 装 LTX-Video 2.3 官方增强节点 ComfyUI-LTXVideo"
+  clone_or_pull https://github.com/Lightricks/ComfyUI-LTXVideo || echo "[setup] LTX 节点拉取失败(不影响 Wan)"
+  [ -f ComfyUI-LTXVideo/requirements.txt ] && pip -q install -r ComfyUI-LTXVideo/requirements.txt || true
+fi
+
 for r in ComfyUI-GGUF ComfyUI-VideoHelperSuite ComfyUI_PuLID_Flux_ll; do
   [ -f "$r/requirements.txt" ] && pip -q install -r "$r/requirements.txt" || true
 done

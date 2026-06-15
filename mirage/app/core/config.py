@@ -135,6 +135,23 @@ class Settings(BaseSettings):
     LTX_FPS: int = 24
     LTX_STEPS: int = 30                 # LTX 30 步已够；比 40 快约 1/4
     LTX_GUIDANCE: float = 3.0
+    # ── LTX-Video 2.3（ComfyUI HTTP provider，与 Wan2.2 并列、用户在下拉里手选）──────────
+    # 定位：LTX=快/音视频一体/走量；Wan=运动真实感/电影级控制/NSFW 生态成熟。走 ComfyUI 原生 LTXAV
+    # 节点(需 ComfyUI v0.16+/torch≥2.4，与本仓默认钉的 v0.3.75 不能同实例共存——见
+    # comfyui_workflows/README.md 的「LTX 2.3 接入」说明)。以下全部可在 .env/面板覆盖(不写死)。
+    # 装好 LTX(节点+权重)后把 LTX2_ENABLED 设 true，它才并列进用户模型下拉(免没装时选了跑不了)。
+    LTX2_ENABLED: bool = False
+    # LTX 专属 ComfyUI 端点（双实例用）：非空=LTX 走这个地址(如另一端口/另一台跑 v0.16+ 的 ComfyUI，
+    # 与 Wan 的 v0.3.75 实例隔离)；空=回落到 COMFYUI_BASE_URL(单实例，Wan/LTX 共用)。
+    COMFYUI_LTX_BASE_URL: str = ""
+    COMFYUI_WORKFLOW_LTX: str = ""        # LTX i2v workflow 模板路径；空=用仓库自带 ltx_i2v_template.json(脚手架，首跑前按官方模板核对)
+    LTX2_SIZE: str = "704*1280"           # 默认竖屏(宽*高，须 32 的倍数)；2.3 可上 1088*1920(1080p)
+    LTX2_FRAMES: int = 121                # 帧数须 8 的倍数+1(如 121≈5s@24fps)
+    LTX2_FPS: int = 24                    # LTX 原生帧率较高，常用 24
+    LTX2_STEPS: int = 30                  # dev 全量精修约 30；distilled 蒸馏档约 8
+    LTX2_GUIDANCE: float = 3.0
+    LTX2_DISTILLED: bool = False          # True=8步蒸馏极速档(类比 Wan Lightning)；False=dev 全量精修
+    LTX2_KEEP_AUDIO: bool = False         # 默认丢 LTX 自带音(交角色声音圣经 TTS 统一音色)；True=保留 LTX 原生音轨
     # ── ComfyUI 后端（HTTP，可配置；对用户完全隐形）──────────────
     # 在 GPU 或任意机器上跑 ComfyUI，本框架通过它的 HTTP API 提交 workflow。
     # 关键：ComfyUI 不作为「用户可见的模型」出现。它**透明顶替**现有公开模型名的执行后端——

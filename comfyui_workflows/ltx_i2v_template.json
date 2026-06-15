@@ -1,0 +1,75 @@
+{
+  "10": {
+    "class_type": "LTXAudioVideoLoader",
+    "_meta": { "title": "⚠️脚手架·待替换 — LTX-2.3 加载器。节点名/输入键为 medium-confidence(据 LTX2.3 文档)。首次真跑前请用 ComfyUI v0.16+ 自带官方 LTX i2v 模板(菜单导出 API 格式)整体替换本文件，仅保留下方 %占位符% 约定即可——provider 代码不用动。" },
+    "inputs": { "ckpt_name": "ltx-2.3-22b-dev-fp8.safetensors" }
+  },
+  "11": {
+    "class_type": "CLIPLoader",
+    "_meta": { "title": "文本编码器 = Gemma 3 12B(LTX-2 用 Gemma3，非 T5/umt5)" },
+    "inputs": { "clip_name": "gemma_3_12B_it_fp4_mixed.safetensors", "type": "ltxv" }
+  },
+  "12": {
+    "class_type": "CLIPTextEncode",
+    "_meta": { "title": "正向提示(由本框架填 %PROMPT%)" },
+    "inputs": { "text": "%PROMPT%", "clip": ["11", 0] }
+  },
+  "13": {
+    "class_type": "CLIPTextEncode",
+    "_meta": { "title": "负向提示(%NEG_PROMPT%)" },
+    "inputs": { "text": "%NEG_PROMPT%", "clip": ["11", 0] }
+  },
+  "14": {
+    "class_type": "LoadImage",
+    "_meta": { "title": "i2v 输入参考图(本框架自动上传后把文件名填进 %IMAGE%)" },
+    "inputs": { "image": "%IMAGE%" }
+  },
+  "15": {
+    "class_type": "LTXVImgToVideo",
+    "_meta": { "title": "图生视频条件(尺寸须 32 倍数、帧数须 8n+1)" },
+    "inputs": {
+      "positive": ["12", 0],
+      "negative": ["13", 0],
+      "vae": ["10", 2],
+      "image": ["14", 0],
+      "width": "%WIDTH%",
+      "height": "%HEIGHT%",
+      "length": "%FRAMES%",
+      "fps": "%FPS%"
+    }
+  },
+  "16": {
+    "class_type": "KSampler",
+    "_meta": { "title": "采样(dev≈30步 / distilled≈8步；步数由 %STEPS% 注入)" },
+    "inputs": {
+      "model": ["10", 0],
+      "positive": ["15", 0],
+      "negative": ["15", 1],
+      "latent_image": ["15", 2],
+      "seed": "%SEED%",
+      "steps": "%STEPS%",
+      "cfg": "%GUIDANCE%",
+      "sampler_name": "euler",
+      "scheduler": "normal",
+      "denoise": 1.0
+    }
+  },
+  "17": {
+    "class_type": "VAEDecode",
+    "_meta": { "title": "解码到像素" },
+    "inputs": { "samples": ["16", 0], "vae": ["10", 2] }
+  },
+  "18": {
+    "class_type": "VHS_VideoCombine",
+    "_meta": { "title": "封装成 mp4(★不接 audio：保持静音出片，配音交给 assembler 的角色声音圣经 TTS；要 LTX 原生音轨再按官方模板接音频节点)" },
+    "inputs": {
+      "images": ["17", 0],
+      "frame_rate": "%FPS%",
+      "loop_count": 0,
+      "filename_prefix": "mirage_ltx2_i2v",
+      "format": "video/h264-mp4",
+      "pingpong": false,
+      "save_output": true
+    }
+  }
+}

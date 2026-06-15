@@ -71,6 +71,16 @@ fi
 # get QuantStack/Wan2.2-I2V-A14B-GGUF LowNoise/Wan2.2-I2V-A14B-LowNoise-Q5_K_M.gguf   "$M/unet"
 # umt5 fp8(S2V 对口型必用;也是 i2v fp8 回退档的文本编码器)——保留下载。
 get Comfy-Org/Wan_2.2_ComfyUI_Repackaged split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors "$M/clip"
+
+# ── (可选) LTX-Video 2.3 权重：与 Wan2.2 并列的「快/音视频一体」档。默认不下(22B+Gemma 很大)。需要才 export DOWNLOAD_LTX=1。──
+# ★前提同 setup：LTX 2.3 要 ComfyUI v0.16+。下方文件名/仓库以官方 Lightricks/LTX-2.3 + v0.16+ 官方模板实际为准；
+#   每条都做成非致命(|| echo)：万一文件名随版本变了也绝不中断 Wan/FLUX 的下载。下完按 ltx_i2v_template.json 核对。
+if [ "${DOWNLOAD_LTX:-0}" = "1" ]; then
+  echo "[download] LTX-Video 2.3（dev fp8；可选蒸馏档；Gemma3 文本编码器）—— 文件名以官方模板为准"
+  get Lightricks/LTX-2.3 ltx-2.3-22b-dev-fp8.safetensors "$M/checkpoints" || echo "[download] ⚠️ LTX dev-fp8 没下到(核对 Lightricks/LTX-2.3 实际文件名)"
+  get Lightricks/LTX-2.3 ltx-2.3-22b-distilled.safetensors "$M/checkpoints" || echo "[download] (跳过)LTX 蒸馏档为可选"
+  echo "[download] ⚠️ LTX 文本编码器是 Gemma 3 12B(非 umt5)：请按 ComfyUI v0.16+ 官方 LTX 模板里的确切文件名/仓库，把它下到 $M/text_encoders(本脚本不臆测仓库名，免下错)"
+fi
 get Comfy-Org/Wan_2.2_ComfyUI_Repackaged split_files/vae/wan2.2_vae.safetensors "$M/vae"
 
 # ── Wan2.2-S2V 对口型(可选；不做对口型可注释掉这3行)──

@@ -26,6 +26,12 @@ if settings.COMFYUI_BASE_URL and settings.COMFYUI_VIDEO_AS:
         _disp = video_provider_registry.get(_as).display_name if video_provider_registry.has(_as) else _as
         from mirage.app.pipeline.providers.comfyui import ComfyUIProvider
         video_provider_registry.register(ComfyUIProvider(name=_as, display_name=_disp))  # 同名覆盖 SSH 版
+# LTX-Video 2.3：ComfyUI HTTP 后端，**独立注册**(不走上面的透明顶替)——和 Wan2.2 并列出现在
+# 用户模型下拉里、逐镜可手选。双门控：配了端点 + LTX2_ENABLED 才注册，避免没装/没下 LTX 时
+# 下拉里冒出个选了跑不了的项。参数卡由它自己的 param_schema() 驱动(LTX 专属字段，与 Wan 不混)。
+if settings.LTX2_ENABLED and (settings.COMFYUI_LTX_BASE_URL or settings.COMFYUI_BASE_URL):
+    from mirage.app.pipeline.providers.comfyui_ltx import ComfyUILtxProvider
+    video_provider_registry.register(ComfyUILtxProvider())
 if settings.VIDEO_PROVIDER_DEFAULT and video_provider_registry.has(settings.VIDEO_PROVIDER_DEFAULT):
     video_provider_registry.set_default(settings.VIDEO_PROVIDER_DEFAULT)
 # Wan2.2-S2V 对口型：隐藏 Provider，不进用户下拉，由「对口型」开关路由。配了端点才注册。

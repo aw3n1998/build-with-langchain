@@ -33,9 +33,13 @@ VIDEO_EXTS = (".mp4", ".webm", ".mkv", ".mov", ".gif", ".webp")
 IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".webp")
 
 
-def base_url() -> str:
-    """读取并校验 ComfyUI 端点。未配置抛 GpuConfigError。"""
-    base = (settings.COMFYUI_BASE_URL or "").rstrip("/")
+def base_url(override: str = "") -> str:
+    """读取并校验 ComfyUI 端点。
+
+    override 非空 → 用它（供 LTX 等走独立实例：如另一端口/另一台的 v0.16+ ComfyUI）；
+    否则回落到全局 COMFYUI_BASE_URL（单实例，Wan/LTX 共用）。两者都空抛 GpuConfigError。
+    """
+    base = (override or settings.COMFYUI_BASE_URL or "").rstrip("/")
     if not base:
         raise GpuConfigError(
             "未配置 ComfyUI 端点，请在 .env 设置 COMFYUI_BASE_URL（如 http://127.0.0.1:8188）。")
