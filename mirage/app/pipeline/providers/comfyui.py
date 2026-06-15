@@ -110,6 +110,12 @@ class ComfyUIProvider(VideoProvider):
             mapping["%LIGHT_LO_LORA%"] = settings.WAN_LIGHTNING_LORA_LOW
             mapping["%LIGHT_HI_STR%"] = float(settings.WAN_LIGHTNING_STR_HIGH)   # 运动弱就调 1.5
             mapping["%LIGHT_LO_STR%"] = float(settings.WAN_LIGHTNING_STR_LOW)
+            # 极速档专属步数/切换步/shift：覆盖满档默认（别拿 COMFYUI_STEPS=30 去跑 4 步蒸馏）。
+            # 步数来自 WAN_LIGHTNING_STEPS(默认6)、夹在 2..12；切换步取一半；shift 用蒸馏档的 ~8。
+            _lsteps = max(2, min(int(settings.WAN_LIGHTNING_STEPS or 6), 12))
+            mapping["%STEPS%"] = _lsteps
+            mapping["%BOUNDARY%"] = max(1, _lsteps // 2)
+            mapping["%SHIFT%"] = float(params.get("shift") or settings.WAN_LIGHTNING_SHIFT)
             template = ch.load_workflow(settings.COMFYUI_WORKFLOW_I2V_LIGHTNING,
                                         "i2v_fp8_lightning_template.json", "i2v-lightning")
         else:
