@@ -502,19 +502,23 @@ export default function App() {
   const handleSelectImage = useCallback(async (sceneId, assetId) => {
     try {
       const res = await pipelineSelect(sceneId, assetId, workspace)
-      setMessages(prev => prev.map(m => {
-        if (!m.images) return m
-        return { ...m, images: m.images.map(img =>
-          img.assetId === assetId ? { ...img, selected: true }
-            : (img.sceneId === sceneId ? { ...img, selected: false } : img)) }
-      }))
+      // 只有后端确认选图成功才在图片墙打勾——否则会出现"勾了但其实没选上"的假象，
+      // 用户以为选好了点出视频才发现分镜状态不对。
+      if (res.success) {
+        setMessages(prev => prev.map(m => {
+          if (!m.images) return m
+          return { ...m, images: m.images.map(img =>
+            img.assetId === assetId ? { ...img, selected: true }
+              : (img.sceneId === sceneId ? { ...img, selected: false } : img)) }
+        }))
+      }
       // 选图确认消息：每个分镜只保留一条（重复点选/换选 = 原地替换，不再叠加刷屏）
       const selMsgId = `sel-${sceneId}`
       setMessages(prev => [...prev.filter(m => m.id !== selMsgId), {
         id: selMsgId, role: 'assistant', streaming: false,
         content: res.success
           ? `已选定候选图 \`${assetId}\`，分镜进入待出视频。\n<MSG_SPLIT><pcAction>{"label":"出视频","userInput":"出视频"}</pcAction>`
-          : res.message,
+          : (res.message || '选图失败，请重试（后端未确认）。'),
       }])
     } catch (e) {
       console.error('select failed', e)

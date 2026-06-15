@@ -23,7 +23,7 @@ from mirage.app.core.config import settings
 from mirage.app.core.logger import get_logger
 from mirage.app.pipeline import comfy_http as ch
 from mirage.app.pipeline import log_bus
-from mirage.app.pipeline.gpu_client import GpuConfigError, GpuRunError  # noqa: F401 (re-export)
+from mirage.app.pipeline.gpu_client import GpuConfigError, GpuRunError, parse_size  # noqa: F401 (re-export)
 from mirage.app.pipeline.image_providers.base import ImageProvider
 
 if TYPE_CHECKING:
@@ -95,11 +95,7 @@ class ComfyUIImageProvider(ImageProvider):
     def generate(self, gpu: "GpuClient", *, prompt: str, out_dir: str, params: dict) -> list[str]:
         """HTTP 提交 t2i workflow，循环出 N 张，下载到本地 out_dir，返回本地路径列表。"""
         base = ch.base_url()
-        size = str(params.get("size") or settings.COMFYUI_T2I_SIZE)
-        try:
-            width, height = (int(x) for x in size.replace("x", "*").split("*"))
-        except ValueError:
-            raise GpuRunError(f"分辨率格式应为 宽*高，收到: {size}")
+        width, height = parse_size(params.get("size"), settings.COMFYUI_T2I_SIZE)
         n = int(params.get("n") or settings.COMFYUI_T2I_N)
         n = max(1, min(n, 12))
         steps = int(params.get("steps") or settings.COMFYUI_T2I_STEPS)

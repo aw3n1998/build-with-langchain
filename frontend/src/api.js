@@ -61,8 +61,9 @@ async function* parseSSE(response) {
         const data = JSON.parse(line.slice(6))
         yield data
         if (data.type === 'done' || data.type === 'error') return
-      } catch {
-        // 忽略格式错误行
+      } catch (err) {
+        // 格式错误行：跳过，但记一笔便于排查后端 SSE 输出异常（之前是静默吞，没法 debug）
+        console.warn('[SSE] 解析失败，已跳过该行:', line, err)
       }
     }
   }

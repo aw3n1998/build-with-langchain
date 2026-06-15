@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 
 from mirage.app.core.config import settings
 from mirage.app.core.logger import get_logger
-from mirage.app.pipeline.gpu_client import GpuRunError
+from mirage.app.pipeline.gpu_client import GpuRunError, coerce_num, parse_size
 from mirage.app.pipeline.providers.base import VideoProvider
 
 if TYPE_CHECKING:
@@ -63,10 +63,15 @@ class Wan22Provider(VideoProvider):
         py = settings.GPU_PYTHON
         repo = settings.GPU_WAN_REPO
         ckpt = settings.GPU_WAN_CKPT
-        size = params.get("size") or settings.WAN_SIZE
-        # 统一字段 frames/steps → SSH 脚本的 --frame_num/--sample_steps(兼容旧键)
-        frame_num = int(params.get("frames") or params.get("frame_num") or settings.WAN_FRAME_NUM)
-        sample_steps = int(params.get("steps") or params.get("sample_steps") or settings.WAN_SAMPLE_STEPS)
+        # 分辨率：共用 parse_size 解析+校验，再用解出的整数重建 --size（避免把含空格/大写X的
+        # 原始串原样塞进远程命令；配错/漏 * 在这里就给友好提示，而不是到 GPU 上才报看不懂的错）。
+        width, height = parse_size(params.get("size"), settings.WAN_SIZE, example="720*1280")
+        size = f"{width}*{height}"
+        # 统一字段 frames/steps → SSH 脚本的 --frame_num/--sample_steps(兼容旧键)；非数字给友好错。
+        frame_num = coerce_num(params.get("frames") or params.get("frame_num"),
+                               settings.WAN_FRAME_NUM, label="帧数")
+        sample_steps = coerce_num(params.get("steps") or params.get("sample_steps"),
+                                  settings.WAN_SAMPLE_STEPS, label="采样步数")
         # seed→--base_seed：>=0 才固定(可复现)；<0/缺省让 generate.py 自取随机种子。seed 为 int，无注入风险。
         try:
             seed = int(params.get("seed", -1))

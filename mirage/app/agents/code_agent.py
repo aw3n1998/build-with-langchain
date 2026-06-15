@@ -32,7 +32,7 @@ def build_code_subgraph(llm, registry: SkillRegistry, checkpointer=None):
     async def skill_retrieval_node(state: CodeState) -> dict:
         """语义检索：根据用户最新消息，从 Registry 中找出最相关的工具。"""
         query = next(
-            m.content for m in reversed(state["messages"]) if m.type == "human"
+            (m.content for m in reversed(state["messages"]) if m.type == "human"), ""
         )
         retrieved = await registry.search(query, top_k=3)
         names = [t.name for t in retrieved]

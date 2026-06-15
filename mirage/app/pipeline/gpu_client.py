@@ -51,6 +51,38 @@ class GpuRunError(RuntimeError):
     """远程命令非零退出。"""
 
 
+def parse_size(raw, default, *, example: str = "720*1280") -> tuple[int, int]:
+    """解析 "宽*高" 字符串 → (w, h)。各 Provider 共用，避免每家抄一份解析逻辑后口径漂移。
+
+    归一化：大小写无关("720X1280" 也行)、x 或 * 分隔、容忍前后空白。
+    非法（漏 *、含非数字、段数不为 2）抛 GpuRunError 给用户友好提示，
+    而不是把垃圾字符串拼进远程命令、到 GPU 上才报看不懂的错。
+    """
+    s = str(raw if (raw is not None and raw != "") else default).lower().replace("x", "*")
+    parts = [p.strip() for p in s.split("*")]
+    try:
+        if len(parts) != 2:
+            raise ValueError
+        w, h = (int(p) for p in parts)
+    except ValueError:
+        raise GpuRunError(f"分辨率格式应为 宽*高（如 {example}），收到: {raw}")
+    return w, h
+
+
+def coerce_num(raw, default, *, label: str, cast=int):
+    """把数值参数转 int/float；非法值给友好 GpuRunError 而非裸 ValueError 冒泡成 500。
+
+    空串/None 回退 default；显式数值 0/0.0 保留（与 pipeline 的 seed=0 可复现一致）。
+    """
+    if raw is None or raw == "":
+        return cast(default)
+    try:
+        return cast(raw)
+    except (TypeError, ValueError):
+        kind = "整数" if cast is int else "数字"
+        raise GpuRunError(f"参数「{label}」应为{kind}，收到: {raw!r}")
+
+
 @dataclass
 class RemoteResult:
     exit_code: int

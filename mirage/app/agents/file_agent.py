@@ -27,7 +27,7 @@ def build_file_subgraph(llm, registry: SkillRegistry, checkpointer=None):
 
     async def skill_retrieval_node(state: FileState) -> dict:
         query = next(
-            m.content for m in reversed(state["messages"]) if m.type == "human"
+            (m.content for m in reversed(state["messages"]) if m.type == "human"), ""
         )
         retrieved = await registry.search(query, top_k=3)
         names = [t.name for t in retrieved]

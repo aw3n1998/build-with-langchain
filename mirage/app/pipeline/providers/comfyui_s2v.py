@@ -24,7 +24,7 @@ from mirage.app.core.config import settings
 from mirage.app.core.logger import get_logger
 from mirage.app.pipeline import comfy_http as ch
 from mirage.app.pipeline import log_bus
-from mirage.app.pipeline.gpu_client import GpuConfigError, GpuRunError  # noqa: F401 (re-export)
+from mirage.app.pipeline.gpu_client import GpuConfigError, GpuRunError, parse_size  # noqa: F401 (re-export)
 from mirage.app.pipeline.providers.base import VideoProvider
 
 logger = get_logger("pipeline.providers.comfyui_s2v")
@@ -57,11 +57,7 @@ class ComfyUIS2VProvider(VideoProvider):
         audio_path = params.get("audio_path") or ""
         if not audio_path or not os.path.exists(audio_path):
             raise GpuRunError("对口型(S2V)缺少语音音频：这镜没有旁白/台词可配音。请先给这镜写一句台词。")
-        size = str(params.get("size") or settings.COMFYUI_SIZE)
-        try:
-            width, height = (int(x) for x in size.replace("x", "*").split("*"))
-        except ValueError:
-            raise GpuRunError(f"分辨率格式应为 宽*高，收到: {size}")
+        width, height = parse_size(params.get("size"), settings.COMFYUI_SIZE)
         seed = int(params.get("seed", -1))
         if seed < 0:
             seed = int(time.time_ns() % 2_000_000_000)

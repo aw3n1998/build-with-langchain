@@ -576,8 +576,9 @@ def _do_render_lipsync_s2v(scene_id, scene, asset, prompt, params) -> str:
         ok_tts = _tts(line, audio_local, voice)
     if not ok_tts:
         return "对口型失败：台词转语音(TTS)没成功（edge-tts 需联网，已重试）。"
+    # 只剔除真正"未设置"的(None/空串)；保留数值 0——seed=0 是合法可复现种子（与主 i2v 一致）。
     merged = {**s2v.default_params(),
-              **{k: v for k, v in (params or {}).items() if v not in (None, "", 0)}}
+              **{k: v for k, v in (params or {}).items() if v is not None and v != ""}}
     merged.pop("lipsync", None); merged.pop("segments", None); merged.pop("motion_prompts", None)
     merged["audio_path"] = audio_local
     # 帧数跟着音频走：否则写死 81帧≈5s 会把长台词截断（口型只对到一半）。
@@ -902,8 +903,9 @@ def append_scene_segment(scene_id: str, motion_prompt: str = "", model: str = ""
 
     provider = video_provider_registry.get(model)
     is_http = getattr(provider, "transport", "ssh") == "http"
+    # 保留数值 0（seed=0 可复现），只剔除 None/空串——与主 i2v 渲染一致。
     merged = {**provider.default_params(),
-              **{k: v for k, v in params.items() if v not in (None, "", 0)}}
+              **{k: v for k, v in params.items() if v is not None and v != ""}}
     merged.pop("segments", None)
     seg_prompts = merged.pop("motion_prompts", None) or []
     if not isinstance(seg_prompts, list):

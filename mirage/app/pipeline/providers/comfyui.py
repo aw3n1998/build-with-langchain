@@ -27,7 +27,7 @@ from mirage.app.core.config import settings
 from mirage.app.core.logger import get_logger
 from mirage.app.pipeline import comfy_http as ch
 from mirage.app.pipeline import log_bus
-from mirage.app.pipeline.gpu_client import GpuConfigError, GpuRunError  # noqa: F401 (re-export 供测试/外部引用)
+from mirage.app.pipeline.gpu_client import GpuConfigError, GpuRunError, parse_size  # noqa: F401 (re-export 供测试/外部引用)
 from mirage.app.pipeline.providers.base import VideoProvider
 
 logger = get_logger("pipeline.providers.comfyui")
@@ -84,11 +84,7 @@ class ComfyUIProvider(VideoProvider):
     def generate(self, gpu, *, image_path: str, prompt: str, out_remote: str, params: dict) -> None:
         """http 分支调用：image_path 为本地参考图，out_remote 为本地输出 mp4 路径。gpu 忽略。"""
         base = ch.base_url()
-        size = str(params.get("size") or settings.COMFYUI_SIZE)
-        try:
-            width, height = (int(x) for x in size.replace("x", "*").split("*"))
-        except ValueError:
-            raise GpuRunError(f"分辨率格式应为 宽*高，收到: {size}")
+        width, height = parse_size(params.get("size"), settings.COMFYUI_SIZE)
         seed = int(params.get("seed", -1))
         if seed < 0:
             seed = int(time.time_ns() % 2_000_000_000)

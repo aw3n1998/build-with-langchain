@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING
 
 from mirage.app.core.config import settings
 from mirage.app.core.logger import get_logger
-from mirage.app.pipeline.gpu_client import GpuConfigError, GpuRunError
+from mirage.app.pipeline.gpu_client import GpuConfigError, GpuRunError, coerce_num, parse_size
 from mirage.app.pipeline.providers.base import VideoProvider
 
 if TYPE_CHECKING:
@@ -99,13 +99,16 @@ class LtxProvider(VideoProvider):
             raise GpuConfigError("未配置 LTX 模型，请在 .env 设置 GPU_LTX_MODEL（HF id 或本地权重目录）。")
         script = self._ensure_script(gpu)
         py = settings.GPU_PYTHON
-        size = str(params.get("size") or settings.LTX_SIZE)
-        width, height = (int(x) for x in size.split("*"))
-        num_frames = int(params.get("num_frames") or settings.LTX_NUM_FRAMES)
-        fps = int(params.get("fps") or settings.LTX_FPS)
-        steps = int(params.get("steps") or settings.LTX_STEPS)
-        guidance = float(params.get("guidance") if params.get("guidance") is not None else settings.LTX_GUIDANCE)
-        seed = int(params.get("seed", -1))
+        # 分辨率 + 数值参数都走共享 helper：格式/类型错在本地给友好提示，不再裸 ValueError 冒泡成 500。
+        width, height = parse_size(params.get("size"), settings.LTX_SIZE, example="480*832")
+        num_frames = coerce_num(params.get("num_frames"), settings.LTX_NUM_FRAMES, label="帧数")
+        fps = coerce_num(params.get("fps"), settings.LTX_FPS, label="帧率")
+        steps = coerce_num(params.get("steps"), settings.LTX_STEPS, label="采样步数")
+        guidance = coerce_num(params.get("guidance"), settings.LTX_GUIDANCE, label="guidance", cast=float)
+        try:
+            seed = int(params.get("seed", -1))
+        except (TypeError, ValueError):
+            seed = -1   # seed 非法就回退随机（-1），不打断出片
 
         t5_arg = ""
         if settings.GPU_LTX_T5_DIR:

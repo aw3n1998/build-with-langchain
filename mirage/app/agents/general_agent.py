@@ -64,14 +64,17 @@ def build_general_subgraph(llm, registry: SkillRegistry, checkpointer=None):
             # 避免整图 KeyError 崩溃（与 video_agent 的加固一致）。
             try:
                 tool = registry.get(name)
-            except KeyError:
+            except Exception:  # 与 shell/code/file agent 对齐：registry.get 抛任何异常都回占位，不只 KeyError
                 tool = None
             if tool is None:
                 msg = f"[工具不可用] 未找到工具 `{name}`，请改用已注册的工具。"
                 logger.warning("[GeneralAgent] %s", msg)
                 results.append(ToolMessage(content=msg, tool_call_id=tc["id"]))
                 continue
-            result = await tool.ainvoke(tc["args"])
+            try:
+                result = await tool.ainvoke(tc["args"])
+            except Exception as e:  # noqa: BLE001  工具执行失败回灌给 LLM，而非中断整图（与 code/file/video agent 一致）
+                result = f"[工具执行失败] {name}: {type(e).__name__}: {e}"
             results.append(ToolMessage(content=str(result), tool_call_id=tc["id"]))
         return {"messages": results}
 

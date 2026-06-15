@@ -259,7 +259,9 @@ def start_bootstrap(store, training_id: str, dataset_dir: str, *, mode: str = "t
                   bool(auto_train), size, steps, seed),
             name=f"loraboot-{training_id[:6]}", daemon=True)
         _BOOT_RUNNING[training_id] = th
-    store.update_lora_training(training_id, status="BOOTSTRAPPING", trigger_word=trigger,
-                               message=f"自动造训练集中…（{mode} 模式，目标 {cnt} 张，造完{'自动开训' if auto_train else '待开训'}）")
-    th.start()
+        # 登记 + 状态写 + start() 纳入同一把锁：否则"已登记未 start"窗口里 is_alive()==False，
+        # 并发调用会误判"没在自举"而重复开线程（与 lora_train.py 的 29c1e9f 加固一致）。
+        store.update_lora_training(training_id, status="BOOTSTRAPPING", trigger_word=trigger,
+                                   message=f"自动造训练集中…（{mode} 模式，目标 {cnt} 张，造完{'自动开训' if auto_train else '待开训'}）")
+        th.start()
     return store.get_lora_training(training_id)
