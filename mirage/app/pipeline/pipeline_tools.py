@@ -972,6 +972,81 @@ def append_scene_segment(scene_id: str, motion_prompt: str = "", model: str = ""
     return msg + f"\nVIDFILE::{scene_id}::{final_local}"
 
 
+def append_uploaded_video(scene_id: str, uploaded_path: str, motion_prompt: str = "",
+                          model: str = "", params: dict | None = None, count: int = 1) -> str:
+    """把【上传的视频】拼到该镜成片末尾，再从它的尾帧 AI 续写 count 段（尾帧接续）。
+
+    - 有现有成片 V：成片变 V + 上传视频 U（+ AI 续写 C）；会给 V 打撤销快照(可「撤销上一段」回退)。
+    - 无现有成片：上传视频成为该镜成片，再 AI 续写。
+    - 上传视频自动统一到成片分辨率/帧率、去音轨(音频在合成整集时统一加)。
+    - count=0：只拼接上传视频、不 AI 续写。
+    """
+    import shutil as _sh
+    params = params or {}
+    store = get_store()
+    scene = store.get_scene(scene_id)
+    if not scene:
+        return f"分镜不存在: {scene_id}"
+    if not (uploaded_path and os.path.exists(uploaded_path)):
+        return f"上传的视频文件不存在: {uploaded_path}"
+    from mirage.app.pipeline.assembler import conform_video, concat_videos, _video_size
+    local_dir = video_dir()
+    final_local = os.path.join(local_dir, f"{scene['scene_number']:02d}_{scene_id}.mp4")
+    has_final = os.path.exists(final_local)
+    tw = th = 0
+    if has_final:
+        try:
+            tw, th = _video_size(final_local)        # 对齐现有成片分辨率，避免拼接尺寸不一
+        except Exception:  # noqa: BLE001
+            tw = th = 0
+    fps = int(params.get("fps") or settings.COMFYUI_FPS)
+    conformed = os.path.join(local_dir, f"{scene['scene_number']:02d}_{scene_id}_upload.mp4")
+    try:
+        conform_video(uploaded_path, conformed, tw, th, fps)
+    except Exception as e:  # noqa: BLE001
+        return f"上传视频转码失败: {e}"
+    if has_final:
+        try:
+            _sh.copy2(final_local, _next_undo_path(final_local))     # 撤销快照
+        except OSError:
+            pass
+        tmp = final_local + ".tmp.mp4"
+        try:
+            concat_videos([final_local, conformed], tmp, dedup_boundary=False)  # 上传段非续生成，不去边界帧
+            os.replace(tmp, final_local)
+        except Exception as e:  # noqa: BLE001
+            for _f in (tmp, conformed):
+                try:
+                    os.remove(_f)
+                except OSError:
+                    pass
+            return f"拼接上传视频失败: {e}"
+        try:
+            os.remove(conformed)
+        except OSError:
+            pass
+    else:
+        try:
+            os.replace(conformed, final_local)
+        except OSError:
+            _sh.copy2(conformed, final_local)
+            try:
+                os.remove(conformed)
+            except OSError:
+                pass
+    store.set_scene_video(scene_id, final_local)
+    store.set_scene_state(scene_id, SceneState.COMPLETED, force=True)
+    head = f"已把上传视频接到分镜 {scene_id} 成片末尾。"
+    try:
+        cnt = max(0, int(count if count is not None else 1))
+    except (TypeError, ValueError):
+        cnt = 1
+    if cnt >= 1:
+        cont = append_scene_segment(scene_id, motion_prompt, model, params, cnt)
+        return head + " 并从其尾帧 AI 续写：\n" + cont
+    return head + f"\nVIDFILE::{scene_id}::{final_local}"
+
+
 @tool
 def append_scene_video(scene_id: str, motion_prompt: str = "", model: str = "",
                        size: str = "", segments: int = 1) -> str:

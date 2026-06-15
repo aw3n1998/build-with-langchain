@@ -1902,6 +1902,82 @@ async def pipeline_scene_append(req: SceneAppendRequest):
         "render", lambda: _scene_append_events(req), meta=meta)}
 
 
+class SceneUploadContinueRequest(BaseModel):
+    scene_id: str
+    workspace: str | None = None
+    session_id: str | None = None
+    model: str = ""
+    motion_prompt: str = ""          # AI 续写段的运镜提示词（留空用分镜自带）
+    size: str = ""
+    count: int = 1                   # 上传后再 AI 续写多少段（0=只拼接、不续写）
+    uploaded_path: str = ""          # 端点先把上传视频存到本地，再带路径提交任务
+
+
+async def _scene_upload_continue_events(req: "SceneUploadContinueRequest"):
+    """拼接上传视频到成片末尾 + 从其尾帧 AI 续写。流式同「再续一段」。"""
+    from mirage.app.pipeline.runtime import set_workspace
+    from mirage.app.pipeline.pipeline_tools import append_uploaded_video
+    set_workspace(req.workspace)
+    params: dict = {}
+    if req.size:
+        params["size"] = req.size
+    yield {"type": "batch_progress", "phase": "render", "scene_id": req.scene_id,
+           "label": "拼接上传视频" + ("+ AI 续写" if (req.count or 0) >= 1 else "") + "中…"}
+    out = None
+    try:
+        async for it in _run_with_logs(lambda: append_uploaded_video(
+                req.scene_id, req.uploaded_path, req.motion_prompt, req.model, params, req.count)):
+            if "_log" in it:
+                yield {"type": "log", "line": it["_log"]}
+            else:
+                out = it["_result"]
+    except Exception as e:  # noqa: BLE001
+        yield {"type": "tool_result", "name": "upload_continue_video",
+               "content": f"上传续接失败: {type(e).__name__}: {e}"}
+        return
+    _clean, events = ai_service._extract_tool_markers(out or "")
+    for ev in events:
+        yield ev
+    yield {"type": "scene_ready", "scene_id": req.scene_id}
+
+
+@router.post("/pipeline/upload_continue_video")
+async def pipeline_upload_continue_video(
+    scene_id: str = Form(...),
+    workspace: str = Form(default=""),
+    session_id: str = Form(default=""),
+    model: str = Form(default=""),
+    motion_prompt: str = Form(default=""),
+    size: str = Form(default=""),
+    count: int = Form(default=1),
+    file: UploadFile = File(...),
+):
+    """上传一段视频 → 拼到该镜成片末尾 → 从其尾帧 AI 续写。先存文件，再提交后台任务，返回 job_id。"""
+    import os as _os
+    import pathlib
+    from uuid import uuid4
+    from mirage.app.pipeline.runtime import set_workspace, video_dir
+    from mirage.app.pipeline.store import get_store
+    from mirage.app.services.job_manager import job_manager
+    suffix = pathlib.Path(file.filename or "").suffix.lower()
+    if suffix not in {".mp4", ".mov", ".webm", ".mkv", ".m4v", ".avi"}:
+        raise HTTPException(status_code=400, detail=f"不支持的视频类型 {suffix}（支持 mp4/mov/webm/mkv）")
+    set_workspace(workspace or None)
+    if not get_store().get_scene(scene_id):
+        raise HTTPException(status_code=404, detail=f"分镜不存在: {scene_id}")
+    up_name = f"upload_{uuid4().hex[:8]}{suffix}"
+    up_path = _os.path.join(video_dir(), up_name)
+    with open(up_path, "wb") as f:
+        f.write(await file.read())
+    req = SceneUploadContinueRequest(
+        scene_id=scene_id, workspace=(workspace or None), session_id=(session_id or None),
+        model=model, motion_prompt=motion_prompt, size=size, count=count, uploaded_path=up_path)
+    meta = {"session_id": req.session_id, "scene_id": scene_id,
+            "project_id": _scene_project_id(scene_id, req.workspace)}
+    return {"job_id": job_manager.submit(
+        "render", lambda: _scene_upload_continue_events(req), meta=meta)}
+
+
 @router.get("/pipeline/jobs")
 async def pipeline_active_jobs(project_id: str | None = None, session_id: str | None = None):
     """列出在跑/排队的任务，供刷新后面板重连（显示进度 + 停止按钮）。"""

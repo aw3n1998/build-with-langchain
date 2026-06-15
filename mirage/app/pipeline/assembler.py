@@ -78,6 +78,28 @@ def _video_size(path: str) -> tuple[int, int]:
     return int(m.group(1)), int(m.group(2))
 
 
+def conform_video(src: str, out: str, width: int = 0, height: int = 0, fps: int = 0) -> str:
+    """把任意上传视频统一成本管线成片规格，供「上传视频续接」拼接：
+      - 可选等比缩放 + 黑边填充到 width×height(不拉伸变形)；
+      - 设帧率 fps；统一 H.264/yuv420p；去音轨(每镜成片静音，音频在合成整集时统一加)。
+    width/height=0 → 保持原尺寸(仅统一帧率/编码)。失败抛 RuntimeError。"""
+    os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
+    vf = []
+    if width and height:
+        vf.append(f"scale={int(width)}:{int(height)}:force_original_aspect_ratio=decrease")
+        vf.append(f"pad={int(width)}:{int(height)}:(ow-iw)/2:(oh-ih)/2:color=black")
+    if fps:
+        vf.append(f"fps={int(fps)}")
+    args = [_ffmpeg(), "-y", "-hide_banner", "-i", src]
+    if vf:
+        args += ["-vf", ",".join(vf)]
+    args += ["-an", "-c:v", "libx264", "-preset", "veryfast", "-crf", "19", "-pix_fmt", "yuv420p", out]
+    res = _run(args, timeout=900)
+    if res.returncode != 0 or not os.path.exists(out) or os.path.getsize(out) == 0:
+        raise RuntimeError(f"上传视频转码失败: {(res.stderr or '')[-400:]}")
+    return out
+
+
 def extract_last_frame(video_path: str, out_png: str) -> str:
     """抽取视频最后一帧（尾帧接续用：作为下一段 i2v 的输入图）。"""
     os.makedirs(os.path.dirname(os.path.abspath(out_png)), exist_ok=True)

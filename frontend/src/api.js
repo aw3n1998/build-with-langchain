@@ -375,6 +375,23 @@ export async function uploadCandidate(sceneId, file, workspace = null) {
   return r.json()
 }
 
+// 上传一段视频 → 拼到该镜成片末尾 → 从其尾帧 AI 续写。返回 job_id，用 streamJobEvents 跟随。
+// opts: { model, motionPrompt, size, count }（count=AI 续写段数，0=只拼接不续写）
+export async function uploadContinueVideo(sceneId, file, opts = {}, workspace = null) {
+  const { model = '', motionPrompt = '', size = '', count = 1 } = opts
+  const form = new FormData()
+  form.append('scene_id', sceneId)
+  form.append('workspace', workspace || '')
+  form.append('model', model)
+  form.append('motion_prompt', motionPrompt)
+  form.append('size', size)
+  form.append('count', String(count))
+  form.append('file', file)
+  const r = await fetch(`${getBase()}/pipeline/upload_continue_video`, { method: 'POST', body: form })
+  if (!r.ok) throw new Error(`status ${r.status}`)
+  return (await r.json()).job_id
+}
+
 export async function listProjects(workspace = null) {
   const q = workspace ? `?workspace=${encodeURIComponent(workspace)}` : ''
   const r = await fetch(`${getBase()}/pipeline/projects${q}`)
