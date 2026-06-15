@@ -2,6 +2,9 @@
 # Colab 单机：装 ComfyUI + 出片/出图/对口型所需自定义节点。幂等(已存在则 git pull)。
 # Wan2.2 的 WanImageToVideo / WanSoundImageToVideo / AudioEncoder* 近版 ComfyUI 核心自带，无需 WanVideoWrapper。
 set -e
+# pip 卸载/替换包时把旧文件 stash 到 TMPDIR 再 rename;Colab 默认 /tmp 与 dist-packages 跨挂载点，
+# 该 rename 会崩 OSError [Errno 18] Invalid cross-device link。把 TMPDIR 指到与 dist-packages 同设备的目录避免。
+export TMPDIR=/usr/local/tmp; mkdir -p "$TMPDIR"
 cd /content
 # ComfyUI 钉版本(关键):主线(v0.4+/v0.8+)依赖 comfy_kitchen,要 torch≥2.4(torch.library.custom_op)，
 # 在 Colab 原装 torch 上 import 直接崩。v0.3.75(2025-11-26)已含 Wan2.2 i2v/s2v 原生节点 +
@@ -14,7 +17,11 @@ if [ "$_cur" != "$COMFY_REF" ]; then
   rm -rf ComfyUI
   git clone --depth 1 --branch "$COMFY_REF" https://github.com/comfyanonymous/ComfyUI
 fi
-pip -q install -r ComfyUI/requirements.txt
+# Colab 自带 torch/torchvision/torchaudio(自洽预装)——严禁让 ComfyUI requirements 重装它们:
+# 否则触发卸载 Colab 的 nvidia-*(如 nccl)时跨设备 rename 崩(Errno 18),还破坏 torch 对齐。
+# 剔除这三行(保留 torchsde 等其它 torch* 依赖)再装其余。
+grep -ivE '^(torch|torchvision|torchaudio)([^A-Za-z0-9_]|$)' ComfyUI/requirements.txt > /content/comfy_reqs_notorch.txt
+pip -q install -r /content/comfy_reqs_notorch.txt
 
 cd ComfyUI/custom_nodes
 clone_or_pull() { d=$(basename "$1"); if [ -d "$d" ]; then (cd "$d" && git pull -q || true); else git clone --depth 1 -q "$1"; fi; }
