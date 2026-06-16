@@ -1928,7 +1928,7 @@ export function ProductionPanel({ message, workspace, sessionId }) {
               )}
 
               {/* 提示词全透明：AI 写的也给用户看，且可改（改完再出图/出片更省 GPU） */}
-              <ScenePrompts scene={s} workspace={workspace} onSaved={load} />
+              <ScenePrompts scene={s} characters={proj?.characters || []} workspace={workspace} onSaved={load} />
             </div>
           )
         })}
@@ -1966,7 +1966,7 @@ export function ProductionPanel({ message, workspace, sessionId }) {
 }
 
 /* 分镜提示词（出图/运镜/旁白）：AI 生成的也全部可见，且可改完保存再出图/出片 */
-function ScenePrompts({ scene, workspace, onSaved }) {
+function ScenePrompts({ scene, characters, workspace, onSaved }) {
   const [open, setOpen] = useState(false)
   const [tit, setTit] = useState(scene.title || '')
   const [num, setNum] = useState(String(scene.scene_number ?? ''))
@@ -1974,17 +1974,18 @@ function ScenePrompts({ scene, workspace, onSaved }) {
   const [mot, setMot] = useState(scene.motion_prompt || '')
   const [nar, setNar] = useState(scene.narration || '')
   const [sub, setSub] = useState(scene.subtitle || '')
-  const [dlg, setDlg] = useState(scene.dialogue || '')
+  const [dlgRows, setDlgRows] = useState(() => _parseDlg(scene.dialogue || ''))
   const [saving, setSaving] = useState(false)
+  const dlgStr = dlgRows.map(r => (r.speaker ? r.speaker + '：' + r.text : r.text)).filter(x => x.trim()).join('\n')
   const numChanged = num !== '' && Number(num) !== scene.scene_number
   const dirty = img !== (scene.image_prompt || '') || mot !== (scene.motion_prompt || '')
-    || nar !== (scene.narration || '') || sub !== (scene.subtitle || '') || dlg !== (scene.dialogue || '')
+    || nar !== (scene.narration || '') || sub !== (scene.subtitle || '') || dlgStr !== (scene.dialogue || '')
     || tit !== (scene.title || '') || numChanged
 
   const save = async () => {
     setSaving(true)
     try {
-      const fields = { image_prompt: img, motion_prompt: mot, narration: nar, subtitle: sub, dialogue: dlg, title: tit }
+      const fields = { image_prompt: img, motion_prompt: mot, narration: nar, subtitle: sub, dialogue: dlgStr, title: tit }
       if (numChanged) fields.scene_number = Number(num)
       await updateScenePrompts(scene.scene_id, fields, workspace)
       onSaved?.()
@@ -2038,7 +2039,25 @@ function ScenePrompts({ scene, workspace, onSaved }) {
           </div>
           {ta('旁白（narration，转 TTS 配音）', nar, setNar)}
           {ta('字幕（subtitle，屏幕文字；留空=同旁白）', sub, setSub)}
-          {ta('角色对话（每行「说话人：台词」，按角色声音圣经各自配音；填了优先于旁白）', dlg, setDlg, 3)}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <span style={{ fontSize: 10.5, color: 'var(--text-muted)' }}>角色对话（每句选说话人＋台词；按角色音色各自配音，填了优先于旁白）</span>
+            {dlgRows.map((r, idx) => (
+              <div key={idx} style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                <select value={r.speaker} onChange={e => setDlgRows(rs => rs.map((x, i) => i === idx ? { ...x, speaker: e.target.value } : x))}
+                  style={{ ...inputStyle, height: 28, width: 104, fontSize: 11 }}>
+                  <option value="">旁白/无名</option>
+                  {(characters || []).map(c => <option key={c.id} value={c.name}>{c.name || '(未命名)'}</option>)}
+                  {r.speaker && !(characters || []).some(c => c.name === r.speaker) && <option value={r.speaker}>{r.speaker}（无此角色）</option>}
+                </select>
+                <input value={r.text} placeholder="台词" onChange={e => setDlgRows(rs => rs.map((x, i) => i === idx ? { ...x, text: e.target.value } : x))}
+                  style={{ ...inputStyle, height: 28, flex: 1, fontSize: 11.5 }} />
+                <button onClick={() => setDlgRows(rs => rs.filter((_, i) => i !== idx))} title="删除这句"
+                  style={{ ...miniBtn2, padding: '0 9px', color: '#fca5a5' }}>×</button>
+              </div>
+            ))}
+            <button onClick={() => setDlgRows(rs => [...rs, { speaker: '', text: '' }])}
+              style={{ ...miniBtn2, alignSelf: 'flex-start' }}>＋ 加一句台词</button>
+          </div>
           <div>
             <button onClick={save} disabled={!dirty || saving} style={{
               height: 26, padding: '0 14px', borderRadius: 6,
@@ -2113,6 +2132,16 @@ const miniBtn = {
   width: 24, height: 24, borderRadius: 6, border: '1px solid var(--border)',
   background: 'rgba(255,255,255,0.05)', color: 'var(--text-sec)', cursor: 'pointer', fontSize: 13,
 }
+// 把「说话人：台词」逐行解析成 [{speaker,text}]（中英文冒号都认；空行跳过）
+function _parseDlg(s) {
+  return (s || '').split('\n').map(line => {
+    const t = line.trim()
+    if (!t) return null
+    let i = t.indexOf('：'); if (i < 0) i = t.indexOf(':')
+    return i >= 0 ? { speaker: t.slice(0, i).trim(), text: t.slice(i + 1).trim() } : { speaker: '', text: t }
+  }).filter(Boolean)
+}
+
 // edge-tts 常用中文音色（角色声音圣经用）
 const VOICES = [
   { v: '', label: '默认音色' },
