@@ -72,6 +72,7 @@ CREATE TABLE IF NOT EXISTS scenes (
     image_prompt  TEXT NOT NULL DEFAULT '',
     motion_prompt TEXT NOT NULL DEFAULT '',
     voice         TEXT NOT NULL DEFAULT '',
+    dialogue      TEXT NOT NULL DEFAULT '',
     state         TEXT NOT NULL DEFAULT 'DRAFT',
     selected_asset_id TEXT,
     video_path    TEXT,
@@ -178,6 +179,9 @@ class PipelineStore:
         if "voice" not in cols:      # 每镜 TTS 音色(角色声音圣经)：旧库补这一列
             conn.execute("ALTER TABLE scenes ADD COLUMN voice TEXT NOT NULL DEFAULT ''")
             logger.info("[PipelineStore] 迁移：scenes 补列 voice")
+        if "dialogue" not in cols:   # 多角色对话(每行「说话人：台词」)：旧库补这一列
+            conn.execute("ALTER TABLE scenes ADD COLUMN dialogue TEXT NOT NULL DEFAULT ''")
+            logger.info("[PipelineStore] 迁移：scenes 补列 dialogue")
         # 项目级风格（每集一种风格）：旧库给 projects 补列
         pcols = {r[1] for r in conn.execute("PRAGMA table_info(projects)").fetchall()}
         for col in ("style_prompt", "trigger_word", "flux_lora", "negative_prompt", "default_size"):
@@ -438,13 +442,16 @@ class PipelineStore:
                              narration: str | None = None,
                              subtitle: str | None = None,
                              title: str | None = None,
-                             scene_number: int | None = None) -> dict:
-        """更新分镜的提示词/旁白/字幕/标题/镜号（只改传入的非 None 字段）。字幕独立于旁白：旁白配音、字幕上屏。"""
+                             scene_number: int | None = None,
+                             dialogue: str | None = None) -> dict:
+        """更新分镜的提示词/旁白/字幕/标题/镜号/多角色对话（只改传入的非 None 字段）。
+        字幕独立于旁白：旁白配音、字幕上屏；dialogue=「说话人：台词」逐行，合成时按角色音色逐句配音。"""
         sets, params = [], []
         for col, val in (("image_prompt", image_prompt),
                          ("motion_prompt", motion_prompt),
                          ("narration", narration),
                          ("subtitle", subtitle),
+                         ("dialogue", dialogue),
                          ("title", title)):
             if val is not None:
                 sets.append(f"{col}=?")

@@ -1242,7 +1242,7 @@ export function ProductionPanel({ message, workspace, sessionId }) {
         sceneId: sceneId || '', kind, projectId: projectId || '', workspace, sessionId,
       })
       for await (const ev of streamJobEvents(jobId)) {
-        if (ev.type === 'log') setLogs(prev => [...prev, ev.line].slice(-300))
+        if (ev.type === 'log') { setLogs(prev => [...prev, ev.line].slice(-300)); if (ev.line) setProgress(ev.line) }   // 心跳也刷到主状态条，让你看到「换脸还在跑·已等待Ns」，不再像卡住
         else if (ev.type === 'video' && ev.url) setSwUrl(u => ({ ...u, [tag]: fileUrl(ev.url) + '&v=' + Date.now() }))
         else if (ev.type === 'tool_result' && ev.content) { setProgress(ev.content); setLogs(prev => [...prev, '» ' + ev.content].slice(-300)) }
         else if (ev.type === 'error') setProgress(ev.content || '换脸已停止')
@@ -1972,16 +1972,17 @@ function ScenePrompts({ scene, workspace, onSaved }) {
   const [mot, setMot] = useState(scene.motion_prompt || '')
   const [nar, setNar] = useState(scene.narration || '')
   const [sub, setSub] = useState(scene.subtitle || '')
+  const [dlg, setDlg] = useState(scene.dialogue || '')
   const [saving, setSaving] = useState(false)
   const numChanged = num !== '' && Number(num) !== scene.scene_number
   const dirty = img !== (scene.image_prompt || '') || mot !== (scene.motion_prompt || '')
-    || nar !== (scene.narration || '') || sub !== (scene.subtitle || '')
+    || nar !== (scene.narration || '') || sub !== (scene.subtitle || '') || dlg !== (scene.dialogue || '')
     || tit !== (scene.title || '') || numChanged
 
   const save = async () => {
     setSaving(true)
     try {
-      const fields = { image_prompt: img, motion_prompt: mot, narration: nar, subtitle: sub, title: tit }
+      const fields = { image_prompt: img, motion_prompt: mot, narration: nar, subtitle: sub, dialogue: dlg, title: tit }
       if (numChanged) fields.scene_number = Number(num)
       await updateScenePrompts(scene.scene_id, fields, workspace)
       onSaved?.()
@@ -2035,6 +2036,7 @@ function ScenePrompts({ scene, workspace, onSaved }) {
           </div>
           {ta('旁白（narration，转 TTS 配音）', nar, setNar)}
           {ta('字幕（subtitle，屏幕文字；留空=同旁白）', sub, setSub)}
+          {ta('角色对话（每行「说话人：台词」，按角色声音圣经各自配音；填了优先于旁白）', dlg, setDlg, 3)}
           <div>
             <button onClick={save} disabled={!dirty || saving} style={{
               height: 26, padding: '0 14px', borderRadius: 6,

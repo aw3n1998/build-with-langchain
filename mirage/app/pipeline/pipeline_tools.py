@@ -1116,16 +1116,42 @@ def assemble_episode(project_id: str, voice: str = "", with_subtitles: bool = Tr
         return "项目下没有分镜。"
 
     local = video_dir()
+    # 角色音色表(声音圣经)：说话人名 → 该角色 TTS 音色，供多角色对话逐句配音
+    char_voice = {}
+    try:
+        for _c in (store.list_characters(project_id) or []):
+            _nm = (_c.get("name") or "").strip()
+            if _nm:
+                char_voice[_nm] = (_c.get("voice") or "").strip()
+    except Exception:  # noqa: BLE001
+        pass
     clips, missing = [], []
     for s in scenes:
         p = os.path.join(local, f"{s['scene_number']:02d}_{s['id']}.mp4")
-        if os.path.isfile(p):
-            clips.append({"path": p, "narration": s.get("narration") or "",
-                          "subtitle": s.get("subtitle") or "", "title": s.get("title") or "",
-                          "voice": s.get("voice") or "",   # 每镜音色(角色圣经)；空=用全集默认
-                          "keep_audio": bool(s.get("lipsync"))})  # 对口型片自带人声，合成时别重配音(否则口型错位)
-        else:
+        if not os.path.isfile(p):
             missing.append(f"#{s['scene_number']} {s['title'] or s['id']}（状态 {s['state']}）")
+            continue
+        clip = {"path": p, "narration": s.get("narration") or "",
+                "subtitle": s.get("subtitle") or "", "title": s.get("title") or "",
+                "voice": s.get("voice") or "",   # 每镜音色(角色圣经)；空=用全集默认
+                "keep_audio": bool(s.get("lipsync"))}  # 对口型片自带人声，别重配音(否则口型错位)
+        # 多角色对话「说话人：台词」逐行 → 各自匹配角色音色；字幕用对话原文。仅非对口型镜生效。
+        _dlg = []
+        for _raw in (s.get("dialogue") or "").splitlines():
+            _raw = _raw.strip()
+            if not _raw:
+                continue
+            _spk, _sep, _txt = _raw.partition("：")
+            if not _sep:
+                _spk, _sep, _txt = _raw.partition(":")
+            _spk, _txt = (_spk.strip(), _txt.strip()) if _sep else ("", _raw)
+            if not _txt:
+                continue
+            _dlg.append({"speaker": _spk, "text": _txt, "voice": char_voice.get(_spk, "")})
+        if _dlg and not clip["keep_audio"]:
+            clip["dialogue"] = _dlg
+            clip["subtitle"] = "\n".join((d["speaker"] + "：" + d["text"]) if d["speaker"] else d["text"] for d in _dlg)
+        clips.append(clip)
     if not clips:
         return "没有任何分镜已出片，请先对各分镜出图→选图→出视频。"
 

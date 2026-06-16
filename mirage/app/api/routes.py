@@ -1216,6 +1216,7 @@ class ScenePromptsRequest(BaseModel):
     title: str | None = None           # 分镜标题；None=不改
     scene_number: int | None = None    # 镜号；None=不改
     voice: str | None = None           # 这一镜 TTS 音色(角色圣经)；None=不改
+    dialogue: str | None = None        # 多角色对话「说话人：台词」逐行；合成时按角色音色逐句配音。None=不改
 
 
 @router.post("/pipeline/scene_prompts")
@@ -1230,7 +1231,7 @@ async def pipeline_scene_prompts(req: ScenePromptsRequest):
     s = store.update_scene_prompts(
         req.scene_id, image_prompt=req.image_prompt,
         motion_prompt=req.motion_prompt, narration=req.narration, subtitle=req.subtitle,
-        title=req.title, scene_number=req.scene_number)
+        title=req.title, scene_number=req.scene_number, dialogue=req.dialogue)
     if req.lipsync is not None:
         s = store.set_scene_lipsync(req.scene_id, req.lipsync)
     if req.voice is not None:
@@ -1239,7 +1240,7 @@ async def pipeline_scene_prompts(req: ScenePromptsRequest):
             "motion_prompt": s.get("motion_prompt") or "", "narration": s.get("narration") or "",
             "subtitle": s.get("subtitle") or "", "lipsync": bool(s.get("lipsync")),
             "title": s.get("title") or "", "scene_number": s.get("scene_number"),
-            "voice": s.get("voice") or ""}
+            "voice": s.get("voice") or "", "dialogue": s.get("dialogue") or ""}
 
 
 # ── 剧集（项目）管理 + 每集风格 + 分镜 增/删（面板自助，不绕 agent）──

@@ -306,6 +306,36 @@ def _add_bgm(ff, video: str, bgm: str, out: str, vol: float) -> None:
         raise RuntimeError((res.stderr or "")[-500:])
 
 
+def _tts_dialogue(lines: list[dict], out_mp3: str, ff: str, default_voice: str) -> bool:
+    """多角色对话：逐句按各自音色 TTS，再按序拼成一条 mp3。lines=[{voice,text}]。任一句出音即 True。"""
+    base = os.path.dirname(out_mp3) or "."
+    parts: list[str] = []
+    for idx, ln in enumerate(lines):
+        txt = (ln.get("text") or "").strip()
+        if not txt:
+            continue
+        v = (ln.get("voice") or "").strip() or default_voice
+        p = os.path.join(base, f"_dlg_{idx}.mp3")
+        if _tts(txt, p, v) and os.path.isfile(p) and os.path.getsize(p) > 0:
+            parts.append(p)
+    if not parts:
+        return False
+    if len(parts) == 1:
+        try:
+            os.replace(parts[0], out_mp3)
+            return True
+        except OSError:
+            return False
+    listf = os.path.join(base, "_dlg_list.txt")
+    with open(listf, "w", encoding="utf-8") as f:
+        for p in parts:
+            f.write("file '%s'\n" % os.path.abspath(p).replace("'", "'\\''"))
+    res = _run([ff, "-y", "-hide_banner", "-f", "concat", "-safe", "0", "-i", listf, "-c", "copy", out_mp3])
+    if res.returncode != 0:                          # 编码不一致 → 重编码再拼
+        res = _run([ff, "-y", "-hide_banner", "-f", "concat", "-safe", "0", "-i", listf, "-c:a", "libmp3lame", out_mp3])
+    return res.returncode == 0 and os.path.isfile(out_mp3) and os.path.getsize(out_mp3) > 0
+
+
 def _assemble_in(work: str, clips: list[dict], out_path: str, ff: str,
                  tw: int, th: int, *, voice: str, with_subtitles: bool,
                  crossfade: float = 0.0, bgm: str = "") -> dict:
@@ -327,7 +357,8 @@ def _assemble_in(work: str, clips: list[dict], out_path: str, ff: str,
         else:
             mp3 = os.path.join(work, f"narr_{i}.mp3")
             v = (c.get("voice") or "").strip() or voice   # 每镜音色(角色圣经)优先，否则全集默认
-            has_narr = bool(narration) and _tts(narration, mp3, v)
+            _dlg = c.get("dialogue") or []                 # 多角色对话：逐句各自音色拼一条；否则走单段旁白
+            has_narr = _tts_dialogue(_dlg, mp3, ff, v) if _dlg else (bool(narration) and _tts(narration, mp3, v))
             ad = _duration(mp3) if has_narr else 0.0
             out_dur = max(vd, ad + 0.3) if has_narr else vd      # 旁白略留尾气口
             freeze = max(0.0, out_dur - vd)
