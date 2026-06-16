@@ -651,6 +651,48 @@ def _do_render_lipsync_s2v(scene_id, scene, asset, prompt, params) -> str:
             f"已下载到本机: {final_local}\nVIDFILE::{scene_id}::{final_local}")
 
 
+def _do_render_t2v(scene_id, scene, motion_prompt, params) -> str:
+    """文生视频出片：文本(画面+运镜) → Wan2.2-T2V 直接出视频，**不需选图/参考帧**。整镜一段。
+
+    身份靠项目级 Wan-T2V 角色 LoRA(没训就纯提示词，身份不稳)。t2v 是隐藏 Provider，端点门控。
+    """
+    store = get_store()
+    if not video_provider_registry.has("comfyui-t2v"):
+        return ("文生视频(t2v)还没就绪：需在 .env 配 COMFYUI_BASE_URL 且在 ComfyUI 部署 Wan2.2-T2V 权重。"
+                "暂未配置时，请把「出片模式」切回 i2v。")
+    t2v = video_provider_registry.get("comfyui-t2v")
+    local_dir = video_dir()
+    final_local = os.path.join(local_dir, f"{scene['scene_number']:02d}_{scene_id}.mp4")
+    prompt = _compose_wan_prompt(scene, motion_prompt)   # 英文化+运镜+光影尾(t2v 同样吃)
+    merged = {**t2v.default_params(),
+              **{k: v for k, v in (params or {}).items() if v is not None and v != ""}}
+    for _k in ("lipsync", "motion_prompts", "segments", "video_mode"):
+        merged.pop(_k, None)
+    # 项目级 Wan-T2V 角色 LoRA(训好后写进项目 style)；params 已显式带则不覆盖
+    try:
+        pstyle = store.get_project_style(scene["project_id"]) if scene.get("project_id") else {}
+    except Exception:  # noqa: BLE001
+        pstyle = {}
+    if not merged.get("wan_t2v_lora_high") and (pstyle.get("wan_t2v_lora_high") or "").strip():
+        merged["wan_t2v_lora_high"] = pstyle["wan_t2v_lora_high"].strip()
+    if not merged.get("wan_t2v_lora_low") and (pstyle.get("wan_t2v_lora_low") or "").strip():
+        merged["wan_t2v_lora_low"] = pstyle["wan_t2v_lora_low"].strip()
+    try:
+        store.set_scene_state(scene_id, SceneState.PENDING_VIDEO_GEN, force=True)
+        _gpu_retry(lambda: t2v.generate(None, image_path="", prompt=prompt,
+                                        out_remote=final_local, params=merged),
+                   what=f"文生视频 {scene_id}")
+    except GpuConfigError as e:
+        return f"文生视频后端未配置: {e}"
+    except (GpuRunError, RuntimeError, OSError) as e:
+        store.set_scene_state(scene_id, SceneState.FAILED, force=True)
+        return f"文生视频出片失败: {e}"
+    store.set_scene_video(scene_id, final_local)
+    store.set_scene_state(scene_id, SceneState.COMPLETED)
+    return (f"文生视频(Wan2.2-T2V)出片完成，分镜 {scene_id} 标记 COMPLETED。\n"
+            f"已下载到本机: {final_local}\nVIDFILE::{scene_id}::{final_local}")
+
+
 def do_render_scene_video(
     scene_id: str,
     motion_prompt: str = "",
@@ -668,6 +710,9 @@ def do_render_scene_video(
     scene = store.get_scene(scene_id)
     if not scene:
         return f"分镜不存在: {scene_id}"
+    # 文生视频(t2v)：不需要选图，文本直接→视频。在「必须已选图」校验之前分流。
+    if (params.get("video_mode") or scene.get("video_mode") or "i2v") == "t2v":
+        return _do_render_t2v(scene_id, scene, motion_prompt, params)
     # 出片的真实前提是「已选好一张图」，而不是 state 恰好等于某枚举。
     # 早先的中断/重生成可能让 state 漂移（选过图但 state 回退），这里以选中资产为准，更稳。
     asset = store.get_asset(scene["selected_asset_id"]) if scene.get("selected_asset_id") else None

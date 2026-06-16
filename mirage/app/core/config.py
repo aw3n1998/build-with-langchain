@@ -140,6 +140,19 @@ class Settings(BaseSettings):
     # 别降高噪(社区"0.65-0.8"是 T2V 防过曝的，照搬到 i2v 会更不动)。
     WAN_LIGHTNING_STR_HIGH: float = 1.5
     WAN_LIGHTNING_STR_LOW: float = 1.0
+    # ── 文生视频 t2v 档(Wan2.2-T2V-A14B；与 i2v 并存，由「出片模式=t2v」路由，不进用户下拉)──
+    # t2v 不经 FLUX、不出图不选图，文本直接→视频；角色身份靠训好的 Wan-T2V 角色 LoRA(空=纯提示词)。
+    COMFYUI_WORKFLOW_T2V: str = ""                                       # 满档 t2v 模板;空=用仓库自带 t2v_fp8_template.json
+    COMFYUI_WORKFLOW_T2V_LIGHTNING: str = "comfyui_workflows/t2v_fp8_lightning_template.json"
+    T2V_PRECISION: str = ""                                             # 同 I2V_PRECISION;空=未探测(cell1 写入)
+    # t2v 角色 LoRA(训好后填;高/低噪各一)。空=不挂(provider 摘除 LoRA 节点)。强度 t2v 基准 ~0.8-1.0。
+    WAN_T2V_LORA_HIGH: str = ""
+    WAN_T2V_LORA_LOW: str = ""
+    WAN_T2V_LORA_STR_HIGH: float = 1.0
+    WAN_T2V_LORA_STR_LOW: float = 1.0
+    # t2v 极速档蒸馏 LoRA(★与 i2v 的不同文件!)。文件名以 HF lightx2v/Wan2.2-Distill-Loras 实际为准,可在 .env 覆盖。
+    WAN_T2V_LIGHTNING_LORA_HIGH: str = "wan2.2_t2v_A14b_high_noise_lora_rank64_lightx2v_4step.safetensors"
+    WAN_T2V_LIGHTNING_LORA_LOW: str = "wan2.2_t2v_A14b_low_noise_lora_rank64_lightx2v_4step.safetensors"
     # ── 视频模型解耦：默认 Provider + LTX-Video 配置 ──────────────
     # 默认用哪个视频模型（对应 providers 注册名：wan2.2 / ltx）
     VIDEO_PROVIDER_DEFAULT: str = "wan2.2"

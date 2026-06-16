@@ -58,6 +58,8 @@ CREATE TABLE IF NOT EXISTS projects (
     flux_lora       TEXT NOT NULL DEFAULT '',
     negative_prompt TEXT NOT NULL DEFAULT '',
     default_size    TEXT NOT NULL DEFAULT '',
+    wan_t2v_lora_high TEXT NOT NULL DEFAULT '',
+    wan_t2v_lora_low  TEXT NOT NULL DEFAULT '',
     created_at  TEXT NOT NULL
 );
 
@@ -74,6 +76,7 @@ CREATE TABLE IF NOT EXISTS scenes (
     voice         TEXT NOT NULL DEFAULT '',
     dialogue      TEXT NOT NULL DEFAULT '',
     character     TEXT NOT NULL DEFAULT '',
+    video_mode    TEXT NOT NULL DEFAULT 'i2v',
     state         TEXT NOT NULL DEFAULT 'DRAFT',
     selected_asset_id TEXT,
     video_path    TEXT,
@@ -186,9 +189,13 @@ class PipelineStore:
         if "character" not in cols:  # 本镜主角名(PuLID 锁脸/音色路由按它查角色)：旧库补这一列
             conn.execute("ALTER TABLE scenes ADD COLUMN character TEXT NOT NULL DEFAULT ''")
             logger.info("[PipelineStore] 迁移：scenes 补列 character")
+        if "video_mode" not in cols:  # 出片模式 i2v/t2v(t2v=文生视频，不出图不选图)：旧库补这一列
+            conn.execute("ALTER TABLE scenes ADD COLUMN video_mode TEXT NOT NULL DEFAULT 'i2v'")
+            logger.info("[PipelineStore] 迁移：scenes 补列 video_mode")
         # 项目级风格（每集一种风格）：旧库给 projects 补列
         pcols = {r[1] for r in conn.execute("PRAGMA table_info(projects)").fetchall()}
-        for col in ("style_prompt", "trigger_word", "flux_lora", "negative_prompt", "default_size"):
+        for col in ("style_prompt", "trigger_word", "flux_lora", "negative_prompt", "default_size",
+                    "wan_t2v_lora_high", "wan_t2v_lora_low"):
             if col not in pcols:
                 conn.execute(f"ALTER TABLE projects ADD COLUMN {col} TEXT NOT NULL DEFAULT ''")
                 logger.info("[PipelineStore] 迁移：projects 补列 %s", col)
@@ -235,7 +242,8 @@ class PipelineStore:
         logger.info("[PipelineStore] 删除项目 %s（删到 %d 行）", project_id, cur.rowcount)
         return cur.rowcount > 0
 
-    _STYLE_COLS = ("style_prompt", "trigger_word", "flux_lora", "negative_prompt", "default_size")
+    _STYLE_COLS = ("style_prompt", "trigger_word", "flux_lora", "negative_prompt", "default_size",
+                   "wan_t2v_lora_high", "wan_t2v_lora_low")
 
     def get_project_style(self, project_id: str) -> dict:
         """项目级风格（每集一种风格）：通用风格词/触发词/LoRA/负向词/默认尺寸。缺失返回空串。"""
@@ -488,6 +496,14 @@ class PipelineStore:
         with self._lock, self._conn() as conn:
             conn.execute("UPDATE scenes SET lipsync=?, updated_at=? WHERE id=?",
                          (1 if on else 0, _now(), scene_id))
+        return self.get_scene(scene_id)
+
+    def set_scene_video_mode(self, scene_id: str, mode: str) -> dict:
+        """设置某镜出片模式：'i2v'(图生，默认) / 't2v'(文生视频，不出图不选图)。"""
+        mode = mode if mode in ("i2v", "t2v") else "i2v"
+        with self._lock, self._conn() as conn:
+            conn.execute("UPDATE scenes SET video_mode=?, updated_at=? WHERE id=?",
+                         (mode, _now(), scene_id))
         return self.get_scene(scene_id)
 
     def delete_asset(self, asset_id: str) -> Optional[str]:

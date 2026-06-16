@@ -38,5 +38,9 @@ if settings.VIDEO_PROVIDER_DEFAULT and video_provider_registry.has(settings.VIDE
 if settings.COMFYUI_BASE_URL:
     from mirage.app.pipeline.providers.comfyui_s2v import ComfyUIS2VProvider
     video_provider_registry.register(ComfyUIS2VProvider())
+# Wan2.2-T2V 文生视频：隐藏 Provider，不进用户下拉，由「出片模式=t2v」路由。配了端点才注册。
+if settings.COMFYUI_BASE_URL:
+    from mirage.app.pipeline.providers.comfyui_t2v import ComfyUIT2VProvider
+    video_provider_registry.register(ComfyUIT2VProvider())
 
 __all__ = ["VideoProvider", "video_provider_registry"]

@@ -72,6 +72,24 @@ fi
 # umt5 fp8(S2V 对口型必用;也是 i2v fp8 回退档的文本编码器)——保留下载。
 get Comfy-Org/Wan_2.2_ComfyUI_Repackaged split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors "$M/clip"
 
+# ── (可选) Wan2.2-T2V-A14B 双专家(文生视频 t2v 档;角色 LoRA+一致性那条路)。默认不下(各 ~14-28G)，需要才 export DOWNLOAD_T2V=1。──
+#    精度 T2V_PRECISION(默认跟随 I2V_PRECISION)。复用同一 umt5(上方已下) + wan_2.1_vae(下方 S2V 那行已下)。
+if [ "${DOWNLOAD_T2V:-0}" = "1" ]; then
+  T2V_PRECISION="${T2V_PRECISION:-${I2V_PRECISION:-fp16}}"
+  if [ "$T2V_PRECISION" = "fp8" ]; then
+    echo "[download] t2v 档 = fp8_scaled"
+    get Comfy-Org/Wan_2.2_ComfyUI_Repackaged split_files/diffusion_models/wan2.2_t2v_high_noise_14B_fp8_scaled.safetensors "$M/unet"
+    get Comfy-Org/Wan_2.2_ComfyUI_Repackaged split_files/diffusion_models/wan2.2_t2v_low_noise_14B_fp8_scaled.safetensors  "$M/unet"
+  else
+    echo "[download] t2v 档 = fp16 原生满精度"
+    get Comfy-Org/Wan_2.2_ComfyUI_Repackaged split_files/diffusion_models/wan2.2_t2v_high_noise_14B_fp16.safetensors "$M/unet"
+    get Comfy-Org/Wan_2.2_ComfyUI_Repackaged split_files/diffusion_models/wan2.2_t2v_low_noise_14B_fp16.safetensors  "$M/unet"
+  fi
+  # (可选) t2v 极速档蒸馏 LoRA：文件名以 lightx2v/Wan2.2-Distill-Loras 实际为准(与 i2v 不同文件)，非致命跳过。
+  get lightx2v/Wan2.2-Distill-Loras wan2.2_t2v_A14b_high_noise_lora_rank64_lightx2v_4step.safetensors "$M/loras" || echo "[download] (跳过)t2v 蒸馏 LoRA high — 文件名待核对"
+  get lightx2v/Wan2.2-Distill-Loras wan2.2_t2v_A14b_low_noise_lora_rank64_lightx2v_4step.safetensors  "$M/loras" || echo "[download] (跳过)t2v 蒸馏 LoRA low — 文件名待核对"
+fi
+
 # ── (可选) LTX-Video 2.3 权重：与 Wan2.2 并列的「快/音视频一体」档。默认不下(22B+Gemma 很大)。需要才 export DOWNLOAD_LTX=1。──
 # ★前提同 setup：LTX 2.3 要 ComfyUI v0.16+。下方文件名/仓库以官方 Lightricks/LTX-2.3 + v0.16+ 官方模板实际为准；
 #   每条都做成非致命(|| echo)：万一文件名随版本变了也绝不中断 Wan/FLUX 的下载。下完按 ltx_i2v_template.json 核对。

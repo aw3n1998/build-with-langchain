@@ -1079,6 +1079,7 @@ class BatchRequest(BaseModel):
     project_id: str
     workspace: str | None = None
     session_id: str | None = None
+    video_mode: str = "i2v"   # 出片模式: i2v(图生,默认) / t2v(文生视频,跳过出图/选图)
     # 出视频参数（面板可选）
     model: str = ""
     segments: int = 1
@@ -1153,9 +1154,13 @@ async def _batch_finish_events(req: BatchRequest):
     store = get_store()
     st = store.status(req.project_id)
     scenes = sorted(st["scenes"], key=lambda x: x["scene_number"])
-    # 以「已选定一张图且尚未出片」为准（state 可能漂移，但选中资产是可靠信号）
-    todo = [s for s in scenes
-            if s.get("selected_asset_id") and s["state"] != SceneState.COMPLETED.value]
+    if (req.video_mode or "i2v") == "t2v":
+        # t2v 不出图不选图：所有未完成的镜都是 todo（不靠 selected_asset_id）
+        todo = [s for s in scenes if s["state"] != SceneState.COMPLETED.value]
+    else:
+        # 以「已选定一张图且尚未出片」为准（state 可能漂移，但选中资产是可靠信号）
+        todo = [s for s in scenes
+                if s.get("selected_asset_id") and s["state"] != SceneState.COMPLETED.value]
     already = [s for s in scenes if s["state"] == SceneState.COMPLETED.value]
     if not todo and not already:
         yield {"type": "tool_result", "name": "batch_finish",
@@ -1169,6 +1174,8 @@ async def _batch_finish_events(req: BatchRequest):
         params["size"] = req.size
     if req.lightning is not None:                  # 两档:True=极速(Lightning 4步打样)/False=精修(满档)
         params["lightning"] = "1" if req.lightning else "0"
+    if (req.video_mode or "i2v") == "t2v":         # t2v 模式透传给 do_render_scene_video 走文生视频
+        params["video_mode"] = "t2v"
     if req.scene_ids:                              # 精修重渲"选中的":只渲这些镜(含已 COMPLETED；do_render 内部 force 重渲)
         _ids = set(req.scene_ids)
         todo = [s for s in scenes if s["id"] in _ids and s.get("selected_asset_id")]
@@ -2201,6 +2208,7 @@ class OneClickRequest(BaseModel):
     project_id: str
     workspace: str | None = None
     session_id: str | None = None
+    video_mode: str = "i2v"           # i2v(图生,默认) / t2v(文生视频,跳过出图/选图)
     novel_text: str = ""              # 非空=先 auto_fill 拆分镜+角色+风格；空=用项目里已有的分镜
     target_sec: float = 60.0          # 目标成片时长(秒)：AI 按此自算分镜数 + 每镜段数
     coherence: bool = True            # True=少而长的连续长镜(更连贯)；False=多而短的快切
@@ -2242,7 +2250,15 @@ async def _one_click_events(req: OneClickRequest):
 
     breq = BatchRequest(project_id=req.project_id, workspace=req.workspace, session_id=req.session_id,
                         model=req.model, size=req.size, lightning=req.lightning,
-                        segments=plan["segments_per_shot"])
+                        segments=plan["segments_per_shot"], video_mode=req.video_mode)
+
+    # t2v 模式：不出图、不选图，storyboard 后直接逐镜文生视频 → 合成整集
+    if (req.video_mode or "i2v") == "t2v":
+        yield {"type": "tool_result", "name": "one_click",
+               "content": "t2v 文生视频模式：跳过出图/选图，逐镜直接文生视频…"}
+        async for ev in _batch_finish_events(breq):
+            yield ev
+        return
 
     # 2) 批量出图
     async for ev in _batch_generate_events(breq):
