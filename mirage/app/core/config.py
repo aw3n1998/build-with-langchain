@@ -124,6 +124,10 @@ class Settings(BaseSettings):
     # 默认关(精修档)；出片时传 lightning=true(面板「极速档」开关/更多参数)或这里设 true 走极速档。
     WAN_LIGHTNING: bool = False
     COMFYUI_WORKFLOW_I2V_LIGHTNING: str = "comfyui_workflows/i2v_fp8_lightning_template.json"
+    # 出片精度(由 colab cell-1 按 GPU 探测写入环境变量;空=未探测)。极速档据此选模板:
+    # 原生 fp8 卡(Blackwell/H100)=fp8;无原生 fp8 卡(A100/V100,探测为 fp16)→自动改用 bf16 极速档模板
+    # ——A100(sm_80)无 FP8 张量核,跑 fp8 是软件模拟纯亏,bf16 更快且画质更高。
+    I2V_PRECISION: str = ""
     # ── FLF2V 首尾帧·共享关键帧续段（治本:根治尾帧续段的接缝抖动）──────────────
     # 每段用相邻两张关键帧做 first-last-frame-to-video,相邻段共用边界帧 → 交界像素相同、零抖、免 xfade,
     # 且每段被两端约束、不累积漂移。需 ComfyUI v0.16+ 原生 WanFirstLastFrameToVideo;首跑前按官方模板核对脚手架。

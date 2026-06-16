@@ -116,7 +116,13 @@ class ComfyUIProvider(VideoProvider):
             mapping["%STEPS%"] = _lsteps
             mapping["%BOUNDARY%"] = max(1, _lsteps // 2)
             mapping["%SHIFT%"] = float(params.get("shift") or settings.WAN_LIGHTNING_SHIFT)
-            template = ch.load_workflow(settings.COMFYUI_WORKFLOW_I2V_LIGHTNING,
+            # 极速档模板按 GPU 精度自适应：无原生 fp8 的卡(A100/V100，cell-1 探测为 fp16)→ 用 bf16 极速档模板，
+            # 避免在 sm_80 上跑模拟 fp8(纯亏)。仅当仍是 fp8 默认模板时自动切；用户显式改过则尊重其选择。
+            _light_tmpl = settings.COMFYUI_WORKFLOW_I2V_LIGHTNING
+            if (settings.I2V_PRECISION or "").lower() in ("fp16", "bf16") \
+                    and _light_tmpl.endswith("i2v_fp8_lightning_template.json"):
+                _light_tmpl = "comfyui_workflows/i2v_bf16_lightning_template.json"
+            template = ch.load_workflow(_light_tmpl,
                                         "i2v_fp8_lightning_template.json", "i2v-lightning")
         else:
             template = ch.load_workflow(settings.COMFYUI_WORKFLOW_I2V, "i2v_gguf_template.json", "i2v")
