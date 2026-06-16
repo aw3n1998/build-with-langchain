@@ -3,7 +3,7 @@
 # FLUX.1-dev / ae 是 gated：先 `hf auth login`(或设 HF_TOKEN 环境变量)。huggingface-cli 已废弃。
 set -e
 M=/content/ComfyUI/models
-mkdir -p "$M"/{unet,checkpoints,clip,vae,audio_encoders,loras,pulid,insightface,diffusion_models,text_encoders,upscale_models}
+mkdir -p "$M"/{unet,checkpoints,clip,vae,audio_encoders,loras,pulid,insightface,diffusion_models,text_encoders,upscale_models,facerestore_models}
 
 # 跳过闸只认扁平路径 $3/$base；hf 会按 repo 子目录(HighNoise/、split_files/..)存，
 # 故下完立刻把文件挪到 $3/$base。即时扁平 = 中途被回收/打断时已下的也已就位，下次必 [skip]。
@@ -102,6 +102,25 @@ get lightx2v/Wan2.2-Distill-Loras wan2.2_i2v_A14b_low_noise_lora_rank64_lightx2v
 
 # ── 画质增强:RealESRGAN_x2 视频放大模型(COMFYUI_WORKFLOW_POST=post_upscale 才用;~64MB)。不放大可注释。──
 get ai-forever/Real-ESRGAN RealESRGAN_x2.pth "$M/upscale_models"
+
+# ── (可选) 视频换脸 ReActor 模型。默认不下;需要才 export DOWNLOAD_FACESWAP=1。──
+# inswapper_128.onnx→insightface/(~530MB,核心换脸);GFPGANv1.4.pth→facerestore_models/(可选修脸);
+# 人脸检测包 buffalo_l 由 insightface 首跑自动下到 /root/.insightface(cell5 已软链 Drive 持久化)。
+if [ "${DOWNLOAD_FACESWAP:-0}" = "1" ]; then
+  mkdir -p "$M/facerestore_models"
+  if [ -s "$M/insightface/inswapper_128.onnx" ]; then echo "[skip] inswapper_128.onnx"; else
+    echo "[get ] inswapper_128.onnx"
+    wget -q -O "$M/insightface/inswapper_128.onnx" \
+      https://huggingface.co/datasets/Gourieff/ReActor/resolve/main/models/inswapper_128.onnx \
+      || echo "[warn] inswapper_128.onnx 下载失败(换脸才需要)"
+  fi
+  if [ -s "$M/facerestore_models/GFPGANv1.4.pth" ]; then echo "[skip] GFPGANv1.4.pth"; else
+    echo "[get ] GFPGANv1.4.pth"
+    wget -q -O "$M/facerestore_models/GFPGANv1.4.pth" \
+      https://huggingface.co/datasets/Gourieff/ReActor/resolve/main/models/facerestore_models/GFPGANv1.4.pth \
+      || echo "[warn] GFPGAN 下载失败(修脸可选;.env 设 FACESWAP_RESTORE_MODEL=none 也能跑)"
+  fi
+fi
 
 # ── 兜底校验：get() 已逐个即时扁平；这里再扫一遍，发现仍埋在子目录的(如旧会话遗留)补挪并报警 ──
 # ★find -L：models/<sub> 是软链到 Drive，不加 -L 扫不进软链 → 漏掉 split_files/ 里的文件（本次大坑根因）。

@@ -40,6 +40,15 @@ if [ "${SETUP_LTX:-0}" = "1" ]; then
   [ -f ComfyUI-LTXVideo/requirements.txt ] && pip -q install -r ComfyUI-LTXVideo/requirements.txt || true
 fi
 
+# ── (可选) 视频换脸 ReActor。默认关(export SETUP_FACESWAP=1 开)。★NSFW 走 Codeberg 无审核镜像★ ──
+# 原 GitHub 仓库 comfyui-reactor-node 已被 GitHub 封;现行 ComfyUI-ReActor 自 0.5.2 内置鉴黄滤镜(命中涂黑)
+# → 本项目用 codeberg.org 的无审核镜像。换脸依赖 insightface/onnxruntime-gpu/facexlib 在下方 PuLID 那步已装,直接复用,免再踩编译坑。
+if [ "${SETUP_FACESWAP:-0}" = "1" ]; then
+  echo "[setup] 装 ReActor 换脸节点(Codeberg 无审核镜像)"
+  clone_or_pull https://codeberg.org/Gourieff/comfyui-reactor-node || echo "[setup] ReActor 拉取失败(不影响出片/出图)"
+  [ -f comfyui-reactor-node/requirements.txt ] && pip -q install -r comfyui-reactor-node/requirements.txt || true
+fi
+
 for r in ComfyUI-GGUF ComfyUI-VideoHelperSuite ComfyUI_PuLID_Flux_ll; do
   [ -f "$r/requirements.txt" ] && pip -q install -r "$r/requirements.txt" || true
 done
