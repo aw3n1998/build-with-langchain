@@ -1218,7 +1218,7 @@ export function ProductionPanel({ message, workspace, sessionId }) {
     try {
       const jobId = await pipelineFlf2v({ scene_id: sceneId, auto: true, workspace, session_id: sessionId })
       for await (const ev of streamJobEvents(jobId)) {
-        if (ev.type === 'log') setLogs(prev => [...prev, ev.line].slice(-300))
+        if (ev.type === 'log') { setLogs(prev => [...prev, ev.line].slice(-300)); if (ev.line) setProgress(ev.line) }   // 心跳/段进度刷到主状态条:看得到「段2/8·已等待Ns」，不再像卡死
         else if (ev.type === 'video') load()   // 后端已 set_scene_video → 刷新显示无缝版
         else if (ev.type === 'tool_result' && ev.content) { setProgress(ev.content); setLogs(prev => [...prev, '» ' + ev.content].slice(-300)) }
         else if (ev.type === 'error') setProgress(ev.content || 'FLF2V 已停止')
