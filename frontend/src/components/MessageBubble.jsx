@@ -1374,8 +1374,10 @@ export function ProductionPanel({ message, workspace, sessionId }) {
                 placeholder="外貌（写明确年龄+发型+特征，如：45岁中年男，短寸花白发，左眉旧疤）"
                 onBlur={e => e.target.value !== c.appearance && charOp('update', { char_id: c.id, appearance: e.target.value })}
                 style={{ ...inputStyle, width: '100%', resize: 'vertical', marginBottom: 4 }} />
-              <div style={{ display: 'flex', gap: 6 }}>
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                <span style={{ fontSize: 11, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>音色</span>
                 <select defaultValue={c.voice || ''} onChange={e => charOp('update', { char_id: c.id, voice: e.target.value })}
+                  title="该角色的配音音色（声音圣经）；旁白/多角色对话出现该角色台词时，按此音色配音"
                   style={{ ...inputStyle, height: 28, flex: 1 }}>
                   {VOICES.map(v => <option key={v.v} value={v.v}>{v.label}</option>)}
                 </select>
