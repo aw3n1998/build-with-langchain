@@ -25,10 +25,11 @@ _SYSTEM = (
     "你是短剧导演 + 分镜师。把用户给的小说/剧情文本拆成一集竖屏短剧的连续分镜。\n"
     "硬性要求：\n"
     "1) 输出恰好 N 个分镜，按时间顺序，每镜是一个 JSON 对象，整体是一个长度严格为 N 的 JSON 数组。\n"
-    "2) 每个分镜对象字段（全部必填，值用中文，除 image_prompt、motion_prompt 可中文也可英文）：\n"
+    "2) 每个分镜对象字段（全部必填，值用中文，但 image_prompt、motion_prompt **必须用英文**）：\n"
     "   - title: 6字内的镜头小标题\n"
-    "   - image_prompt: 出图画面描述。**人物务必写明确年龄数字**（如'17岁'、'40岁中年'，别只写'高中生/老人'，否则模型会画错年龄）；\n"
-    "     同一角色每镜复用同一段外貌描述（发型/脸型/穿着/特征），保证跨镜是同一个人；结尾统一带风格词。\n"
+    "   - image_prompt: 出图画面描述，**必须用英文**（出图模型 FLUX 只懂英文；中文会被画成毫不相关的乱图——头号坑）。\n"
+    "     **人物务必写明确年龄数字**（如 '17-year-old'、'40-year-old man'，别只写 teenager/old man，否则画错年龄）；\n"
+    "     同一角色每镜复用同一段英文外貌描述（hair / face / clothing / distinctive features），保证跨镜是同一个人；结尾统一带英文风格词。\n"
     "   - motion_prompt: 图生视频运镜(喂 Wan2.2，**优先英文**——运镜术语英文更稳)。写**一段**(非一句)，按公式：\n"
     "     [主体的一个具体动作，先轻后重、单一方向] + [单一运镜术语] + [光影/氛围]。运镜术语**只选一个**英文：\n"
     "     push-in / pull-out / pan left / pan right / tilt up / tilt down / orbit / following shot / static shot，别堆两个矛盾运镜。\n"
@@ -124,7 +125,7 @@ async def breakdown_storyboard(novel_text: str, n: int, *, style: str = "",
             if nm:
                 lines.append(f"- {nm}：{ap or '(外貌自拟，但每镜保持一致)'}")
         if lines:
-            char_block = "本剧角色（image_prompt 写到该角色时用其外貌、character 字段填其名）：\n" + "\n".join(lines) + "\n"
+            char_block = "本剧角色（image_prompt 写到该角色时，把其外貌**翻成英文**写进去；character 字段填其原名）：\n" + "\n".join(lines) + "\n"
 
     human = (
         f"{char_block}"

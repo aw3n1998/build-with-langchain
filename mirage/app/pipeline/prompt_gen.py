@@ -137,7 +137,9 @@ def translate_to_english(text: str) -> str:
     from mirage.app.services.ai_service import ai_service
     from langchain_core.messages import SystemMessage, HumanMessage
     try:
-        resp = ai_service._llm.invoke([
+        # 用分镜模型(STORYBOARD_* env → 全局默认)，别用裸 _llm——全局 key 常空(Colab 默认)，
+        # 那样翻译必失败、退回中文 → FLUX 出乱图。配了 STORYBOARD_* 这条安全网才真生效。
+        resp = ai_service.storyboard_llm.invoke([
             SystemMessage(content=_TRANSLATE_SYSTEM),
             HumanMessage(content=t),
         ])

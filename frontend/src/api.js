@@ -310,7 +310,7 @@ export async function autoStoryboard(projectId, novelText, scenes, replace, work
 export async function autoFill(projectId, novelText, scenes, replace, workspace = null) {
   const body = { project_id: projectId, novel_text: novelText, scenes, replace, workspace }
   const agentConfigs = getAgentConfigs()
-  if (agentConfigs) body.agent_configs = agentConfigs   // 拆分镜步骤走它(角色/风格分析仍走默认)
+  if (agentConfigs) body.agent_configs = agentConfigs   // 角色/风格/分镜 全部 AI 分析都走它(导演模型)
   const r = await fetch(`${getBase()}/pipeline/auto_fill`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),

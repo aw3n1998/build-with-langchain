@@ -61,6 +61,10 @@ class ComfyUIImageProvider(ImageProvider):
     display_name = "ComfyUI (文生图)"
     capabilities = {"t2i"}
     transport = "http"
+    # 本 Provider 服务的都是 FLUX 系 checkpoint(DAC_Fluxed / Chroma / flux-dev)——文本编码器纯英文，读不懂中文。
+    # 标 "en" → 工具层出图前把含中文的 image_prompt 自动翻英文(受 IMAGE_PROMPT_AUTOTRANSLATE 总开关)。
+    # ★漏标会退回基类默认 "any" → 跳过翻译 → 中文直喂 FLUX 出乱图(女人/食物/玩具那种)★。
+    prompt_lang = "en"
 
     def __init__(self, name: str | None = None, display_name: str | None = None) -> None:
         if name:

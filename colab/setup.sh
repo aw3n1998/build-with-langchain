@@ -52,7 +52,11 @@ fi
 for r in ComfyUI-GGUF ComfyUI-VideoHelperSuite ComfyUI_PuLID_Flux_ll; do
   [ -f "$r/requirements.txt" ] && pip -q install -r "$r/requirements.txt" || true
 done
-pip -q install facexlib onnxruntime-gpu insightface facenet_pytorch || true   # PuLID 依赖(可选;facenet_pytorch 给 lldacing 版的 MTCNN)
+pip -q install facexlib onnxruntime-gpu insightface || true   # PuLID 依赖(可选)
+# ★facenet_pytorch 钉死 torch<2.3,直接 pip 装会把 Colab 原装 torch(≥2.6)拉退到 2.2.x →
+#   ComfyUI v0.3.75 的 comfy/ops.py 调 torch.compiler.is_compiling()(torch 2.3+ 才有)直接崩(出图/出片全挂)。
+#   --no-deps 只装它本体、复用现有 torch(facenet 纯 wrapper,在新 torch 上照跑)。给 lldacing 版 PuLID 的 MTCNN 用。
+pip -q install --no-deps facenet_pytorch || true
 
 # ── SageAttention：出片提速 ~2×(实测把 Wan2.2-A14B 720p 从 58→22 s/step)。装上 cell5 才会带 --use-sage-attention ──
 # 优先 v2 现场编译(Colab 自带 nvcc,约几分钟);失败退纯 Triton 的 1.0.6(免编译、稍慢但稳);都失败也不影响出片。
@@ -62,5 +66,20 @@ pip -q install sageattention==2.2.0 --no-build-isolation \
   || pip -q install sageattention==1.0.6 \
   || echo "[setup] SageAttention 未装上(出片仍可用,只是少了那 ~2x 注意力提速)"
 python -c "import sageattention" 2>/dev/null && echo "[setup] SageAttention OK" || echo "[setup] 无 SageAttention(将走普通注意力)"
+
+# ── 兜底:确保 torch 没被任何依赖偷偷拉退到 <2.3 ─────────────────────────────
+# ComfyUI v0.3.75 的 comfy/ops.py 用 torch.compiler.is_compiling()(torch 2.3+ 才有)。
+# facenet 已用 --no-deps 隔离;但任何 custom_node 的 requirements 也可能 pin 旧 torch。
+# 装完一切后自检一次,缺了就把 torch 顶回去(TMPDIR 已设,重装不会踩 Errno 18 跨设备 rename)。
+if python -c "import torch,sys; sys.exit(0 if hasattr(torch.compiler,'is_compiling') else 1)" 2>/dev/null; then
+  echo "[setup] torch 自检 OK:$(python -c 'import torch;print(torch.__version__)')"
+else
+  echo "[setup] ⚠ torch=$(python -c 'import torch;print(torch.__version__)' 2>/dev/null || echo '?') 缺 torch.compiler.is_compiling(被依赖拉退),重装恢复"
+  # ★三件套一起卸再一起装★——只 `-U torch` 会把 torch 升级、torchaudio 留旧 → ABI 不匹配
+  #   (undefined symbol: aoti_torch_abi_version)。一起装才保证 torch/vision/audio 版本对齐。
+  pip -q uninstall -y torch torchvision torchaudio
+  pip -q install torch torchvision torchaudio
+  echo "[setup] torch 已恢复:$(python -c 'import torch;print(torch.__version__)')"
+fi
 
 echo "[setup] ComfyUI + 节点就绪"

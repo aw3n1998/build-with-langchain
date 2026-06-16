@@ -1412,7 +1412,7 @@ class AutoFillRequest(BaseModel):
     novel_text: str
     scenes: int = 8
     replace: bool = False         # true=替换现有角色/风格/分镜（LoRA 任务不删，保住已传图）
-    # 前端「导演/分镜模型」；空=走 .env STORYBOARD_*/默认。仅作用于拆分镜步骤(角色/风格分析仍走默认)。
+    # 前端「导演/分镜模型」；空=走 .env STORYBOARD_*/默认。作用于 角色/风格/分镜 全部 AI 分析步骤。
     agent_configs: dict[str, AgentLLMConfig] | None = None
 
 
@@ -1426,9 +1426,10 @@ async def pipeline_auto_fill(req: AutoFillRequest):
     if not store.get_project(pid):
         raise HTTPException(status_code=404, detail="项目不存在")
     novel = req.novel_text or ""
+    sb_cfg = (req.agent_configs or {}).get("supervisor")   # 前端导演模型(空=回退 .env)；角色/风格/分镜共用
 
-    # 1) 角色（replace 时先清空旧角色）
-    chars = await extract_characters(novel)
+    # 1) 角色（replace 时先清空旧角色）——用前端配的模型，避免全局 LLM key 空时静默抽不出角色
+    chars = await extract_characters(novel, llm_config=sb_cfg)
     if req.replace:
         for c in store.list_characters(pid):
             store.delete_character(c["id"])
@@ -1452,7 +1453,7 @@ async def pipeline_auto_fill(req: AutoFillRequest):
             style_refs.append((_json.loads(t.get("content") or "{}") or {}).get("style_prompt") or "")
         except Exception:  # noqa: BLE001
             pass
-    style = await generate_style(novel, style_refs=[s for s in style_refs if s])
+    style = await generate_style(novel, style_refs=[s for s in style_refs if s], llm_config=sb_cfg)
     try:
         store.update_project_style(pid, **style)
     except Exception:  # noqa: BLE001
@@ -1461,7 +1462,6 @@ async def pipeline_auto_fill(req: AutoFillRequest):
     # 3) 分镜（带新角色 + 新风格；逻辑同 auto_storyboard）
     chars_now = store.list_characters(pid)
     n = max(1, min(int(req.scenes or 8), 40))
-    sb_cfg = (req.agent_configs or {}).get("supervisor")   # 前端导演模型(空=回退 .env)
     scenes = await breakdown_storyboard(novel, n, style=style.get("style_prompt", ""),
                                         characters=chars_now, llm_config=sb_cfg)
     if req.replace:

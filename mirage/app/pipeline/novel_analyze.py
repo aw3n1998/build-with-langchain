@@ -32,8 +32,9 @@ _VOICES: list[tuple[str, str]] = [
 _VOICE_IDS = {v for v, _ in _VOICES}
 
 _DEFAULT_STYLE = {
-    "style_prompt": "电影感，写实，浅景深",
-    "negative_prompt": "低质,模糊,多手指,畸形,水印",
+    # ★英文★：style_prompt 会拼到每镜 image_prompt 末尾喂 FLUX，中文会把整张图带成乱图。
+    "style_prompt": "cinematic film still, photorealistic, shallow depth of field",
+    "negative_prompt": "low quality, blurry, extra fingers, deformed, watermark, text",
     "default_size": "768x1024",
 }
 
@@ -84,8 +85,13 @@ def _coerce_style(text: str) -> dict:
     return out
 
 
-async def extract_characters(novel_text: str, max_n: int = 6) -> list[dict]:
-    """从小说文本抽主要角色，返回 [{name, appearance, voice}]（失败返回 []）。"""
+async def extract_characters(novel_text: str, max_n: int = 6, *, llm_config=None) -> list[dict]:
+    """从小说文本抽主要角色，返回 [{name, appearance, voice}]（失败返回 []）。
+
+    llm_config: 前端「导演模型」(AgentLLMConfig|dict|None)。非空=用它(与拆分镜同一个模型,
+        如 grok/OpenRouter)；空=回退 STORYBOARD_* env → 全局默认。★关键★：全局 LLM key 若留空
+        (Colab 默认 DEEPSEEK_KEY 可空)，抽角色就会静默失败返回空——必须复用用户实际配的那个模型。
+    """
     from mirage.app.services.ai_service import ai_service
     from langchain_core.messages import SystemMessage, HumanMessage
 
@@ -105,7 +111,8 @@ async def extract_characters(novel_text: str, max_n: int = 6) -> list[dict]:
         f"小说/剧情文本：\n{(novel_text or '').strip()[:6000]}"
     )
     try:
-        resp = await ai_service._llm.ainvoke([
+        llm = ai_service.storyboard_llm_for(llm_config)   # 与拆分镜同一个模型 > STORYBOARD_* env > 全局默认
+        resp = await llm.ainvoke([
             SystemMessage(content=system), HumanMessage(content=human),
         ])
         out = _coerce_characters(getattr(resp, "content", "") or "", max_n)
@@ -116,10 +123,12 @@ async def extract_characters(novel_text: str, max_n: int = 6) -> list[dict]:
         return []
 
 
-async def generate_style(novel_text: str, style_refs: list[str] | None = None) -> dict:
+async def generate_style(novel_text: str, style_refs: list[str] | None = None,
+                         *, llm_config=None) -> dict:
     """据小说题材/氛围生成本集统一画风，返回 {style_prompt, negative_prompt, default_size}。
 
     style_refs: 用户在模板库里存过的偏好风格词；传入则让 AI 尽量贴近这些口味（F→E 的「下次自动」）。
+    llm_config: 同 extract_characters——复用前端配的导演模型，避免全局 key 空时静默用默认风格。
     """
     from mirage.app.services.ai_service import ai_service
     from langchain_core.messages import SystemMessage, HumanMessage
@@ -127,8 +136,9 @@ async def generate_style(novel_text: str, style_refs: list[str] | None = None) -
     system = (
         "你是短剧美术指导。据题材/氛围给这一集定**统一画风**（全集一个调性）。\n"
         "输出一个 JSON 对象，字段：\n"
-        "  - style_prompt: 一句通用风格词（写实/电影感/色调/光线/景深等，会拼到每镜出图词末尾）\n"
-        "  - negative_prompt: 不想要的元素（如 低质,模糊,多手指,畸形,水印）\n"
+        "  - style_prompt: 一句通用风格词，**必须用英文**（会拼到每镜出图词末尾喂 FLUX，中文会画成乱图）。\n"
+        "    写实/电影感/色调/光线/景深等，如 'cinematic film still, photorealistic, moody lighting, shallow depth of field'。\n"
+        "  - negative_prompt: 不想要的元素，**用英文**（如 'low quality, blurry, extra fingers, deformed, watermark'）。\n"
         "  - default_size: 出图尺寸，竖屏短剧默认 768x1024（横屏题材可 1024x768）\n"
         "只输出这个 JSON 对象，不要解释/代码块标记。"
     )
@@ -139,7 +149,8 @@ async def generate_style(novel_text: str, style_refs: list[str] | None = None) -
             ref_block = f"用户偏好的画风参考（尽量贴近这些口味，可融合）：{refs}\n"
     human = f"{ref_block}小说/剧情文本：\n{(novel_text or '').strip()[:4000]}"
     try:
-        resp = await ai_service._llm.ainvoke([
+        llm = ai_service.storyboard_llm_for(llm_config)
+        resp = await llm.ainvoke([
             SystemMessage(content=system), HumanMessage(content=human),
         ])
         out = _coerce_style(getattr(resp, "content", "") or "")
