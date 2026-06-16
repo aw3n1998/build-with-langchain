@@ -2,7 +2,7 @@
 流水线状态机存储 —— 架构文档 DDL 的 SQLite 精简实现。
 
 为什么用 SQLite 而非架构文档里的 Postgres？
-  本框架（build-with-langchain）已用 langgraph-checkpoint-sqlite 做会话持久化，
+  本框架（蜃景 Mirage）已用 langgraph-checkpoint-sqlite 做会话持久化，
   这里复用同一套轻量持久化栈，避免为"一个能力"引入 Postgres+Celery+Redis 整套重型基建。
   表结构与状态机语义和架构文档完全对齐，未来要换 Postgres 只需替换本文件。
 

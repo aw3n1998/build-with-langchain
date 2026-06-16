@@ -1,5 +1,5 @@
 """
-小说转短剧视频流水线（Novel-to-Video Pipeline）—— build-with-langchain 扩展模块
+小说转短剧视频流水线（Novel-to-Video Pipeline）—— 蜃景 Mirage 扩展模块
 
 把 headless / 解耦 / 人在回路（HITL）的小说转视频架构，原生集成进 LangGraph 框架：
   - store.py        : 轻量 SQLite 状态机（projects / scenes / assets），对应架构文档 DDL
