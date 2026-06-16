@@ -23,7 +23,7 @@ import { fileUrl, getVideoProviders, getImageProviders, getProject, batchGenerat
          loraCreate, loraAction, loraUploadImage, loraUploadRef,
          suggestContinuation, sceneGenerate, sceneRender, sceneAppend,
          cancelJob, listActiveJobs,
-         projectStyle, sceneAdd, sceneDelete } from '../api'
+         projectStyle, sceneAdd, sceneDelete, listLoras } from '../api'
 
 /**
  * MessageBubble — 消息渲染
@@ -695,6 +695,7 @@ export function ProductionPanel({ message, workspace, sessionId }) {
   const [showStyle, setShowStyle] = useState(false)
   const [style, setStyle] = useState(null)              // {style_prompt,trigger_word,flux_lora,negative_prompt,default_size}
   const [styleBusy, setStyleBusy] = useState(false)
+  const [loras, setLoras] = useState({ loras: [], model: {} })   // ComfyUI 可用 LoRA + 对话/全局出图配置
   const [showAddScene, setShowAddScene] = useState(false)
   const [newScene, setNewScene] = useState({ title: '', narration: '', image_prompt: '', motion_prompt: '', subtitle: '', lipsync: false })
   const [addBusy, setAddBusy] = useState(false)
@@ -886,6 +887,9 @@ export function ProductionPanel({ message, workspace, sessionId }) {
   const loadStyle = async () => {
     try { const r = await projectStyle(pid, {}, workspace); setStyle(r.style || {}) } catch { /* 忽略 */ }
   }
+  const loadLoras = async () => {
+    try { const r = await listLoras(workspace); setLoras(r || { loras: [], model: {} }) } catch { /* 忽略 */ }
+  }
   const saveStyle = async () => {
     setStyleBusy(true)
     try { const r = await projectStyle(pid, style || {}, workspace); setStyle(r.style); setProgress('本集风格已保存（下次出图自动套用）') }
@@ -996,6 +1000,23 @@ export function ProductionPanel({ message, workspace, sessionId }) {
         style={{ ...inputStyle, width: '100%', height: 30, boxSizing: 'border-box' }} />
     </div>
   )
+  const styleLoraField = () => {
+    const cur = (style && style.flux_lora) || ''
+    const avail = loras.loras || []
+    const missing = cur && cur !== 'none' && !avail.includes(cur)
+    return (
+      <div style={{ marginBottom: 6 }}>
+        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 2 }}>FLUX LoRA（出图锁人物；下拉选真实文件，免得手填到不存在的名字让出图整批失败）</div>
+        <select value={cur} onChange={e => setStyle(s => ({ ...(s || {}), flux_lora: e.target.value }))}
+          style={{ ...inputStyle, width: '100%', height: 30, boxSizing: 'border-box' }}>
+          <option value="">默认（.env / 不指定）</option>
+          <option value="none">none（不加载任何 LoRA）</option>
+          {avail.map(n => <option key={n} value={n}>{n}</option>)}
+          {missing && <option value={cur}>{cur}（⚠ ComfyUI 里没有此文件）</option>}
+        </select>
+      </div>
+    )
+  }
   const addField = (label, key) => (
     <div style={{ marginBottom: 6 }}>
       <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 2 }}>{label}</div>
@@ -1005,7 +1026,7 @@ export function ProductionPanel({ message, workspace, sessionId }) {
   )
   const subBox = { background: '#161616', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 12, padding: '16px 18px', marginBottom: 12 }
   useEffect(() => { cancelled.current = false; load(); return () => { cancelled.current = true } }, [pid])  // eslint-disable-line
-  useEffect(() => { if (tab === 'script' && !style) loadStyle() }, [tab])  // eslint-disable-line 进剧本 tab 时加载本集风格
+  useEffect(() => { if (tab === 'script') { if (!style) loadStyle(); loadLoras() } }, [tab])  // eslint-disable-line 进剧本 tab 时加载本集风格 + 可用 LoRA
   useEffect(() => {
     getVideoProviders().then(d => {
       setModels(d.providers || [])
@@ -1426,7 +1447,12 @@ export function ProductionPanel({ message, workspace, sessionId }) {
           </div>
           {styleField('通用风格词', 'style_prompt', '如：写实，电影感，冷蓝调，浅景深（自动拼到每镜出图词后）')}
           {styleField('角色触发词', 'trigger_word', '人物 LoRA 触发词；没有就留空')}
-          {styleField('FLUX LoRA 路径', 'flux_lora', 'GPU 上 LoRA 路径；none=不加载任何 LoRA')}
+          {styleLoraField()}
+          {(loras.model && (loras.model.trigger_word || loras.model.flux_lora)) ? (
+            <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 6 }}>
+              对话/全局设置（本集留空时回退用）：触发词={loras.model.trigger_word || '（无）'} · LoRA={loras.model.flux_lora || '（无）'}
+            </div>
+          ) : null}
           {styleField('负向词', 'negative_prompt', '不想要的元素（ComfyUI 出图用）')}
           {styleField('默认出图尺寸', 'default_size', '如 768x1024（留空用面板尺寸）')}
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>

@@ -445,6 +445,13 @@ export const projectRename = (projectId, title, workspace = null) => _post('/pip
 export const projectDelete = (projectId, workspace = null) => _post('/pipeline/project_delete', { project_id: projectId, workspace })
 // fields 全空=只读返回风格；带字段=写入。返回 { project_id, style:{...} }
 export const projectStyle = (projectId, fields = {}, workspace = null) => _post('/pipeline/project_style', { project_id: projectId, workspace, ...fields })
+// 列 ComfyUI 实际可用 LoRA + 当前工作目录(对话/全局)出图配置。返回 { loras:[...], model:{trigger_word,flux_lora,negative_prompt} }
+export async function listLoras(workspace = null) {
+  const q = workspace ? `?workspace=${encodeURIComponent(workspace)}` : ''
+  const r = await fetch(`${getBase()}/pipeline/loras${q}`)
+  if (!r.ok) throw new Error(`status ${r.status}`)
+  return r.json()
+}
 export const sceneAdd = (projectId, fields = {}, workspace = null) => _post('/pipeline/scene_add', { project_id: projectId, workspace, ...fields })
 export const sceneDelete = (sceneId, workspace = null) => _post('/pipeline/scene_delete', { scene_id: sceneId, workspace })
 

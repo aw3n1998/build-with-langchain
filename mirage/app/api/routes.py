@@ -1331,6 +1331,21 @@ async def pipeline_project_style(req: ProjectStyleRequest):
     return {"project_id": req.project_id, "style": style}
 
 
+@router.get("/pipeline/loras")
+async def pipeline_loras(workspace: str = ""):
+    """列出 ComfyUI 实际可用的 LoRA 文件 + 当前工作目录(对话/全局)的出图配置。
+    面板据此把「LoRA」做成下拉真实文件，免得手填出一个不存在的名字(出图会被 ComfyUI 打回、整批失败)。"""
+    from mirage.app.pipeline.runtime import set_workspace, model_config
+    from mirage.app.pipeline import comfy_http as ch
+    if workspace:
+        set_workspace(workspace)
+    try:
+        avail = ch.available_loras(ch.base_url())
+    except Exception:  # noqa: BLE001
+        avail = None
+    return {"loras": sorted(avail) if avail else [], "model": model_config()}
+
+
 @router.post("/pipeline/scene_add")
 async def pipeline_scene_add(req: SceneAddRequest):
     """面板「新增分镜」：不绕 agent 直接加一镜。镜号缺省=接最后。"""
