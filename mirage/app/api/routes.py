@@ -2230,7 +2230,9 @@ async def _one_click_events(req: OneClickRequest):
     import asyncio
     from mirage.app.pipeline.auto_plan import estimate_storyboard, auto_select_all
 
-    plan = estimate_storyboard(req.target_sec, coherence=req.coherence)
+    # t2v 每镜单段(_do_render_t2v 丢 segments)→ 用单段时长反推镜数,否则报的总时长虚高约一倍
+    _t2v = (req.video_mode or "i2v") == "t2v"
+    plan = estimate_storyboard(req.target_sec, coherence=(req.coherence and not _t2v))
     yield {"type": "tool_result", "name": "one_click",
            "content": (f"目标 {req.target_sec:.0f}s → {plan['n_shots']} 个镜头 × {plan['segments_per_shot']} 段"
                        f"（每镜≈{plan['sec_per_shot']}s，估算总长≈{plan['est_total_sec']}s）。开始全自动制作…")}

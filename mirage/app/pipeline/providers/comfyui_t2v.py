@@ -66,6 +66,7 @@ class ComfyUIT2VProvider(VideoProvider):
                  {"value": "832*480", "label": "832×480 横屏"},
                  {"value": "768*768", "label": "768×768 方形"},
              ]},
+            {"key": "negative", "label": "负向词(留空=Wan 官方负向)", "type": "text", "default": "", "advanced": True},
             {"key": "lightning", "label": "极速档(4-6步蒸馏)", "type": "bool", "default": bool(settings.WAN_LIGHTNING)},
             {"key": "frames", "label": "帧数(4n+1)", "type": "number", "default": settings.COMFYUI_FRAMES, "advanced": True},
             {"key": "steps", "label": "采样步数(满档)", "type": "number", "default": settings.COMFYUI_STEPS, "advanced": True},
@@ -85,17 +86,27 @@ class ComfyUIT2VProvider(VideoProvider):
         _lv = params.get("lightning", settings.WAN_LIGHTNING)
         lightning = _lv if isinstance(_lv, bool) else str(_lv).strip().lower() in (
             "1", "true", "yes", "on", "lightning", "极速")
+        # 极速档缺 t2v 蒸馏 LoRA 文件名 → 4-6 步无蒸馏=噪声,自动改走满档(别拿空 lora_name 喂 ComfyUI)
+        if lightning and not ((settings.WAN_T2V_LIGHTNING_LORA_HIGH or "").strip()
+                              and (settings.WAN_T2V_LIGHTNING_LORA_LOW or "").strip()):
+            log_bus.emit("[文生视频] 极速档缺 t2v 蒸馏 LoRA 文件名,本次改走满档。")
+            lightning = False
         if lightning:
             steps = max(2, min(int(settings.WAN_LIGHTNING_STEPS or 6), 12))
             shift = float(params.get("shift") or settings.WAN_LIGHTNING_SHIFT)
-            tmpl_path, tmpl_default = settings.COMFYUI_WORKFLOW_T2V_LIGHTNING, "t2v_fp8_lightning_template.json"
+            tmpl = settings.COMFYUI_WORKFLOW_T2V_LIGHTNING or "comfyui_workflows/t2v_fp8_lightning_template.json"
+            tmpl_default, bf16_tmpl = "t2v_fp8_lightning_template.json", "comfyui_workflows/t2v_bf16_lightning_template.json"
         else:
             steps = int(params.get("steps") or settings.COMFYUI_STEPS)
             shift = float(params.get("shift") or settings.WAN_SHIFT)
-            tmpl_path, tmpl_default = settings.COMFYUI_WORKFLOW_T2V, "t2v_fp8_template.json"
+            tmpl = settings.COMFYUI_WORKFLOW_T2V or "comfyui_workflows/t2v_fp8_template.json"
+            tmpl_default, bf16_tmpl = "t2v_fp8_template.json", "comfyui_workflows/t2v_bf16_template.json"
+        # 无原生 fp8 卡(A100/V100，cell-1 探测=fp16)→ 用 bf16 模板,避免 sm_80 跑模拟 fp8;仅当仍是 fp8 默认模板时切
+        if (settings.T2V_PRECISION or "").lower() in ("fp16", "bf16") and tmpl.endswith(tmpl_default):
+            tmpl = bf16_tmpl
         mapping = {
             "%PROMPT%": prompt or "",
-            "%NEG_PROMPT%": str(params.get("negative") or ""),
+            "%NEG_PROMPT%": str(params.get("negative") or settings.WAN_VIDEO_NEGATIVE),
             "%WIDTH%": width, "%HEIGHT%": height,
             "%FRAMES%": int(params.get("frames") or settings.COMFYUI_FRAMES),
             "%FPS%": int(params.get("fps") or settings.COMFYUI_FPS),
@@ -104,7 +115,7 @@ class ComfyUIT2VProvider(VideoProvider):
             "%SHIFT%": shift,
             "%SEED%": seed,
         }
-        template = ch.load_workflow(tmpl_path, tmpl_default, "t2v")
+        template = ch.load_workflow(tmpl, tmpl_default, "t2v")
         # 角色 LoRA：有就填，没有就摘节点(69/70)
         char_hi = (params.get("wan_t2v_lora_high") or settings.WAN_T2V_LORA_HIGH or "").strip()
         char_lo = (params.get("wan_t2v_lora_low") or settings.WAN_T2V_LORA_LOW or "").strip()

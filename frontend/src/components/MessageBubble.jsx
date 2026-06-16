@@ -1149,7 +1149,7 @@ export function ProductionPanel({ message, workspace, sessionId }) {
         segments: kind === 'finish' ? segments : 1,
         size: kind === 'finish' ? vidSize : '',
         video_params: kind === 'finish' ? vidParams : {},
-        video_mode: kind === 'finish' ? ocMode : 'i2v',
+        video_mode: 'i2v',   // 手动「③出片」恒 i2v(分步本就有出图/选图);t2v 只走顶部✨一键,别继承一键面板的 ocMode
         n: kind === 'generate' ? imgN : 0,
         width: kind === 'generate' ? (iw || 0) : 0,
         height: kind === 'generate' ? (ih || 0) : 0,

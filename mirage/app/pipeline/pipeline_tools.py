@@ -651,6 +651,29 @@ def _do_render_lipsync_s2v(scene_id, scene, asset, prompt, params) -> str:
             f"已下载到本机: {final_local}\nVIDFILE::{scene_id}::{final_local}")
 
 
+def _compose_t2v_prompt(scene, motion_prompt, pstyle) -> str:
+    """t2v 提示词 = 画面描述(image_prompt + 风格词 + 触发词，英文化) + 运镜 + 画质尾。
+
+    ★关键:t2v 没有首帧图,画面/主体/外貌/环境只能来自文本——不能像 i2v 那样只给运镜
+    (_compose_wan_prompt 刻意只取 motion;对 i2v 对,对 t2v 会丢掉整段 image_prompt → 出空泛镜头)。
+    """
+    raw = (scene.get("image_prompt") or "").strip()
+    style_words = (pstyle.get("style_prompt") or "").strip()
+    if style_words and style_words.lower() not in raw.lower():
+        raw = f"{raw}，{style_words}".strip("，").strip()
+    if raw and settings.IMAGE_PROMPT_AUTOTRANSLATE:   # Wan/umt5 偏英文，同出图走翻译；失败退原文
+        try:
+            from mirage.app.pipeline.prompt_gen import translate_to_english
+            raw = translate_to_english(raw) or raw
+        except Exception:  # noqa: BLE001
+            pass
+    trigger = (pstyle.get("trigger_word") or "").strip() or model_config().get("trigger_word")
+    raw = _apply_trigger(raw, trigger)
+    motion = (motion_prompt or scene.get("motion_prompt") or "").strip()
+    base = ", ".join(p for p in (raw, motion) if p) or "cinematic film still"
+    return f"{base}, cinematic lighting, high detail"
+
+
 def _do_render_t2v(scene_id, scene, motion_prompt, params) -> str:
     """文生视频出片：文本(画面+运镜) → Wan2.2-T2V 直接出视频，**不需选图/参考帧**。整镜一段。
 
@@ -663,16 +686,17 @@ def _do_render_t2v(scene_id, scene, motion_prompt, params) -> str:
     t2v = video_provider_registry.get("comfyui-t2v")
     local_dir = video_dir()
     final_local = os.path.join(local_dir, f"{scene['scene_number']:02d}_{scene_id}.mp4")
-    prompt = _compose_wan_prompt(scene, motion_prompt)   # 英文化+运镜+光影尾(t2v 同样吃)
+    # 项目级风格/触发词/角色 LoRA：本镜读一次复用(出 prompt + 挂 LoRA 共用，避免逐镜重复读)
+    try:
+        pstyle = store.get_project_style(scene["project_id"]) if scene.get("project_id") else {}
+    except Exception:  # noqa: BLE001
+        pstyle = {}
+    prompt = _compose_t2v_prompt(scene, motion_prompt, pstyle)   # ★带 image_prompt，否则出空泛镜头
     merged = {**t2v.default_params(),
               **{k: v for k, v in (params or {}).items() if v is not None and v != ""}}
     for _k in ("lipsync", "motion_prompts", "segments", "video_mode"):
         merged.pop(_k, None)
     # 项目级 Wan-T2V 角色 LoRA(训好后写进项目 style)；params 已显式带则不覆盖
-    try:
-        pstyle = store.get_project_style(scene["project_id"]) if scene.get("project_id") else {}
-    except Exception:  # noqa: BLE001
-        pstyle = {}
     if not merged.get("wan_t2v_lora_high") and (pstyle.get("wan_t2v_lora_high") or "").strip():
         merged["wan_t2v_lora_high"] = pstyle["wan_t2v_lora_high"].strip()
     if not merged.get("wan_t2v_lora_low") and (pstyle.get("wan_t2v_lora_low") or "").strip():

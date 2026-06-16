@@ -1,0 +1,116 @@
+{
+  "37": {
+    "class_type": "UNETLoader",
+    "_meta": { "title": "高噪专家 t2v fp16 原生(A100 等无原生fp8卡;免 fp8 模拟税)" },
+    "inputs": { "unet_name": "wan2.2_t2v_high_noise_14B_fp16.safetensors", "weight_dtype": "default" }
+  },
+  "41": {
+    "class_type": "UNETLoader",
+    "_meta": { "title": "低噪专家 t2v fp16 原生" },
+    "inputs": { "unet_name": "wan2.2_t2v_low_noise_14B_fp16.safetensors", "weight_dtype": "default" }
+  },
+  "69": {
+    "class_type": "LoraLoaderModelOnly",
+    "_meta": { "title": "高噪 角色 LoRA(身份;空则 provider 摘除本节点)" },
+    "inputs": { "model": ["37", 0], "lora_name": "%CHAR_HI_LORA%", "strength_model": "%CHAR_HI_STR%" }
+  },
+  "70": {
+    "class_type": "LoraLoaderModelOnly",
+    "_meta": { "title": "低噪 角色 LoRA(身份)" },
+    "inputs": { "model": ["41", 0], "lora_name": "%CHAR_LO_LORA%", "strength_model": "%CHAR_LO_STR%" }
+  },
+  "65": {
+    "class_type": "ModelSamplingSD3",
+    "_meta": { "title": "高噪 shift" },
+    "inputs": { "shift": "%SHIFT%", "model": ["69", 0] }
+  },
+  "66": {
+    "class_type": "ModelSamplingSD3",
+    "_meta": { "title": "低噪 shift" },
+    "inputs": { "shift": "%SHIFT%", "model": ["70", 0] }
+  },
+  "38": {
+    "class_type": "CLIPLoader",
+    "_meta": { "title": "文本编码器 umt5(fp16 原生满精度)" },
+    "inputs": { "clip_name": "umt5_xxl_fp16.safetensors", "type": "wan", "device": "default" }
+  },
+  "39": {
+    "class_type": "VAELoader",
+    "_meta": { "title": "VAE — A14B 必用 wan_2.1_vae" },
+    "inputs": { "vae_name": "wan_2.1_vae.safetensors" }
+  },
+  "6": {
+    "class_type": "CLIPTextEncode",
+    "_meta": { "title": "正向 %PROMPT%" },
+    "inputs": { "text": "%PROMPT%", "clip": ["38", 0] }
+  },
+  "7": {
+    "class_type": "CLIPTextEncode",
+    "_meta": { "title": "负向 %NEG_PROMPT%" },
+    "inputs": { "text": "%NEG_PROMPT%", "clip": ["38", 0] }
+  },
+  "59": {
+    "class_type": "EmptyHunyuanLatentVideo",
+    "_meta": { "title": "空视频 latent(t2v 专用)" },
+    "inputs": { "width": "%WIDTH%", "height": "%HEIGHT%", "length": "%FRAMES%", "batch_size": 1 }
+  },
+  "63": {
+    "class_type": "KSamplerAdvanced",
+    "_meta": { "title": "高噪采样 0→boundary(t2v 满档 cfg3.5/euler/simple)" },
+    "inputs": {
+      "model": ["65", 0],
+      "positive": ["6", 0],
+      "negative": ["7", 0],
+      "latent_image": ["59", 0],
+      "add_noise": "enable",
+      "noise_seed": "%SEED%",
+      "steps": "%STEPS%",
+      "cfg": 3.5,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "start_at_step": 0,
+      "end_at_step": "%BOUNDARY%",
+      "return_with_leftover_noise": "enable"
+    }
+  },
+  "64": {
+    "class_type": "KSamplerAdvanced",
+    "_meta": { "title": "低噪采样 boundary→end" },
+    "inputs": {
+      "model": ["66", 0],
+      "positive": ["6", 0],
+      "negative": ["7", 0],
+      "latent_image": ["63", 0],
+      "add_noise": "disable",
+      "noise_seed": "%SEED%",
+      "steps": "%STEPS%",
+      "cfg": 3.5,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "start_at_step": "%BOUNDARY%",
+      "end_at_step": 10000,
+      "return_with_leftover_noise": "disable"
+    }
+  },
+  "8": {
+    "class_type": "VAEDecode",
+    "_meta": { "title": "解码" },
+    "inputs": { "samples": ["64", 0], "vae": ["39", 0] }
+  },
+  "57": {
+    "class_type": "VHS_VideoCombine",
+    "_meta": { "title": "合成 mp4" },
+    "inputs": {
+      "images": ["8", 0],
+      "frame_rate": "%FPS%",
+      "loop_count": 0,
+      "filename_prefix": "mirage_t2v_bf16",
+      "format": "video/h264-mp4",
+      "pix_fmt": "yuv420p",
+      "crf": 19,
+      "save_metadata": true,
+      "pingpong": false,
+      "save_output": true
+    }
+  }
+}
