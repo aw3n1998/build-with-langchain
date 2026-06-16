@@ -815,15 +815,16 @@ export function ProductionPanel({ message, workspace, sessionId }) {
   }
 
   // 「上传视频续接」：把你的一段视频拼到该镜成片末尾，再从它的尾帧 AI 续写（复用续段的运镜词/段数）。
-  const runUploadContinue = async (sceneId, file) => {
+  const runUploadContinue = async (sceneId, file, opts = {}) => {
     if (busy || sceneBusy[sceneId]) return
     startAt.current[sceneId] = Date.now()
     setLogs([]); setShowLogs(true)
     setSceneBusy(p => ({ ...p, [sceneId]: 'append' }))
     try {
+      // opts.count 显式给(如「没出片就上传」用 0=只当成片不强行续写)；否则用「续 N 段」框
       const jobId = await uploadContinueVideo(sceneId, file, {
         model, motionPrompt: appendPrompt[sceneId] || '', size: vidSize,
-        count: Math.max(1, Number(appendCount[sceneId]) || 1),
+        count: opts.count != null ? Math.max(0, Number(opts.count) || 0) : Math.max(1, Number(appendCount[sceneId]) || 1),
       }, workspace)
       sceneJob.current[sceneId] = jobId
       await consume(jobId)
@@ -1210,6 +1211,7 @@ export function ProductionPanel({ message, workspace, sessionId }) {
   // 合规红线：仅用于你有权使用的脸(原创/AI/本人授权);换可识别真人=deepfake,平台 ToS 与法律禁止。
   const [swBusy, setSwBusy] = useState({})   // tag -> 换脸中
   const [swUrl, setSwUrl] = useState({})     // tag -> 换脸版 url
+  const [swFile, setSwFile] = useState({})   // tag -> 已选源脸 File（先选后确认，避免一选就跑、看不到确定键）
   const doFaceswap = async (tag, kind, sceneId, projectId, file) => {
     if (!file) return
     setSwBusy(b => ({ ...b, [tag]: true })); setShowLogs(true)
@@ -1225,21 +1227,38 @@ export function ProductionPanel({ message, workspace, sessionId }) {
         else if (ev.type === 'error') setProgress(ev.content || '换脸已停止')
       }
     } catch (e) { setProgress('换脸失败：' + String(e.message || e)) }
-    finally { setSwBusy(b => { const n = { ...b }; delete n[tag]; return n }) }
+    finally {
+      setSwBusy(b => { const n = { ...b }; delete n[tag]; return n })
+      setSwFile(s => { const n = { ...s }; delete n[tag]; return n })   // 跑完清掉已选脸，行复位
+    }
   }
   const faceswapRow = (tag, kind, sceneId, projectId) => {
     const bz = !!swBusy[tag]
+    const f = swFile[tag]
     return (
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 6, alignItems: 'center' }}>
         <span style={{ fontSize: 11, color: 'var(--text-muted)' }}
           title="把你上传的源脸换到这段成片里的人物上；输出独立新文件、不覆盖原片。仅限你有权使用的脸(原创/AI/本人授权)。">一键换脸</span>
+        {/* 第一步：选源脸——只暂存，不立刻跑（之前一选就跑，没有确定键，体验像坏了） */}
         <label style={{ ...miniAct(false), opacity: bz ? 0.6 : 1, cursor: bz ? 'default' : 'pointer' }}>
-          {bz ? '换脸中…' : '🎭 选脸换脸'}
+          {f ? `🖼 已选：${(f.name || '源脸').slice(0, 16)}` : '🖼 选源脸'}
           <input type="file" accept="image/png,image/jpeg,image/webp" hidden disabled={bz}
-            onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; doFaceswap(tag, kind, sceneId, projectId, f) }} />
+            onChange={e => { const file = e.target.files?.[0]; e.target.value = ''; if (file) setSwFile(s => ({ ...s, [tag]: file })) }} />
         </label>
+        {/* 第二步：确定开始（选了脸才可点） */}
+        <button type="button" disabled={bz || !f}
+          onClick={() => doFaceswap(tag, kind, sceneId, projectId, f)}
+          style={{ ...miniAct(false), border: '1px solid rgba(134,239,172,0.5)',
+            color: (!bz && f) ? 'rgba(134,239,172,1)' : 'var(--text-dim)',
+            opacity: (bz || !f) ? 0.45 : 1, cursor: (bz || !f) ? 'default' : 'pointer' }}>
+          {bz ? '换脸中…' : '✅ 开始换脸'}
+        </button>
+        {f && !bz && (
+          <button type="button" onClick={() => setSwFile(s => { const n = { ...s }; delete n[tag]; return n })}
+            style={{ ...miniAct(false), fontSize: 10.5 }}>✕ 重选</button>
+        )}
         <span style={{ fontSize: 10.5, color: 'var(--text-dim)', width: '100%' }}>
-          ⚠️ 仅用于你有权使用的脸（原创/AI 生成/本人授权）；换可识别真人=deepfake，平台 ToS 与法律禁止。
+          ⚠️ 选好源脸后点「✅ 开始换脸」。仅用于你有权使用的脸（原创/AI 生成/本人授权）；换可识别真人=deepfake，平台 ToS 与法律禁止。
         </span>
         {swUrl[tag] && (<>
           <span style={{ fontSize: 11, color: 'rgba(134,239,172,1)', width: '100%' }}>✓ 换脸版（原片保留，可对比）</span>
@@ -1730,6 +1749,21 @@ export function ProductionPanel({ message, workspace, sessionId }) {
                         setProgress(`上传 #${s.scene_number} 的图片…`)
                         try { await uploadCandidate(s.scene_id, f, workspace); setProgress(''); load() }
                         catch (err) { setProgress('上传失败：' + String(err.message || err)) }
+                      }} />
+                  </label>
+                )}
+                {!s.video && (
+                  <label title="已有这镜的视频？直接上传当成片，跳过出图/出片。之后可在下方继续 AI 续接 / 换脸 / 无缝化。"
+                    style={{ fontSize: 11, color: 'rgba(94,234,212,0.95)',
+                             cursor: (busy || !!sceneBusy[s.scene_id]) ? 'default' : 'pointer',
+                             border: '1px solid rgba(45,212,191,0.35)', borderRadius: 6, padding: '2px 8px',
+                             opacity: (busy || !!sceneBusy[s.scene_id]) ? 0.5 : 1 }}>
+                    上传视频
+                    <input type="file" accept="video/*,.mp4,.mov,.webm,.mkv,.m4v" style={{ display: 'none' }}
+                      disabled={busy || !!sceneBusy[s.scene_id]}
+                      onChange={async e => {
+                        const f = e.target.files?.[0]; e.target.value = ''
+                        if (f) await runUploadContinue(s.scene_id, f, { count: 0 })   // 0=只当成片，不强行 AI 续写
                       }} />
                   </label>
                 )}
