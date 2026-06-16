@@ -128,11 +128,6 @@ class Settings(BaseSettings):
     # 原生 fp8 卡(Blackwell/H100)=fp8;无原生 fp8 卡(A100/V100,探测为 fp16)→自动改用 bf16 极速档模板
     # ——A100(sm_80)无 FP8 张量核,跑 fp8 是软件模拟纯亏,bf16 更快且画质更高。
     I2V_PRECISION: str = ""
-    # ── FLF2V 首尾帧·共享关键帧续段（治本:根治尾帧续段的接缝抖动）──────────────
-    # 每段用相邻两张关键帧做 first-last-frame-to-video,相邻段共用边界帧 → 交界像素相同、零抖、免 xfade,
-    # 且每段被两端约束、不累积漂移。需 ComfyUI v0.16+ 原生 WanFirstLastFrameToVideo;首跑前按官方模板核对脚手架。
-    COMFYUI_WORKFLOW_FLF2V: str = ""       # FLF2V workflow;空=用仓库自带 flf2v_template.json
-    FLF2V_DROP_SHARED_FRAME: bool = True   # 拼接时丢掉相邻段重复的共享关键帧,避免接缝处 1 帧卡顿
     # 极速档步数(可调):蒸馏 LoRA 按 4 步训,4=最快(贴训练点)、6=通常更干净、8=再稳更慢。
     # 模板用 %STEPS%/%BOUNDARY% 占位;切换步(高噪→低噪)取步数一半(高噪 0→BOUNDARY、低噪 BOUNDARY→end)。
     WAN_LIGHTNING_STEPS: int = 6

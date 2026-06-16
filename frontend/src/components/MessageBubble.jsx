@@ -17,7 +17,7 @@ function usePersistedState(key, initial) {
 }
 import ReactMarkdown from 'react-markdown'
 import { fileUrl, getVideoProviders, getImageProviders, getProject, batchGenerate, batchFinish,
-         pipelineSelect, streamJobEvents, pipelineUpscale, pipelineFlf2v, pipelineFaceswap, uploadCandidate, uploadContinueVideo, updateScenePrompts,
+         pipelineSelect, streamJobEvents, pipelineUpscale, pipelineFaceswap, uploadCandidate, uploadContinueVideo, updateScenePrompts,
          deleteCandidate, deleteSceneVideo, sceneUndoAppend, deleteEpisode, suggestSegmentPrompts,
          autoStoryboard, autoFill, characters as charactersApi, templatesApi,
          loraCreate, loraAction, loraUploadImage, loraUploadRef,
@@ -1264,23 +1264,6 @@ export function ProductionPanel({ message, workspace, sessionId }) {
     )
   }
 
-  // ── FLF2V 一键无缝化(自动选帧、零人工):从该镜已有成片等距抽关键帧→FLF2V 重渲→消接缝抖动 ──
-  const [flf2vBusy, setFlf2vBusy] = useState({})
-  const doFlf2v = async (sceneId) => {
-    setFlf2vBusy(b => ({ ...b, [sceneId]: true })); setShowLogs(true)
-    setProgress('FLF2V 自动无缝化中(抽关键帧 → 逐段重渲,会慢些)…')
-    try {
-      const jobId = await pipelineFlf2v({ scene_id: sceneId, auto: true, workspace, session_id: sessionId })
-      for await (const ev of streamJobEvents(jobId)) {
-        if (ev.type === 'log') { setLogs(prev => [...prev, ev.line].slice(-300)); if (ev.line) setProgress(ev.line) }   // 心跳/段进度刷到主状态条:看得到「段2/8·已等待Ns」，不再像卡死
-        else if (ev.type === 'video') load()   // 后端已 set_scene_video → 刷新显示无缝版
-        else if (ev.type === 'tool_result' && ev.content) { setProgress(ev.content); setLogs(prev => [...prev, '» ' + ev.content].slice(-300)) }
-        else if (ev.type === 'error') setProgress(ev.content || 'FLF2V 已停止')
-      }
-      load()
-    } catch (e) { setProgress('FLF2V 失败：' + String(e.message || e)) }
-    finally { setFlf2vBusy(b => { const n = { ...b }; delete n[sceneId]; return n }) }
-  }
 
   // ── 一键换脸：上传一张源脸 → 换到这段成片里的人物上(产物独立新文件、原片保留)──
   // 合规红线：仅用于你有权使用的脸(原创/AI/本人授权);换可识别真人=deepfake,平台 ToS 与法律禁止。
@@ -1913,14 +1896,6 @@ export function ProductionPanel({ message, workspace, sessionId }) {
                   {/* key 绑 url（含 &v=mtime）：追加后文件变了，强制 <video> 重建、不吃旧缓存 */}
                   <video key={s.video.url} src={fileUrl(s.video.url)} controls
                          style={{ width: '100%', maxHeight: 300, borderRadius: 8, display: 'block' }} />
-                  <div style={{ marginTop: 6 }}>
-                    <button onClick={() => doFlf2v(s.scene_id)}
-                      disabled={!!flf2vBusy[s.scene_id] || !!busy || !!sceneBusy[s.scene_id]}
-                      title="续段接缝抖动？一键自动:从这条成片等距抽关键帧→FLF2V 在关键帧间重渲→共享关键帧拼接,接缝零抖。零选帧,稍慢。"
-                      style={miniAct(false)}>
-                      {flf2vBusy[s.scene_id] ? 'FLF2V 无缝化中…' : '✨ FLF2V 一键无缝(治接缝抖)'}
-                    </button>
-                  </div>
                   {upscaleRow(s.scene_id, 'scene', s.scene_id, '')}
                   {faceswapRow(s.scene_id, 'scene', s.scene_id, '')}
                   {/* 看效果再加长：取现有成片末帧续生成、拼到末尾，可反复点。段数不写死。 */}
