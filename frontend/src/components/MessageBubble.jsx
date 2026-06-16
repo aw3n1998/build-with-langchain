@@ -1206,6 +1206,50 @@ export function ProductionPanel({ message, workspace, sessionId }) {
     finally { setFlf2vBusy(b => { const n = { ...b }; delete n[sceneId]; return n }) }
   }
 
+  // ── 一键换脸：上传一张源脸 → 换到这段成片里的人物上(产物独立新文件、原片保留)──
+  // 合规红线：仅用于你有权使用的脸(原创/AI/本人授权);换可识别真人=deepfake,平台 ToS 与法律禁止。
+  const [swBusy, setSwBusy] = useState({})   // tag -> 换脸中
+  const [swUrl, setSwUrl] = useState({})     // tag -> 换脸版 url
+  const doFaceswap = async (tag, kind, sceneId, projectId, file) => {
+    if (!file) return
+    setSwBusy(b => ({ ...b, [tag]: true })); setShowLogs(true)
+    setProgress('换脸中（上传源脸 → 逐帧换脸，会慢些）…')
+    try {
+      const jobId = await pipelineFaceswap(file, {
+        sceneId: sceneId || '', kind, projectId: projectId || '', workspace, sessionId,
+      })
+      for await (const ev of streamJobEvents(jobId)) {
+        if (ev.type === 'log') setLogs(prev => [...prev, ev.line].slice(-300))
+        else if (ev.type === 'video' && ev.url) setSwUrl(u => ({ ...u, [tag]: fileUrl(ev.url) + '&v=' + Date.now() }))
+        else if (ev.type === 'tool_result' && ev.content) { setProgress(ev.content); setLogs(prev => [...prev, '» ' + ev.content].slice(-300)) }
+        else if (ev.type === 'error') setProgress(ev.content || '换脸已停止')
+      }
+    } catch (e) { setProgress('换脸失败：' + String(e.message || e)) }
+    finally { setSwBusy(b => { const n = { ...b }; delete n[tag]; return n }) }
+  }
+  const faceswapRow = (tag, kind, sceneId, projectId) => {
+    const bz = !!swBusy[tag]
+    return (
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 6, alignItems: 'center' }}>
+        <span style={{ fontSize: 11, color: 'var(--text-muted)' }}
+          title="把你上传的源脸换到这段成片里的人物上；输出独立新文件、不覆盖原片。仅限你有权使用的脸(原创/AI/本人授权)。">一键换脸</span>
+        <label style={{ ...miniAct(false), opacity: bz ? 0.6 : 1, cursor: bz ? 'default' : 'pointer' }}>
+          {bz ? '换脸中…' : '🎭 选脸换脸'}
+          <input type="file" accept="image/png,image/jpeg,image/webp" hidden disabled={bz}
+            onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; doFaceswap(tag, kind, sceneId, projectId, f) }} />
+        </label>
+        <span style={{ fontSize: 10.5, color: 'var(--text-dim)', width: '100%' }}>
+          ⚠️ 仅用于你有权使用的脸（原创/AI 生成/本人授权）；换可识别真人=deepfake，平台 ToS 与法律禁止。
+        </span>
+        {swUrl[tag] && (<>
+          <span style={{ fontSize: 11, color: 'rgba(134,239,172,1)', width: '100%' }}>✓ 换脸版（原片保留，可对比）</span>
+          <video key={swUrl[tag]} src={swUrl[tag]} controls
+            style={{ width: '100%', maxHeight: 320, borderRadius: 8, display: 'block', border: '1px solid rgba(134,239,172,0.4)' }} />
+        </>)}
+      </div>
+    )
+  }
+
   const c = proj?.counts || { total: 0, with_candidates: 0, selected: 0, done: 0 }
   const allSelected = c.total > 0 && c.selected === c.total
   const someSelected = c.selected > 0
@@ -1599,6 +1643,7 @@ export function ProductionPanel({ message, workspace, sessionId }) {
           <video src={fileUrl(proj.episode.url)} controls
                  style={{ width: '100%', maxHeight: 420, borderRadius: 8, display: 'block' }} />
           {upscaleRow('episode', 'episode', '', pid)}
+          {faceswapRow('episode', 'episode', '', pid)}
         </div>
       )}
 
@@ -1713,6 +1758,7 @@ export function ProductionPanel({ message, workspace, sessionId }) {
                     </button>
                   </div>
                   {upscaleRow(s.scene_id, 'scene', s.scene_id, '')}
+                  {faceswapRow(s.scene_id, 'scene', s.scene_id, '')}
                   {/* 看效果再加长：取现有成片末帧续生成、拼到末尾，可反复点。段数不写死。 */}
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 6, alignItems: 'center' }}>
                     <input value={appendPrompt[s.scene_id] || ''} disabled={busy || !!sceneBusy[s.scene_id]}

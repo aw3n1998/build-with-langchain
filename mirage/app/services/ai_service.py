@@ -93,6 +93,25 @@ class AIService:
             self._storyboard_llm = self._llm
         return self._storyboard_llm
 
+    def storyboard_llm_for(self, cfg=None):
+        """按前端「导演/分镜模型」现造分镜 LLM（通用解耦的回退链顶层）。
+
+        - cfg 非空（前端 Settings 填了 model/api_base/api_key）→ 按它**现造**(UI 覆盖，不缓存，避免串配置)；
+        - cfg 空 → 回退 storyboard_llm（→ STORYBOARD_* env → 全局默认 _llm）。
+        cfg 可为 AgentLLMConfig 对象或 dict（前端经路由透传 supervisor 键）。
+        """
+        if cfg is not None:
+            if isinstance(cfg, dict):
+                from types import SimpleNamespace
+                cfg = SimpleNamespace(
+                    model=cfg.get("model"), api_base=cfg.get("api_base"),
+                    api_key=cfg.get("api_key"), max_tokens=cfg.get("max_tokens"),
+                )
+            if any([getattr(cfg, "model", None), getattr(cfg, "api_base", None),
+                    getattr(cfg, "api_key", None)]):
+                return self._make_llm_from_config(cfg)
+        return self.storyboard_llm
+
     def _build_llms_dict(self, agent_configs: dict | None) -> dict:
         """
         把前端传来的 agent_configs dict 转换为 llms 字典。

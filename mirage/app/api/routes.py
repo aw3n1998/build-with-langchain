@@ -510,6 +510,15 @@ class Flf2vRequest(BaseModel):
     session_id: str | None = None
 
 
+class FaceSwapRequest(BaseModel):
+    kind: str = "scene"          # scene / episode
+    scene_id: str = ""
+    project_id: str = ""
+    face_path: str = ""          # 服务端已保存的源脸图路径(由上传端点填)
+    workspace: str | None = None
+    session_id: str | None = None
+
+
 @router.get("/agents")
 async def list_agents():
     """列出当前可用的 Agent（supervisor + 所有热插拔注册的子 Agent）。
@@ -848,6 +857,66 @@ async def pipeline_flf2v_render(req: Flf2vRequest):
     from mirage.app.services.job_manager import job_manager
     job_id = job_manager.submit("flf2v", lambda: _flf2v_events(req))
     return {"job_id": job_id}
+
+
+async def _faceswap_events(req: "FaceSwapRequest"):
+    """一键换脸任务事件流：把源脸换到成片里的人物上，产物落独立新文件(原片保留)。"""
+    import asyncio
+    from mirage.app.pipeline.runtime import set_workspace
+    from mirage.app.pipeline.pipeline_tools import faceswap_scene_video
+
+    set_workspace(req.workspace)
+    yield {"type": "tool_call", "name": "faceswap_scene_video",
+           "args": {"kind": req.kind, "scene_id": req.scene_id, "project_id": req.project_id}}
+    try:
+        out = await asyncio.to_thread(
+            faceswap_scene_video, req.scene_id, req.face_path, req.project_id, req.kind,
+        )
+    except Exception as e:  # noqa: BLE001
+        yield {"type": "tool_result", "name": "faceswap_scene_video",
+               "content": f"换脸失败: {type(e).__name__}: {e}"}
+        return
+    clean, events = ai_service._extract_tool_markers(out)
+    yield {"type": "tool_result", "name": "faceswap_scene_video", "content": clean[:600]}
+    for ev in events:
+        yield ev
+
+
+@router.post("/pipeline/faceswap")
+async def pipeline_faceswap(
+    scene_id: str = Form(default=""),
+    kind: str = Form(default="scene"),
+    project_id: str = Form(default=""),
+    workspace: str = Form(default=""),
+    session_id: str = Form(default=""),
+    file: UploadFile = File(...),
+):
+    """视频一键换脸：上传一张源脸 → 换到该成片里(产物独立新文件)。先存脸图，再提交后台任务，返回 job_id。
+
+    合规红线：仅用于你有权使用的脸（原创/AI 生成/本人授权）；换可识别真人=deepfake，平台 ToS 与法律禁止。
+    """
+    import os as _os
+    import pathlib
+    from uuid import uuid4
+    from mirage.app.pipeline.runtime import set_workspace, video_dir
+    from mirage.app.pipeline.store import get_store
+    from mirage.app.services.job_manager import job_manager
+    suffix = pathlib.Path(file.filename or "").suffix.lower()
+    if suffix not in {".png", ".jpg", ".jpeg", ".webp"}:
+        raise HTTPException(status_code=400, detail=f"不支持的图片类型 {suffix}（支持 png/jpg/jpeg/webp）")
+    set_workspace(workspace or None)
+    if kind != "episode" and not get_store().get_scene(scene_id):
+        raise HTTPException(status_code=404, detail=f"分镜不存在: {scene_id}")
+    face_name = f"face_{uuid4().hex[:8]}{suffix}"
+    face_path = _os.path.join(video_dir(), face_name)
+    with open(face_path, "wb") as f:
+        f.write(await file.read())
+    req = FaceSwapRequest(
+        kind=kind, scene_id=scene_id, project_id=project_id,
+        workspace=(workspace or None), session_id=(session_id or None), face_path=face_path)
+    meta = {"session_id": req.session_id, "scene_id": scene_id,
+            "project_id": project_id or _scene_project_id(scene_id, req.workspace)}
+    return {"job_id": job_manager.submit("faceswap", lambda: _faceswap_events(req), meta=meta)}
 
 
 @router.get("/pipeline/jobs/{job_id}/events")
@@ -1295,6 +1364,8 @@ class AutoStoryboardRequest(BaseModel):
     novel_text: str
     scenes: int = 8           # 想拆几镜
     replace: bool = False     # true=先清空现有分镜再拆；false=接在现有后面
+    # 前端「导演/分镜模型」(Settings 的 supervisor 配置)；空=走 .env STORYBOARD_*/默认。让 UI 选 grok 真生效。
+    agent_configs: dict[str, AgentLLMConfig] | None = None
 
 
 @router.post("/pipeline/auto_storyboard")
@@ -1307,7 +1378,9 @@ async def pipeline_auto_storyboard(req: AutoStoryboardRequest):
     style = (store.get_project_style(req.project_id) or {}).get("style_prompt") or ""
     chars = store.list_characters(req.project_id) if hasattr(store, "list_characters") else []
     n = max(1, min(int(req.scenes or 8), 40))     # 上限保护，避免一次拆太多
-    scenes = await breakdown_storyboard(req.novel_text or "", n, style=style, characters=chars)
+    sb_cfg = (req.agent_configs or {}).get("supervisor")   # 前端导演模型(空=回退 .env)
+    scenes = await breakdown_storyboard(req.novel_text or "", n, style=style,
+                                        characters=chars, llm_config=sb_cfg)
     if req.replace:
         for s in store.list_scenes(req.project_id):
             store.delete_scene(s["id"])
@@ -1339,6 +1412,8 @@ class AutoFillRequest(BaseModel):
     novel_text: str
     scenes: int = 8
     replace: bool = False         # true=替换现有角色/风格/分镜（LoRA 任务不删，保住已传图）
+    # 前端「导演/分镜模型」；空=走 .env STORYBOARD_*/默认。仅作用于拆分镜步骤(角色/风格分析仍走默认)。
+    agent_configs: dict[str, AgentLLMConfig] | None = None
 
 
 @router.post("/pipeline/auto_fill")
@@ -1386,7 +1461,9 @@ async def pipeline_auto_fill(req: AutoFillRequest):
     # 3) 分镜（带新角色 + 新风格；逻辑同 auto_storyboard）
     chars_now = store.list_characters(pid)
     n = max(1, min(int(req.scenes or 8), 40))
-    scenes = await breakdown_storyboard(novel, n, style=style.get("style_prompt", ""), characters=chars_now)
+    sb_cfg = (req.agent_configs or {}).get("supervisor")   # 前端导演模型(空=回退 .env)
+    scenes = await breakdown_storyboard(novel, n, style=style.get("style_prompt", ""),
+                                        characters=chars_now, llm_config=sb_cfg)
     if req.replace:
         for s in store.list_scenes(pid):
             store.delete_scene(s["id"])

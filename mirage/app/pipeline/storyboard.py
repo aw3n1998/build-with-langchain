@@ -97,7 +97,8 @@ def _coerce_scenes(text: str, n: int, style: str = "") -> list[dict]:
 
 
 async def breakdown_storyboard(novel_text: str, n: int, *, style: str = "",
-                               characters: list[dict] | None = None) -> list[dict]:
+                               characters: list[dict] | None = None,
+                               llm_config=None) -> list[dict]:
     """把小说文本拆成 N 个分镜。
 
     Args:
@@ -105,6 +106,8 @@ async def breakdown_storyboard(novel_text: str, n: int, *, style: str = "",
         n: 想要的分镜数。
         style: 本集统一风格词（拼到每镜 image_prompt 末尾，保证全集一个调性）。
         characters: 角色圣经 [{"name","appearance","voice"}...]；导演据此写人物外貌、判断 character 字段。
+        llm_config: 前端「导演/分镜模型」配置(AgentLLMConfig|dict|None)；非空=按它现造(UI 覆盖)，
+            空=回退 STORYBOARD_* env → 全局默认。让前端选 grok/OpenRouter 等真正生效。
     Returns:
         长度严格为 n 的分镜 dict 列表，字段见 _FIELDS。
     """
@@ -130,7 +133,8 @@ async def breakdown_storyboard(novel_text: str, n: int, *, style: str = "",
         f"小说/剧情文本：\n{(novel_text or '').strip()[:6000]}"
     )
     try:
-        resp = await ai_service.storyboard_llm.ainvoke([   # 分镜专属 LLM(配了 STORYBOARD_*/OpenRouter 就走它)
+        llm = ai_service.storyboard_llm_for(llm_config)   # 前端导演模型 > STORYBOARD_* env > 全局默认
+        resp = await llm.ainvoke([
             SystemMessage(content=_SYSTEM),
             HumanMessage(content=human),
         ])

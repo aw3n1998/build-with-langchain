@@ -1260,6 +1260,40 @@ def render_scene_flf2v_auto(scene_id: str, source_video: str = "", num_keyframes
             f"VIDFILE::{scene_id}::{out}")
 
 
+def faceswap_scene_video(scene_id: str = "", face_path: str = "", project_id: str = "",
+                         kind: str = "scene") -> str:
+    """一键换脸：把 face_path 的源脸换到某分镜/整集【已有成片】里的人物上，产物落独立新文件(不覆盖原片)。
+
+    kind='scene' → 换某分镜成片；kind='episode' → 换整集成片。源脸由前端上传后存盘传入 face_path。
+    合规红线：仅用于你有权使用的脸(原创/AI 生成/本人授权)；换可识别真人=deepfake,平台 ToS 与法律禁止。
+    """
+    from mirage.app.pipeline import faceswap, log_bus
+    if not (face_path and os.path.exists(face_path)):
+        return "换脸失败：源脸图片缺失（先上传一张脸）。"
+    if kind == "episode":
+        if not project_id:
+            return "换脸失败：缺 project_id。"
+        src = os.path.join(video_dir(), f"episode_{project_id}.mp4")
+        tag = "episode"
+    else:
+        st = get_store()
+        scene = st.get_scene(scene_id)
+        if not scene:
+            return f"分镜不存在: {scene_id}"
+        src = (scene.get("video")
+               or os.path.join(video_dir(), f"{scene.get('scene_number', 0):02d}_{scene_id}.mp4"))
+        tag = scene_id
+    if not os.path.exists(src):
+        return f"换脸失败：找不到成片 {src}（先出片/合成）。"
+    out = os.path.splitext(src)[0] + "_swap.mp4"
+    log_bus.emit(f"[换脸] {os.path.basename(src)} ← 源脸 …")
+    r = faceswap.faceswap_video(src, face_path, out)
+    if not r.get("applied"):
+        return f"换脸失败：{r.get('note')}"
+    return (f"换脸完成（产物为独立新文件，原片保留：{os.path.basename(src)}）。\n"
+            f"VIDFILE::{tag}::{out}")
+
+
 @tool
 def configure_character(trigger_word: str = "", flux_lora: str = "", negative_prompt: str = "") -> str:
     """配置本工作目录的角色/风格（写入 .agent/config.json），出图时自动注入，无需写死在提示词里。

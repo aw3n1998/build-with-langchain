@@ -225,6 +225,21 @@ export async function pipelineFlf2v(params) {
   return submitJob('/pipeline/flf2v_render', params)
 }
 
+// ── 视频一键换脸：上传一张源脸 → 换到该成片里(产物独立新文件)。返回 job_id，用 streamJobEvents 跟随。
+// ⚠️ 合规红线：仅用于你有权使用的脸(原创/AI 生成/本人授权);换可识别真人=deepfake,平台 ToS 与法律禁止。
+export async function pipelineFaceswap(faceFile, { sceneId = '', kind = 'scene', projectId = '', workspace = null, sessionId = '' } = {}) {
+  const form = new FormData()
+  form.append('scene_id', sceneId)
+  form.append('kind', kind)
+  form.append('project_id', projectId)
+  form.append('workspace', workspace || '')
+  form.append('session_id', sessionId || '')
+  form.append('file', faceFile)
+  const r = await fetch(`${getBase()}/pipeline/faceswap`, { method: 'POST', body: form })
+  if (!r.ok) throw new Error(`HTTP ${r.status}`)
+  return (await r.json()).job_id
+}
+
 // ── 制作面板：项目状态 + 一键批量出图 / 出片合成 ─────────────────
 export async function getProject(projectId, workspace = null) {
   const q = workspace ? `?workspace=${encodeURIComponent(workspace)}` : ''
@@ -279,19 +294,26 @@ export async function deleteEpisode(projectId, workspace = null) {
 }
 
 // 小说 → 自动拆分镜（LLM 当导演一次拆 N 镜入库）
+// 带上 Settings 里的导演模型(agent_configs)→ 让前端选 grok/OpenRouter 真去拆分镜(空=后端走 .env)
 export async function autoStoryboard(projectId, novelText, scenes, replace, workspace = null) {
+  const body = { project_id: projectId, novel_text: novelText, scenes, replace, workspace }
+  const agentConfigs = getAgentConfigs()
+  if (agentConfigs) body.agent_configs = agentConfigs
   const r = await fetch(`${getBase()}/pipeline/auto_storyboard`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ project_id: projectId, novel_text: novelText, scenes, replace, workspace }),
+    body: JSON.stringify(body),
   })
   if (!r.ok) throw new Error(`status ${r.status}`)
   return r.json()
 }
 // 一键 AI 分析小说 → 自动填角色(+空 LoRA)/风格/分镜
 export async function autoFill(projectId, novelText, scenes, replace, workspace = null) {
+  const body = { project_id: projectId, novel_text: novelText, scenes, replace, workspace }
+  const agentConfigs = getAgentConfigs()
+  if (agentConfigs) body.agent_configs = agentConfigs   // 拆分镜步骤走它(角色/风格分析仍走默认)
   const r = await fetch(`${getBase()}/pipeline/auto_fill`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ project_id: projectId, novel_text: novelText, scenes, replace, workspace }),
+    body: JSON.stringify(body),
   })
   if (!r.ok) throw new Error(`status ${r.status}`)
   return r.json()

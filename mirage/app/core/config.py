@@ -217,6 +217,18 @@ class Settings(BaseSettings):
     # 目标规格预设（名:宽*高，逗号分隔，可增减、不写死；前端下拉据此，API 也可直接传 width/height）
     UPSCALE_TARGETS: str = ("4K竖屏:2160*3840,4K横屏:3840*2160,2K竖屏:1440*2560,"
                             "1080P竖屏:1080*1920,1080P横屏:1920*1080,720P竖屏:720*1280")
+    # ── 视频一键换脸（ReActor 等；后处理、产物落独立新文件，不覆盖原片）──────────────
+    # 合规红线：仅用于你有权使用的脸（原创/AI 生成/本人授权）。换成可识别真人=deepfake，
+    # ReelShort/DramaBox 等平台 ToS 与多地法律禁止；本功能仅作角色脸一致性/原创角色用途。
+    # 端点门控：FACESWAP_ENABLED 且配了 COMFYUI_BASE_URL 且模板存在才注册可用，否则休眠。
+    FACESWAP_ENABLED: bool = True
+    COMFYUI_WORKFLOW_FACESWAP: str = ""   # 换脸 workflow；空=用仓库自带 comfyui_workflows/faceswap_video_template.json
+    FACESWAP_SWAP_MODEL: str = "inswapper_128.onnx"        # 换脸模型(放 models/insightface/，ReActor 安装时自动下)
+    # 面部修复(放 models/facerestore_models/，ReActor 首次用到时按需下)。可选 GFPGANv1.4.pth / codeformer-v0.1.0.pth(带 v)；
+    # 逐帧修复会提清晰度但可能引入轻微闪烁——若模型没就位或想先跑通/避免闪烁，设 none。
+    FACESWAP_RESTORE_MODEL: str = "GFPGANv1.4.pth"
+    FACESWAP_RESTORE_VISIBILITY: float = 1.0               # 修复可见度 0~1
+    FACESWAP_DET_MODEL: str = "retinaface_resnet50"        # 人脸检测器(retinaface_resnet50 质量最好)
     # Wan2.2-S2V 对口型（语音驱动）：人物开口说话的镜头用。图+音频→口型同步视频，走 ComfyUI。
     # 隐藏 Provider：不进用户模型下拉，由每镜「对口型」开关自动路由。端点门控同 COMFYUI_BASE_URL。
     COMFYUI_WORKFLOW_S2V: str = ""        # S2V workflow 模板路径；空=用仓库自带 comfyui_workflows/s2v_template.json

@@ -12,9 +12,13 @@ const AGENTS = [
   { id: 'batch',      label: 'Batch',       desc: 'Falls back to Supervisor if unset' },
 ]
 
+// 预设只填 model + api_base，key 永远手填（密钥不写死进代码）。
+// OpenRouter 系（grok 等）选完记得在下方 API Key 填 sk-or-v1-… 的 key。
 const PRESETS = [
   { label: 'deepseek-chat',     base: 'https://api.deepseek.com/v1',  short: 'DS Chat' },
   { label: 'deepseek-reasoner', base: 'https://api.deepseek.com/v1',  short: 'DS R1' },
+  { label: 'x-ai/grok-4.20',    base: 'https://openrouter.ai/api/v1', short: 'Grok 4.20' },
+  { label: 'x-ai/grok-4',       base: 'https://openrouter.ai/api/v1', short: 'Grok 4' },
   { label: 'gpt-4o-mini',       base: 'https://api.openai.com/v1',    short: 'GPT mini' },
   { label: 'gpt-4o',            base: 'https://api.openai.com/v1',    short: 'GPT-4o' },
 ]
