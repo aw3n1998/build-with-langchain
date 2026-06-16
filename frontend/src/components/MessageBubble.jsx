@@ -17,7 +17,7 @@ function usePersistedState(key, initial) {
 }
 import ReactMarkdown from 'react-markdown'
 import { fileUrl, getVideoProviders, getImageProviders, getProject, batchGenerate, batchFinish,
-         pipelineSelect, streamJobEvents, pipelineUpscale, pipelineFlf2v, uploadCandidate, uploadContinueVideo, updateScenePrompts,
+         pipelineSelect, streamJobEvents, pipelineUpscale, pipelineFlf2v, pipelineFaceswap, uploadCandidate, uploadContinueVideo, updateScenePrompts,
          deleteCandidate, deleteSceneVideo, sceneUndoAppend, deleteEpisode, suggestSegmentPrompts,
          autoStoryboard, autoFill, characters as charactersApi, templatesApi,
          loraCreate, loraAction, loraUploadImage, loraUploadRef,
