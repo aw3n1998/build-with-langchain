@@ -144,3 +144,37 @@ def ensure_service(name: str, cmd: list[str], url: str, log_path: str,
             pass
         print(f"{name}: ✗ 未就绪，看 {log_path}\n{tail}")
     return ok
+
+
+def prewarm(paths: list[str],
+            exts: tuple[str, ...] = (".safetensors", ".pth", ".onnx", ".gguf", ".ckpt"),
+            background: bool = True, log_path: str = "/content/prewarm.log") -> int:
+    """把模型文件预读进 OS 页缓存(RAM)——治 Drive(FUSE)冷读慢：首次/逐镜加载从内存走、不卡盘。
+    paths: 文件或目录(目录递归找 exts 文件)。background=True 脱离内核后台跑、不挡 notebook。
+    解决「ComfyUI 重复 load 模型」里"冷启动那一刀"：跑热后页缓存常驻(几十G 模型 vs ~180G RAM)。返回文件数。"""
+    import glob
+    files: list[str] = []
+    for p in paths:
+        if os.path.isdir(p):
+            for e in exts:
+                files += glob.glob(os.path.join(p, "**", "*" + e), recursive=True)
+        elif os.path.isfile(p):
+            files.append(p)
+    files = sorted({os.path.realpath(f) for f in files if os.path.isfile(f)})  # 软链→真身、去重
+    if not files:
+        print("[prewarm] 没找到要预热的模型文件")
+        return 0
+    total = sum(os.path.getsize(f) for f in files) / (1024 ** 3)
+    cat = "; ".join(f"cat {shlex.quote(f)} > /dev/null 2>&1" for f in files)  # cat→/dev/null 触发页缓存
+    if background:
+        full = (f"echo '[prewarm] 预热 {len(files)} 个模型 ~{total:.0f}G 进 RAM…'; "
+                f"{cat}; echo '[prewarm] 完成'")
+        with open(log_path, "w") as lf:
+            subprocess.Popen(full, shell=True, stdout=lf, stderr=subprocess.STDOUT,
+                             start_new_session=True)
+        print(f"🔥 RAM 预热后台启动：{len(files)} 个模型 ~{total:.0f}G"
+              f"（进度 `!tail {log_path}`；跑完后 ComfyUI 首次/逐镜加载走内存、不卡 Drive）")
+    else:
+        subprocess.run(cat, shell=True)
+        print(f"🔥 RAM 预热完成：{len(files)} 个模型 ~{total:.0f}G")
+    return len(files)
