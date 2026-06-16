@@ -194,6 +194,63 @@ def bootstrap_pulid(store, training: dict, dataset_dir: str, *, appearance: str,
     return made
 
 
+def pulid_generate(ref_image: str, prompt: str, *, out_dir: str, n: int = 1,
+                   size: Optional[str] = None, steps: Optional[int] = None,
+                   seed: Optional[int] = None, negative: Optional[str] = None,
+                   guidance: Optional[float] = None, name_prefix: str = "pulid") -> list[str]:
+    """PuLID 单参考脸【直出】：锁定 ref_image 的人脸 ID，按 prompt 出 n 张落 out_dir，返回本地路径。
+
+    供 batch_generate「角色有参考脸 → 锁脸出图」复用，免训练即可跨镜同一张脸。
+    与 bootstrap_pulid 共用同一套 ComfyUI 调用（pulid_t2i_template.json）；这里不写 caption、
+    不做训练集 bookkeeping，纯出图。失败按 comfy_http 约定抛 GpuConfigError/GpuRunError。
+    """
+    import httpx
+
+    from mirage.app.pipeline import comfy_http as ch
+    from mirage.app.pipeline.gpu_client import GpuRunError
+
+    if not ref_image or not os.path.exists(ref_image):
+        raise GpuRunError(f"PuLID 锁脸出图需要角色参考脸，未找到：{ref_image}")
+    base = ch.base_url()
+    template = ch.load_workflow(settings.COMFYUI_WORKFLOW_PULID, "pulid_t2i_template.json", "pulid-t2i")
+    size = size or settings.COMFYUI_T2I_SIZE
+    try:
+        width, height = (int(x) for x in str(size).replace("x", "*").split("*"))
+    except ValueError:
+        width, height = 768, 1024
+    base_seed = seed if (seed is not None and seed >= 0) else int(time.time_ns() % 2_000_000_000)
+    neg = negative or _NEG
+    made: list[str] = []
+    os.makedirs(out_dir, exist_ok=True)
+    with httpx.Client() as client:
+        face_name = ch.upload_image(client, base, ref_image)
+        client_id = f"mirage-pulid-{os.getpid()}-{int(time.time())}"
+        for i in range(max(1, int(n))):
+            mapping = {
+                "%UNET%": settings.COMFYUI_FLUX_UNET or "flux1-dev.safetensors",
+                "%PULID_MODEL%": settings.PULID_MODEL,
+                "%FACE%": face_name,
+                "%PULID_WEIGHT%": float(settings.PULID_WEIGHT),
+                "%PROMPT%": prompt,
+                "%NEG_PROMPT%": neg,
+                "%GUIDANCE%": float(guidance if guidance is not None else settings.PULID_GUIDANCE),
+                "%WIDTH%": width, "%HEIGHT%": height,
+                "%STEPS%": int(steps or settings.COMFYUI_T2I_STEPS),
+                "%SEED%": (base_seed + i) % 2_000_000_000,
+            }
+            graph = ch.fill_template(template, mapping)
+            pid = ch.submit(client, base, graph, client_id)
+            outs = ch.wait(client, base, pid, label="pulid")
+            for it in ch.collect_outputs(outs):
+                fn = it.get("filename", "")
+                if fn.lower().endswith(ch.IMAGE_EXTS):
+                    out_path = os.path.join(out_dir, f"{name_prefix}_{i:02d}_{fn}")
+                    ch.download_view(client, base, it, out_path)
+                    made.append(out_path)
+                    break
+    return made
+
+
 def bootstrap(store, training: dict, dataset_dir: str, *, mode: str = "text",
               appearance: str = "", trigger: str = "", count: int = 0,
               ref_image: Optional[str] = None, size: Optional[str] = None,

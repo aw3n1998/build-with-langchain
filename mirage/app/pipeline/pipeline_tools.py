@@ -314,6 +314,25 @@ def request_image_params(scene_id: str, image_prompt: str = "") -> str:
            f"PARAM_FORM::{json.dumps(payload, ensure_ascii=False)}"
 
 
+def _scene_ref_face(store, scene: dict) -> str:
+    """取这一镜主角的参考脸路径（characters.ref_image_path）；无角色/无脸/文件不存在则空串。
+
+    用于「角色有参考脸 → PuLID 锁脸出图」：一张脸即跨镜锁定同一身份（免训练）。
+    """
+    name = (scene.get("character") or "").strip()
+    pid = scene.get("project_id")
+    if not name or not pid:
+        return ""
+    try:
+        for c in store.list_characters(pid):
+            if (c.get("name") or "").strip() == name:
+                rp = (c.get("ref_image_path") or "").strip()
+                return rp if (rp and os.path.exists(rp)) else ""
+    except Exception:  # noqa: BLE001
+        pass
+    return ""
+
+
 @tool
 def generate_candidates(
     scene_id: str,
@@ -383,20 +402,34 @@ def generate_candidates(
         "negative": (pstyle.get("negative_prompt") or "").strip() or None,
     }
     local_dir = candidates_dir(scene_id)  # 落到当前工作目录
+    # 角色有参考脸 + 开了 PuLID + 配了 ComfyUI → 走 PuLID 锁脸直出（免训练，跨镜同一张脸）；否则普通出图。
+    ref_face = _scene_ref_face(store, scene)
+    use_pulid = bool(ref_face) and settings.PULID_ENABLED and bool((settings.COMFYUI_BASE_URL or "").strip())
 
-    if is_http:
-        # http（ComfyUI）：provider 直接把候选图下到本地 local_dir，返回本地路径，无需 SSH 下载
+    if is_http or use_pulid:
+        # http（ComfyUI）/ PuLID：候选图直接下到本地 local_dir，返回本地路径，无需 SSH 下载
         os.makedirs(local_dir, exist_ok=True)
         try:
             store.set_scene_state(scene_id, SceneState.PENDING_FLUX_GEN, force=True)
-            local_paths = provider.generate(None, prompt=prompt, out_dir=local_dir, params=params)
+            if use_pulid:
+                from mirage.app.pipeline.lora_bootstrap import pulid_generate
+                local_paths = pulid_generate(
+                    ref_face, prompt, out_dir=local_dir,
+                    n=(n or settings.COMFYUI_T2I_N),
+                    size=(f"{width}*{height}" if (width and height) else None),
+                    steps=(steps or None),
+                    seed=(seed if (seed is not None and seed >= 0) else None),
+                    negative=params.get("negative"))
+            else:
+                local_paths = provider.generate(None, prompt=prompt, out_dir=local_dir, params=params)
         except GpuConfigError as e:
             return f"出图后端未配置: {e}"
         except GpuRunError as e:
             store.set_scene_state(scene_id, SceneState.FAILED, force=True)
             return f"出图失败: {e}"
         store.set_scene_state(scene_id, SceneState.PENDING_HUMAN_SELECTION, force=True)
-        lines = [f"{provider.display_name} 出 {len(local_paths)} 张候选 → 分镜 {scene_id} 进入 PENDING_HUMAN_SELECTION:"]
+        _who = "PuLID 锁脸" if use_pulid else provider.display_name
+        lines = [f"{_who} 出 {len(local_paths)} 张候选 → 分镜 {scene_id} 进入 PENDING_HUMAN_SELECTION:"]
         img_markers = []
         for lp in local_paths:
             asset = store.add_asset(scene_id=scene_id, storage_path=lp, asset_type="IMAGE")

@@ -307,14 +307,48 @@ export async function autoStoryboard(projectId, novelText, scenes, replace, work
   return r.json()
 }
 // 一键 AI 分析小说 → 自动填角色(+空 LoRA)/风格/分镜
-export async function autoFill(projectId, novelText, scenes, replace, workspace = null) {
+// opts.targetSec 非空 → 后端按目标秒数自算分镜数(覆盖 scenes)；opts.coherence 控制少而长/快切
+export async function autoFill(projectId, novelText, scenes, replace, workspace = null, opts = {}) {
   const body = { project_id: projectId, novel_text: novelText, scenes, replace, workspace }
+  if (opts.targetSec != null) body.target_sec = opts.targetSec
+  if (opts.coherence != null) body.coherence = opts.coherence
   const agentConfigs = getAgentConfigs()
   if (agentConfigs) body.agent_configs = agentConfigs   // 角色/风格/分镜 全部 AI 分析都走它(导演模型)
   const r = await fetch(`${getBase()}/pipeline/auto_fill`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   })
+  if (!r.ok) throw new Error(`status ${r.status}`)
+  return r.json()
+}
+
+// 自动选图（与手动 pipelineSelect 并存的双模式）：strategy=first/best。即时返回 {selected,skipped,empty}
+export async function autoSelect(projectId, strategy = 'first', workspace = null) {
+  const r = await fetch(`${getBase()}/pipeline/auto_select`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ project_id: projectId, strategy, workspace }),
+  })
+  if (!r.ok) throw new Error(`status ${r.status}`)
+  return r.json()
+}
+
+// 一键全自动：小说 → ~目标时长成片（AI 按秒数自算镜数/段数；自动或手动选图）。返回 job_id，用 streamJobEvents 跟随。
+// params: { project_id, novel_text, target_sec, coherence, select_mode:'auto'|'manual', select_strategy:'first'|'best', replace, lightning, model, size, workspace, session_id }
+export async function oneClick(params) {
+  const body = { ...params }
+  const agentConfigs = getAgentConfigs()
+  if (agentConfigs) body.agent_configs = agentConfigs
+  return submitJob('/pipeline/one_click', body)
+}
+
+// PuLID 锁脸：给某角色上传 1 张参考脸 → 存盘并写入 characters.ref_image_path（出图时自动锁脸）
+export async function uploadCharacterFace(charId, projectId, file, workspace = null) {
+  const form = new FormData()
+  form.append('char_id', charId)
+  form.append('project_id', projectId)
+  form.append('workspace', workspace || '')
+  form.append('file', file)
+  const r = await fetch(`${getBase()}/pipeline/character_face`, { method: 'POST', body: form })
   if (!r.ok) throw new Error(`status ${r.status}`)
   return r.json()
 }

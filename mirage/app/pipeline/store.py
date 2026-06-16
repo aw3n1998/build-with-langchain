@@ -73,6 +73,7 @@ CREATE TABLE IF NOT EXISTS scenes (
     motion_prompt TEXT NOT NULL DEFAULT '',
     voice         TEXT NOT NULL DEFAULT '',
     dialogue      TEXT NOT NULL DEFAULT '',
+    character     TEXT NOT NULL DEFAULT '',
     state         TEXT NOT NULL DEFAULT 'DRAFT',
     selected_asset_id TEXT,
     video_path    TEXT,
@@ -182,6 +183,9 @@ class PipelineStore:
         if "dialogue" not in cols:   # 多角色对话(每行「说话人：台词」)：旧库补这一列
             conn.execute("ALTER TABLE scenes ADD COLUMN dialogue TEXT NOT NULL DEFAULT ''")
             logger.info("[PipelineStore] 迁移：scenes 补列 dialogue")
+        if "character" not in cols:  # 本镜主角名(PuLID 锁脸/音色路由按它查角色)：旧库补这一列
+            conn.execute("ALTER TABLE scenes ADD COLUMN character TEXT NOT NULL DEFAULT ''")
+            logger.info("[PipelineStore] 迁移：scenes 补列 character")
         # 项目级风格（每集一种风格）：旧库给 projects 补列
         pcols = {r[1] for r in conn.execute("PRAGMA table_info(projects)").fetchall()}
         for col in ("style_prompt", "trigger_word", "flux_lora", "negative_prompt", "default_size"):
@@ -391,6 +395,7 @@ class PipelineStore:
         title: str = "",
         subtitle: str = "",
         dialogue: str = "",
+        character: str = "",
     ) -> dict:
         if not self.get_project(project_id):
             raise ValueError(f"项目不存在: {project_id}")
@@ -399,10 +404,10 @@ class PipelineStore:
         with self._lock, self._conn() as conn:
             conn.execute(
                 """INSERT INTO scenes(id,project_id,scene_number,title,narration,subtitle,
-                   image_prompt,motion_prompt,dialogue,state,created_at,updated_at)
-                   VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
+                   image_prompt,motion_prompt,dialogue,character,state,created_at,updated_at)
+                   VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (sid, project_id, scene_number, title, narration, subtitle,
-                 image_prompt, motion_prompt, dialogue, SceneState.DRAFT.value, ts, ts),
+                 image_prompt, motion_prompt, dialogue, character, SceneState.DRAFT.value, ts, ts),
             )
         return self.get_scene(sid)
 
@@ -444,15 +449,18 @@ class PipelineStore:
                              subtitle: str | None = None,
                              title: str | None = None,
                              scene_number: int | None = None,
-                             dialogue: str | None = None) -> dict:
-        """更新分镜的提示词/旁白/字幕/标题/镜号/多角色对话（只改传入的非 None 字段）。
-        字幕独立于旁白：旁白配音、字幕上屏；dialogue=「说话人：台词」逐行，合成时按角色音色逐句配音。"""
+                             dialogue: str | None = None,
+                             character: str | None = None) -> dict:
+        """更新分镜的提示词/旁白/字幕/标题/镜号/多角色对话/主角（只改传入的非 None 字段）。
+        字幕独立于旁白：旁白配音、字幕上屏；dialogue=「说话人：台词」逐行，合成时按角色音色逐句配音；
+        character=本镜主角名（PuLID 锁脸/音色按它查角色）。"""
         sets, params = [], []
         for col, val in (("image_prompt", image_prompt),
                          ("motion_prompt", motion_prompt),
                          ("narration", narration),
                          ("subtitle", subtitle),
                          ("dialogue", dialogue),
+                         ("character", character),
                          ("title", title)):
             if val is not None:
                 sets.append(f"{col}=?")

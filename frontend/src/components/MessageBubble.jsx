@@ -23,7 +23,8 @@ import { fileUrl, getVideoProviders, getImageProviders, getProject, batchGenerat
          loraCreate, loraAction, loraUploadImage, loraUploadRef,
          suggestContinuation, sceneGenerate, sceneRender, sceneAppend,
          cancelJob, listActiveJobs,
-         projectStyle, sceneAdd, sceneDelete, listLoras } from '../api'
+         projectStyle, sceneAdd, sceneDelete, listLoras,
+         oneClick, autoSelect, uploadCharacterFace } from '../api'
 
 /**
  * MessageBubble — 消息渲染
@@ -708,6 +709,11 @@ export function ProductionPanel({ message, workspace, sessionId }) {
   // 一键 AI 分析填充（角色+风格+LoRA+分镜）
   const [afBusy, setAfBusy] = useState(false)
   const [afReplace, setAfReplace] = useState(false)
+  // 一键全自动出片（按目标秒数自算镜数 → 出图 → 自动/手动选图 → 出片 → 合成）
+  const [ocSec, setOcSec] = usePersistedState('ocSec', 60)      // 目标成片时长(秒)
+  const [ocCoh, setOcCoh] = usePersistedState('ocCoh', true)    // true=少而长连贯档；false=快切
+  const [ocAuto, setOcAuto] = usePersistedState('ocAuto', true) // true=自动选图全自动到底；false=出完图停下手动选
+  const [autoSelBusy, setAutoSelBusy] = useState(false)         // 面板内「自动选图」按钮忙
   // 角色/声音圣经
   const [showChars, setShowChars] = useState(false)
   const [charsBusy, setCharsBusy] = useState(false)
@@ -924,6 +930,54 @@ export function ProductionPanel({ message, workspace, sessionId }) {
     } catch (e) { setProgress('一键分析失败：' + String(e.message || e)) }
     finally { setAfBusy(false) }
   }
+  // 一键全自动出片：按目标秒数自算镜数 → 拆镜/角色/风格 → 出图 → 自动/手动选图 → 出片 → 合成
+  const doOneClick = async () => {
+    if (busy) return
+    if (!novel.trim()) { setProgress('先在上方粘一段小说/剧情文本'); return }
+    const hasContent = (proj?.characters?.length || 0) > 0 || (proj?.scenes?.length || 0) > 0 || !!(proj?.style?.style_prompt)
+    if (hasContent) {
+      if (!await dialog.confirm('一键全自动会重拆分镜并覆盖现有 角色 / 风格 / 分镜，继续？', {
+        message: '按目标时长自动拆镜 → 出图 → ' + (ocAuto ? '自动选图' : '手动选图') + ' → 出片 → 合成整集（LoRA 任务保留）。',
+        danger: true, confirmText: '开始',
+      })) return
+    }
+    cancelled.current = false
+    startAt.current.batch = Date.now()
+    setLogs([]); setShowLogs(true); setBusy('oneclick'); setProgress('提交一键全自动任务…')
+    try {
+      const jobId = await oneClick({
+        project_id: pid, workspace, session_id: sessionId,
+        novel_text: novel, target_sec: Number(ocSec) || 60, coherence: ocCoh,
+        select_mode: ocAuto ? 'auto' : 'manual', select_strategy: 'first',
+        replace: true, lightning: true, model, size: vidSize,
+      })
+      batchJob.current = jobId
+      await consume(jobId)
+    } catch (e) { setProgress('一键全自动失败：' + String(e.message || e)) }
+    finally { batchJob.current = null; setBusy('') }
+  }
+  // 面板内「自动选图」（与逐张手动点选并存的双模式）：默认选第一张
+  const doAutoSelect = async () => {
+    if (busy || autoSelBusy) return
+    setAutoSelBusy(true); setProgress('自动选图中…')
+    try {
+      const r = await autoSelect(pid, 'first', workspace)
+      setProgress(`自动选图完成：选定 ${r.selected} 镜${r.skipped ? `（跳过已选 ${r.skipped}）` : ''}。可点「③ 一键出片并合成」。`)
+      await load()
+    } catch (e) { setProgress('自动选图失败：' + String(e.message || e)) }
+    finally { setAutoSelBusy(false) }
+  }
+  // PuLID 锁脸：给某角色上传 1 张参考脸（出图自动锁脸，跨镜同一张脸，免训练）
+  const uploadFace = async (charId, file) => {
+    if (!file) return
+    setCharsBusy(true); setProgress('上传参考脸中…')
+    try {
+      await uploadCharacterFace(charId, pid, file, workspace)
+      setProgress('参考脸已设定，该角色出图将自动 PuLID 锁脸。')
+      await load()
+    } catch (e) { setProgress('上传参考脸失败：' + String(e.message || e)) }
+    finally { setCharsBusy(false) }
+  }
   // 角色/声音圣经
   const charOp = async (action, fields = {}) => {
     setCharsBusy(true)
@@ -1057,11 +1111,11 @@ export function ProductionPanel({ message, workspace, sessionId }) {
     listActiveJobs(pid).then(d => {
       if (!alive) return
       for (const j of (d.jobs || [])) {
-        if (j.kind === 'batch_generate' || j.kind === 'batch_finish') {
+        if (j.kind === 'batch_generate' || j.kind === 'batch_finish' || j.kind === 'one_click') {
           if (busy || batchJob.current) continue
           batchJob.current = j.job_id
           startAt.current.batch = Date.now()   // 重连无法知真实起点，以重连时刻起算
-          setBusy(j.kind === 'batch_generate' ? 'generate' : 'finish')
+          setBusy(j.kind === 'batch_generate' ? 'generate' : j.kind === 'one_click' ? 'oneclick' : 'finish')
           setProgress('重新连接到进行中的任务…')
           consume(j.job_id).finally(() => { batchJob.current = null; setBusy('') })
         } else if (j.scene_id) {
@@ -1351,6 +1405,34 @@ export function ProductionPanel({ message, workspace, sessionId }) {
             </label>
             <span style={{ fontSize: 11, color: 'var(--text-dim)' }}>角色 + 风格 + LoRA + 分镜，全自动</span>
           </div>
+          {/* 终极一键：小说 → 按秒数自算镜数 → 出图 → 自动/手动选图 → 出片 → 合成整集，全自动到底 */}
+          <div style={{ border: '1px solid rgba(0,189,176,0.35)', background: 'rgba(0,189,176,0.07)',
+                        borderRadius: 8, padding: 10, marginBottom: 8 }}>
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+              <button onClick={doOneClick} disabled={!!busy || afBusy || sbBusy}
+                style={{ height: 38, padding: '0 18px', borderRadius: 8, border: 'none',
+                         background: (busy || afBusy || sbBusy) ? 'rgba(255,255,255,0.06)' : '#00bdb0',
+                         color: (busy || afBusy || sbBusy) ? 'var(--text-muted)' : '#04201e', fontSize: 13.5, fontWeight: 700,
+                         cursor: (busy || afBusy || sbBusy) ? 'default' : 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                {busy === 'oneclick' ? '全自动制作中…' : '✨ 一键全自动出片'}
+              </button>
+              <label style={{ fontSize: 12, color: 'var(--text-muted)' }}>目标
+                <input type="number" min={5} max={300} value={ocSec} onChange={e => setOcSec(e.target.value)}
+                  style={{ ...inputStyle, width: 60, height: 28, margin: '0 4px' }} />秒</label>
+              <label style={{ fontSize: 12, display: 'inline-flex', gap: 4, alignItems: 'center', color: 'var(--text-muted)' }}
+                title="少而长的连续长镜头，切换点少 → 更连贯；关掉=多而短的快切">
+                <input type="checkbox" checked={ocCoh} onChange={e => setOcCoh(e.target.checked)} />连贯优先
+              </label>
+              <label style={{ fontSize: 12, display: 'inline-flex', gap: 4, alignItems: 'center', color: 'var(--text-muted)' }}
+                title="勾选=自动选图全自动到底；取消=出完图停下，到「分镜制作」手动逐镜点选后再出片">
+                <input type="checkbox" checked={ocAuto} onChange={e => setOcAuto(e.target.checked)} />自动选图
+              </label>
+            </div>
+            <div style={{ fontSize: 10.5, color: 'var(--text-dim)', marginTop: 6 }}>
+              AI 按秒数自算镜数：拆镜 → 出图 → {ocAuto ? '自动选图' : '手动选图'} → 出片 → 合成整集，一步到底。
+              脸要一致：先到「角色」给主角传 1 张参考脸（PuLID 锁脸）。
+            </div>
+          </div>
           {/* 次要：角色/风格已设好、只想补分镜 */}
           <div style={{ fontSize: 10.5, color: 'var(--text-dim)', marginBottom: 6 }}>或只想补分镜（角色/风格已弄好时）：</div>
           <button onClick={doStoryboard} disabled={sbBusy || afBusy}
@@ -1383,6 +1465,16 @@ export function ProductionPanel({ message, workspace, sessionId }) {
                 </select>
                 <button onClick={() => charOp('delete', { char_id: c.id })} disabled={charsBusy}
                   style={{ ...miniBtn2, color: '#fca5a5', borderColor: 'rgba(239,68,68,0.4)' }}>删除</button>
+              </div>
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 4 }}>
+                <label style={{ ...miniBtn2, cursor: charsBusy ? 'default' : 'pointer', display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                  <Icon.Plus size={12} />{c.ref_image_path ? '换参考脸' : '传参考脸(锁脸)'}
+                  <input type="file" accept="image/*" style={{ display: 'none' }} disabled={charsBusy}
+                    onChange={e => { uploadFace(c.id, (e.target.files || [])[0]); e.target.value = '' }} />
+                </label>
+                {c.ref_image_path
+                  ? <span style={{ fontSize: 10.5, color: '#5fe8de' }} title="出图自动 PuLID 锁脸，跨镜同一张脸">已锁脸(PuLID)</span>
+                  : <span style={{ fontSize: 10.5, color: 'var(--text-dim)' }}>传 1 张脸 → 跨镜同一张脸（免训练）</span>}
               </div>
             </div>
           ))}
@@ -1510,6 +1602,16 @@ export function ProductionPanel({ message, workspace, sessionId }) {
           <option value="1024x1024">1024×1024 方形</option>
         </select>
         <span style={{ fontSize: 11, color: 'var(--text-dim)' }}>已有图的分镜可在下方直接「上传图片」跳过生图</span>
+      </div>
+
+      {/* 第②步可选：自动选图（与逐张手动点选并存的双模式；默认选第一张）*/}
+      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+        <button onClick={doAutoSelect} disabled={!!busy || autoSelBusy}
+          style={{ ...miniBtn2, height: 32, padding: '0 12px' }}
+          title="给每个有候选图但还没选的分镜自动选第一张；想自己挑就在下方图墙逐张点（两种都行）">
+          {autoSelBusy ? '自动选图中…' : '② 自动选图（选第一张）'}
+        </button>
+        <span style={{ fontSize: 11, color: 'var(--text-dim)' }}>或在下方图墙逐张手动点选（两种模式都行）</span>
       </div>
 
       {/* 第③步：出片并合成（模型/段数/分辨率可选）*/}

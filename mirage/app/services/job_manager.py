@@ -37,6 +37,7 @@ _TIMEOUTS = {
     "render": 120 * 60,         # 出片（Wan 单段 ~5min × 接续段数；LTX 快得多）
     "batch_generate": 4 * 3600, # 整片批量出图
     "batch_finish": 6 * 3600,   # 整片批量出片 + 合成
+    "one_click": 8 * 3600,      # 一键全自动：拆分镜 + 批量出图 + 选图 + 批量出片 + 合成（最长链）
     "chat": 20 * 60,            # 一轮 agent 对话（LLM + 工具）
 }
 _DEFAULT_TIMEOUT = 3600
@@ -167,7 +168,7 @@ class JobManager:
             logger.error("[job] 超时 %s（%ss）", job.id, timeout)
             # 超时只停了本地协程，远程 GPU 推理仍在跑 → 杀掉远程进程释放显卡，
             # 避免僵尸进程占卡堆积（与用户主动取消的清理一致）。
-            if job.kind in ("generate", "render", "batch_generate", "batch_finish"):
+            if job.kind in ("generate", "render", "batch_generate", "batch_finish", "one_click"):
                 try:
                     from mirage.app.pipeline.gpu_client import get_gpu_client
                     await asyncio.to_thread(get_gpu_client().kill_inference)

@@ -217,7 +217,7 @@ async def pipeline_job_cancel(job_id: str):
     job = job_manager.get(job_id)
     cancelled = job_manager.cancel(job_id)
     # GPU 任务：取消只停本地，远程进程不会自己死 → 顺手杀掉，避免僵尸进程占卡堆积
-    if cancelled and job and job.kind in ("generate", "render", "batch_generate", "batch_finish"):
+    if cancelled and job and job.kind in ("generate", "render", "batch_generate", "batch_finish", "one_click"):
         try:
             from mirage.app.pipeline.gpu_client import get_gpu_client
             await asyncio.to_thread(get_gpu_client().kill_inference)
@@ -919,6 +919,39 @@ async def pipeline_faceswap(
     return {"job_id": job_manager.submit("faceswap", lambda: _faceswap_events(req), meta=meta)}
 
 
+@router.post("/pipeline/character_face")
+async def pipeline_character_face(
+    char_id: str = Form(...),
+    project_id: str = Form(default=""),
+    workspace: str = Form(default=""),
+    file: UploadFile = File(...),
+):
+    """PuLID 锁脸：给某角色上传 1 张参考脸 → 存盘并写入 characters.ref_image_path。
+
+    之后出图时 generate_candidates 见该角色有参考脸即走 PuLID 锁脸直出（免训练，跨镜同一张脸）。
+    合规红线：仅用你有权使用的脸（原创/AI 生成/本人授权）。
+    """
+    import os as _os
+    import pathlib
+    from uuid import uuid4
+    from mirage.app.pipeline.runtime import set_workspace, video_dir
+    from mirage.app.pipeline.store import get_store
+    suffix = pathlib.Path(file.filename or "").suffix.lower()
+    if suffix not in {".png", ".jpg", ".jpeg", ".webp"}:
+        raise HTTPException(status_code=400, detail=f"不支持的图片类型 {suffix}（支持 png/jpg/jpeg/webp）")
+    set_workspace(workspace or None)
+    store = get_store()
+    if not store.get_character(char_id):
+        raise HTTPException(status_code=404, detail=f"角色不存在: {char_id}")
+    face_dir = _os.path.join(video_dir(), "char_faces")
+    _os.makedirs(face_dir, exist_ok=True)
+    face_path = _os.path.join(face_dir, f"char_{char_id[:8]}_{uuid4().hex[:6]}{suffix}")
+    with open(face_path, "wb") as f:
+        f.write(await file.read())
+    store.update_character(char_id, ref_image_path=face_path)
+    return {"success": True, "char_id": char_id, "ref_image_path": face_path}
+
+
 @router.get("/pipeline/jobs/{job_id}/events")
 async def pipeline_job_events(job_id: str, since: int = 0) -> StreamingResponse:
     """SSE：回放并实时跟随某个 GPU 任务的事件，直到完成。
@@ -982,6 +1015,26 @@ async def pipeline_select(req: SelectRequest):
     # （早先按 ✅ 前缀判断，但 emoji 已统一移除，导致永远判为失败、前端不给「出视频」按钮）
     ok = ("已选定" in msg) or ("PENDING_VIDEO_GEN" in msg)
     return {"success": ok, "message": msg}
+
+
+class AutoSelectRequest(BaseModel):
+    project_id: str
+    workspace: str | None = None
+    strategy: str = "first"   # first=选第1张(零依赖)；best=AI视觉评分挑最佳(需 VISION_*，失败回退 first)
+
+
+@router.post("/pipeline/auto_select")
+async def pipeline_auto_select(req: AutoSelectRequest):
+    """自动选图（与手动 /pipeline/select 并存的「双模式」）：
+
+    对每个「有候选且尚未选过」的分镜自动选定一张，推进到 PENDING_VIDEO_GEN，
+    使 batch_finish 立刻可出片。不影响已手动选过的分镜。
+    """
+    import asyncio
+    from mirage.app.pipeline.auto_plan import auto_select_all
+    res = await asyncio.to_thread(auto_select_all, req.project_id,
+                                  strategy=req.strategy, workspace=req.workspace)
+    return {"success": True, **res}
 
 
 # ── 制作面板：确定性、DB 驱动的整片流程（出图/选图/出片/合成全用按钮，不绕 agent）──
@@ -1412,7 +1465,8 @@ async def pipeline_auto_storyboard(req: AutoStoryboardRequest):
     for i, sc in enumerate(scenes, 1):
         row = store.add_scene(req.project_id, base + i, narration=sc["narration"],
                               image_prompt=sc["image_prompt"], motion_prompt=sc["motion_prompt"],
-                              title=sc["title"], subtitle=sc["subtitle"], dialogue=sc.get("dialogue") or "")
+                              title=sc["title"], subtitle=sc["subtitle"], dialogue=sc.get("dialogue") or "",
+                              character=sc.get("character") or "")
         if sc.get("lipsync"):
             store.set_scene_lipsync(row["id"], True)
         v = voice_of.get(sc.get("character"))
@@ -1427,6 +1481,9 @@ class AutoFillRequest(BaseModel):
     project_id: str
     novel_text: str
     scenes: int = 8
+    # 目标成片时长(秒)：非空时由 AI 按秒数自算分镜数(覆盖 scenes)；None=沿用 scenes(零回归)。
+    target_sec: float | None = None
+    coherence: bool = True        # 估算镜数时是否「少而长」(连贯优先)；仅在 target_sec 非空时生效
     replace: bool = False         # true=替换现有角色/风格/分镜（LoRA 任务不删，保住已传图）
     # 前端「导演/分镜模型」；空=走 .env STORYBOARD_*/默认。作用于 角色/风格/分镜 全部 AI 分析步骤。
     agent_configs: dict[str, AgentLLMConfig] | None = None
@@ -1477,7 +1534,11 @@ async def pipeline_auto_fill(req: AutoFillRequest):
 
     # 3) 分镜（带新角色 + 新风格；逻辑同 auto_storyboard）
     chars_now = store.list_characters(pid)
-    n = max(1, min(int(req.scenes or 8), 40))
+    if req.target_sec:                                  # AI 按目标秒数自算镜数（连贯优先=少而长）
+        from mirage.app.pipeline.auto_plan import estimate_storyboard
+        n = estimate_storyboard(req.target_sec, coherence=req.coherence)["n_shots"]
+    else:
+        n = max(1, min(int(req.scenes or 8), 40))
     scenes = await breakdown_storyboard(novel, n, style=style.get("style_prompt", ""),
                                         characters=chars_now, llm_config=sb_cfg)
     if req.replace:
@@ -1494,7 +1555,8 @@ async def pipeline_auto_fill(req: AutoFillRequest):
     for i, sc in enumerate(scenes, 1):
         rrow = store.add_scene(pid, base + i, narration=sc["narration"],
                                image_prompt=sc["image_prompt"], motion_prompt=sc["motion_prompt"],
-                               title=sc["title"], subtitle=sc["subtitle"], dialogue=sc.get("dialogue") or "")
+                               title=sc["title"], subtitle=sc["subtitle"], dialogue=sc.get("dialogue") or "",
+                               character=sc.get("character") or "")
         if sc.get("lipsync"):
             store.set_scene_lipsync(rrow["id"], True)
         v = voice_of.get(sc.get("character"))
@@ -2186,3 +2248,84 @@ async def pipeline_batch_finish(req: BatchRequest):
     """一键全部出片并合成整集：后台单飞任务，返回 job_id。"""
     from mirage.app.services.job_manager import job_manager
     return {"job_id": job_manager.submit("batch_finish", lambda: _batch_finish_events(req), meta={"session_id": req.session_id, "project_id": req.project_id})}
+
+
+class OneClickRequest(BaseModel):
+    project_id: str
+    workspace: str | None = None
+    session_id: str | None = None
+    novel_text: str = ""              # 非空=先 auto_fill 拆分镜+角色+风格；空=用项目里已有的分镜
+    target_sec: float = 60.0          # 目标成片时长(秒)：AI 按此自算分镜数 + 每镜段数
+    coherence: bool = True            # True=少而长的连续长镜(更连贯)；False=多而短的快切
+    select_mode: str = "auto"         # auto=自动选图全自动到底；manual=出完图暂停等用户手动选
+    select_strategy: str = "first"    # first=选第1张；best=AI视觉评分挑最佳(需 VISION_*)
+    replace: bool = True              # auto_fill 时是否替换现有角色/风格/分镜
+    lightning: bool | None = True     # 出片档位：True=极速档(默认，先求跑通)/False=精修/None=按 .env
+    model: str = ""
+    size: str = ""
+    agent_configs: dict[str, AgentLLMConfig] | None = None
+
+
+async def _one_click_events(req: OneClickRequest):
+    """一键全自动：小说 →(AI按秒数自算镜数→拆分镜/角色/风格)→ 批量出图 → 自动/手动选图 → 出片+合成。
+
+    全程复用现成 auto_fill / _batch_generate_events / auto_select_all / _batch_finish_events，
+    只把它们按依赖顺序串成一个后台单飞 job，事件格式不变（前端走同一套 SSE）。
+    """
+    import asyncio
+    from mirage.app.pipeline.auto_plan import estimate_storyboard, auto_select_all
+
+    plan = estimate_storyboard(req.target_sec, coherence=req.coherence)
+    yield {"type": "tool_result", "name": "one_click",
+           "content": (f"目标 {req.target_sec:.0f}s → {plan['n_shots']} 个镜头 × {plan['segments_per_shot']} 段"
+                       f"（每镜≈{plan['sec_per_shot']}s，估算总长≈{plan['est_total_sec']}s）。开始全自动制作…")}
+
+    # 1) 拆分镜 + 角色 + 风格（小说非空才做；否则沿用项目里已有的分镜）
+    if (req.novel_text or "").strip():
+        yield {"type": "batch_progress", "phase": "storyboard", "label": "AI 分析小说 → 角色 / 风格 / 分镜…"}
+        af = AutoFillRequest(workspace=req.workspace, project_id=req.project_id, novel_text=req.novel_text,
+                             scenes=plan["n_shots"], replace=req.replace, agent_configs=req.agent_configs)
+        try:
+            res = await pipeline_auto_fill(af)
+            yield {"type": "tool_result", "name": "one_click",
+                   "content": f"分镜就绪：{res.get('scenes_count')} 镜，角色 {res.get('characters')} 个。"}
+        except Exception as e:  # noqa: BLE001
+            yield {"type": "tool_result", "name": "one_click", "content": f"拆分镜失败: {type(e).__name__}: {e}"}
+            return
+
+    breq = BatchRequest(project_id=req.project_id, workspace=req.workspace, session_id=req.session_id,
+                        model=req.model, size=req.size, lightning=req.lightning,
+                        segments=plan["segments_per_shot"])
+
+    # 2) 批量出图
+    async for ev in _batch_generate_events(breq):
+        yield ev
+
+    # 3) 选图：自动（默认）或暂停交给手动
+    if (req.select_mode or "auto") == "manual":
+        yield {"type": "tool_result", "name": "one_click",
+               "content": "已全部出图。请在面板逐镜点选候选图后，再点「一键出片并合成」继续。"}
+        return
+    yield {"type": "batch_progress", "phase": "select", "label": "自动选图中…"}
+    try:
+        sel = await asyncio.to_thread(auto_select_all, req.project_id,
+                                      strategy=req.select_strategy, workspace=req.workspace)
+        yield {"type": "tool_result", "name": "one_click", "content": f"自动选图完成：选定 {sel['selected']} 镜。"}
+    except Exception as e:  # noqa: BLE001
+        yield {"type": "tool_result", "name": "one_click", "content": f"自动选图失败: {type(e).__name__}: {e}"}
+        return
+
+    # 4) 批量出片 + 合成整集
+    async for ev in _batch_finish_events(breq):
+        yield ev
+
+
+@router.post("/pipeline/one_click")
+async def pipeline_one_click(req: OneClickRequest):
+    """一键全自动出片：小说 → ~目标时长成片，全程后台单飞任务，返回 job_id。
+
+    进度走 /pipeline/jobs/{job_id}/events SSE（与 batch_* 同一套）。
+    """
+    from mirage.app.services.job_manager import job_manager
+    return {"job_id": job_manager.submit("one_click", lambda: _one_click_events(req),
+            meta={"session_id": req.session_id, "project_id": req.project_id})}
