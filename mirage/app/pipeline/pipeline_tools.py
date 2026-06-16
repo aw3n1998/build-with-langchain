@@ -1306,13 +1306,36 @@ def configure_character(trigger_word: str = "", flux_lora: str = "", negative_pr
         flux_lora: FLUX LoRA 文件在 GPU 上的路径；留空则用 .env 默认。
         negative_prompt: 可选负向提示词。
     """
+    import os
+    lora_in = (flux_lora or "").strip()
+    lora_to_set = None                       # None=不动该字段（留空时不覆盖既有配置）
+    warn = ""
+    if lora_in and lora_in.lower() != "none":
+        name = os.path.basename(lora_in)
+        try:
+            from mirage.app.pipeline import comfy_http as ch
+            avail = ch.available_loras(ch.base_url())
+        except Exception:  # noqa: BLE001
+            avail = None
+        if avail is not None and name not in avail:
+            sample = "、".join(sorted(avail)[:8]) or "（loras 目录为空）"
+            return (f"❌ 没给你设 LoRA：ComfyUI 的 loras 目录里没有「{name}」这个文件——"
+                    f"硬设会让出图被校验打回、整批失败（这正是刚才的故障）。\n"
+                    f"现有可用 LoRA：{sample}。\n"
+                    f"要这个角色的 LoRA：先去「角色 & LoRA」面板训练它，或把正确文件名/路径发我；"
+                    f"我不会替你编一个不存在的文件名。触发词需要的话我可以单独设。")
+        lora_to_set = name                   # 通过校验 or 无法核实 → 存 basename（匹配 models/loras/）
+        if avail is None:
+            warn = "（注：没连上 ComfyUI 核实该 LoRA 是否真实存在；出图时若不存在会自动跳过 LoRA、不再整批失败）"
+    elif lora_in.lower() == "none":
+        lora_to_set = ""                     # 显式清空 LoRA（回退 .env 默认）
     m = set_model_config(
         trigger_word=(trigger_word if trigger_word != "" else None),
-        flux_lora=(flux_lora if flux_lora != "" else None),
+        flux_lora=lora_to_set,
         negative_prompt=(negative_prompt if negative_prompt != "" else None),
     )
     return (f"已更新工作目录角色配置：触发词='{m['trigger_word'] or '（无）'}'，"
-            f"LoRA='{m['flux_lora'] or '默认(.env)'}'。出图时会自动注入触发词。")
+            f"LoRA='{m['flux_lora'] or '默认(.env)'}'。出图时会自动注入触发词。{warn}")
 
 
 @tool

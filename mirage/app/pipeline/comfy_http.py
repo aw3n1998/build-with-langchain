@@ -46,6 +46,18 @@ def base_url(override: str = "") -> str:
     return base
 
 
+def available_loras(base: str) -> set[str] | None:
+    """查 ComfyUI 实际可用的 LoRA 文件名集合（GET /object_info/LoraLoader）。
+    取不到/解析失败返回 None —— 让调用方「无法核实就别拦」，避免把存在的 LoRA 误删/误判。"""
+    try:
+        r = httpx.get(f"{base}/object_info/LoraLoader", timeout=10)
+        r.raise_for_status()
+        names = r.json()["LoraLoader"]["input"]["required"]["lora_name"][0]
+        return {str(n) for n in names} if isinstance(names, (list, tuple)) else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def load_workflow(path: str, default_name: str, kind: str) -> dict:
     """读 workflow 模板（API 格式 JSON）。path 为空则用仓库自带 comfyui_workflows/<default_name>。"""
     p = path or os.path.join(WORKFLOWS_DIR, default_name)

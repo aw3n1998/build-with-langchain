@@ -118,6 +118,14 @@ class ComfyUIImageProvider(ImageProvider):
             # 没配则删掉模板里的 LoraLoader 节点（空 %LORA% 会被 ComfyUI 当成找不到的 lora 直接报错）。
             lora = (params.get("flux_lora") or "").strip()
             use_lora = bool(lora) and lora.lower() != "none"
+            # 核实 LoRA 真实存在：配了个 ComfyUI 里没有的文件名会让整批出图被校验打回(整批失败)。
+            # 能查到列表且不在其中 → 降级为「不加 LoRA」继续出图 + 告警；查不到列表则不拦(保持原行为)。
+            if use_lora:
+                avail = ch.available_loras(base)
+                if avail is not None and os.path.basename(lora) not in avail:
+                    log_bus.emit(f"[出图] ⚠ LoRA「{os.path.basename(lora)}」在 ComfyUI 不存在，"
+                                 f"本次按【不加 LoRA】出图（去「角色 & LoRA」训练它，或核对文件名）。")
+                    use_lora = False
             for i in range(n):
                 seed = (seed0 + i) % 2_000_000_000
                 mapping = {
