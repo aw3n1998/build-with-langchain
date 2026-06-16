@@ -1412,7 +1412,7 @@ async def pipeline_auto_storyboard(req: AutoStoryboardRequest):
     for i, sc in enumerate(scenes, 1):
         row = store.add_scene(req.project_id, base + i, narration=sc["narration"],
                               image_prompt=sc["image_prompt"], motion_prompt=sc["motion_prompt"],
-                              title=sc["title"], subtitle=sc["subtitle"])
+                              title=sc["title"], subtitle=sc["subtitle"], dialogue=sc.get("dialogue") or "")
         if sc.get("lipsync"):
             store.set_scene_lipsync(row["id"], True)
         v = voice_of.get(sc.get("character"))
@@ -1494,7 +1494,7 @@ async def pipeline_auto_fill(req: AutoFillRequest):
     for i, sc in enumerate(scenes, 1):
         rrow = store.add_scene(pid, base + i, narration=sc["narration"],
                                image_prompt=sc["image_prompt"], motion_prompt=sc["motion_prompt"],
-                               title=sc["title"], subtitle=sc["subtitle"])
+                               title=sc["title"], subtitle=sc["subtitle"], dialogue=sc.get("dialogue") or "")
         if sc.get("lipsync"):
             store.set_scene_lipsync(rrow["id"], True)
         v = voice_of.get(sc.get("character"))

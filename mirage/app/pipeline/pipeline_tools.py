@@ -186,6 +186,7 @@ def add_scene(
     motion_prompt: str = "",
     title: str = "",
     subtitle: str = "",
+    dialogue: str = "",
 ) -> str:
     """给项目添加一个分镜（镜头）。状态初始为 DRAFT。
 
@@ -197,6 +198,7 @@ def add_scene(
         motion_prompt: 运镜/动态提示词（Wan2.2 图生视频用）。
         title: 镜头简短标题。
         subtitle: 屏幕字幕文本；留空则字幕沿用 narration。旁白≠字幕时（如标题卡/台词）单独给。
+        dialogue: 多角色对话「说话人：台词」逐行（说话人用角色名）；一镜多人对话时填，合成按各角色音色逐句配音。
     """
     scene = get_store().add_scene(
         project_id=project_id,
@@ -206,6 +208,7 @@ def add_scene(
         motion_prompt=motion_prompt,
         title=title,
         subtitle=subtitle,
+        dialogue=dialogue,
     )
     return (
         f"已添加分镜 [{scene['id']}] #{scene['scene_number']} {scene['title']}"

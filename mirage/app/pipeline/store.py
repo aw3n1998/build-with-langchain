@@ -390,6 +390,7 @@ class PipelineStore:
         motion_prompt: str = "",
         title: str = "",
         subtitle: str = "",
+        dialogue: str = "",
     ) -> dict:
         if not self.get_project(project_id):
             raise ValueError(f"项目不存在: {project_id}")
@@ -398,10 +399,10 @@ class PipelineStore:
         with self._lock, self._conn() as conn:
             conn.execute(
                 """INSERT INTO scenes(id,project_id,scene_number,title,narration,subtitle,
-                   image_prompt,motion_prompt,state,created_at,updated_at)
-                   VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+                   image_prompt,motion_prompt,dialogue,state,created_at,updated_at)
+                   VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (sid, project_id, scene_number, title, narration, subtitle,
-                 image_prompt, motion_prompt, SceneState.DRAFT.value, ts, ts),
+                 image_prompt, motion_prompt, dialogue, SceneState.DRAFT.value, ts, ts),
             )
         return self.get_scene(sid)
 

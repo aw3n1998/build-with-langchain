@@ -34,17 +34,37 @@ _SYSTEM = (
     "     [主体的一个具体动作，先轻后重、单一方向] + [单一运镜术语] + [光影/氛围]。运镜术语**只选一个**英文：\n"
     "     push-in / pull-out / pan left / pan right / tilt up / tilt down / orbit / following shot / static shot，别堆两个矛盾运镜。\n"
     "     例：'slowly turns head toward camera, a faint smile forms, gentle push-in, soft warm rim light, shallow depth of field'。\n"
-    "   - narration: 这镜的声音。若 lipsync=true 这里写【人物要说的台词】；若 false 写画外音旁白。\n"
-    "     台词控制在能一口气说完（≤约25字/7秒），太长就拆到下一镜。\n"
-    "   - subtitle: 屏幕大字（片头标题/钩子/留空）。普通解说镜可留空（会自动用旁白）。\n"
-    "   - lipsync: 布尔。这镜有人物开口说台词=true（走对口型）；画外音/空镜/物件特写=false。\n"
+    "   - narration: 这镜的【单一】声音。若 lipsync=true 写【那一个人物要说的台词】；若 false 写画外音旁白。\n"
+    "     ≤约25字/7秒能一口气说完，太长拆到下一镜。**两人及以上对话别写这里，用 dialogue。**\n"
+    "   - dialogue: 多角色对话。【仅当这一镜里两个及以上角色你一句我一句对话】时填，否则给空数组 []。\n"
+    "     格式：[{\"speaker\":\"角色名(必须用上面角色表里的原名)\",\"text\":\"台词(中文，每句≤约20字)\"}, ...]，按说话顺序。\n"
+    "     填了 dialogue 的镜：lipsync 必须 false（画面给场景，各角色按各自音色配音，不做单脸对口型）、narration 留空。\n"
+    "   - subtitle: 屏幕大字（片头标题/钩子/留空）。普通解说镜可留空（会自动用旁白/对话）。\n"
+    "   - lipsync: 布尔。这镜【单个】人物开口对口型说话=true；画外音/空镜/物件特写/【多人对话(用dialogue)】=false。\n"
     "   - character: 这镜的主要出场角色名（用用户给的角色名；无具体人物如空镜/物件则填空串）。\n"
     "3) 景别要有节奏：开场用空镜/全景交代环境，中间中景推进，情绪点用特写；别每镜都大特写或都全景。\n"
     "4) 短剧命脉：开头要有钩子，结尾留悬念。\n"
     "只输出这个 JSON 数组，不要任何解释、前后缀、代码块标记。"
 )
 
-_FIELDS = ("title", "image_prompt", "motion_prompt", "narration", "subtitle", "lipsync", "character")
+_FIELDS = ("title", "image_prompt", "motion_prompt", "narration", "subtitle", "lipsync", "character", "dialogue")
+
+
+def _coerce_dialogue(v) -> str:
+    """把 LLM 的 dialogue（数组 [{speaker,text}] 或多行文本）规整成「说话人：台词」逐行文本。"""
+    lines = []
+    if isinstance(v, list):
+        for it in v:
+            if isinstance(it, dict):
+                spk = str(it.get("speaker") or it.get("name") or "").strip()
+                txt = str(it.get("text") or it.get("line") or "").strip()
+            else:
+                spk, txt = "", str(it or "").strip()
+            if txt:
+                lines.append(f"{spk}：{txt}" if spk else txt)
+    elif isinstance(v, str):
+        lines = [ln.strip() for ln in v.splitlines() if ln.strip()]
+    return "\n".join(lines)
 
 
 def _as_bool(v) -> bool:
@@ -82,6 +102,7 @@ def _coerce_scenes(text: str, n: int, style: str = "") -> list[dict]:
                         "subtitle": str(it.get("subtitle") or "").strip(),
                         "lipsync": _as_bool(it.get("lipsync")),
                         "character": str(it.get("character") or "").strip(),
+                        "dialogue": _coerce_dialogue(it.get("dialogue")),
                     })
         except Exception as e:  # noqa: BLE001
             logger.warning("[storyboard] JSON 解析失败，将走保底: %s", e)
@@ -93,7 +114,7 @@ def _coerce_scenes(text: str, n: int, style: str = "") -> list[dict]:
         k = len(scenes) + 1
         scenes.append({"title": f"镜{k}", "image_prompt": (style or "电影感，写实").strip("，"),
                        "motion_prompt": "缓慢推近，自然光影", "narration": "",
-                       "subtitle": "", "lipsync": False, "character": ""})
+                       "subtitle": "", "lipsync": False, "character": "", "dialogue": ""})
     return scenes
 
 
