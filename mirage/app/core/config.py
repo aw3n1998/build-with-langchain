@@ -14,6 +14,15 @@ class Settings(BaseSettings):
     OPENAI_API_BASE: str = "https://api.deepseek.com/v1"
     MODEL_NAME: str = "deepseek-chat"
     EMBEDDING_MODEL_NAME: str = "text-embedding-3-small"
+    # ── 分镜(storyboard)专属 LLM:可选覆盖,空=用上面通用默认。通用解耦,跟 DeepSeek 同一套 OpenAI 兼容口 ──
+    #   想【全体 agent 都用 OpenRouter/grok】→ 直接把上面 OPENAI_API_BASE/KEY/MODEL 指向 OpenRouter(.env 有样例)。
+    #   只想【分镜用 grok、聊天仍 DeepSeek】→ 填下面三个(未填的字段回退通用默认)。★ key 一律走 env/Secret,绝不入库。
+    STORYBOARD_API_KEY: str = ""       # 空=用 OPENAI_API_KEY
+    STORYBOARD_API_BASE: str = ""      # 如 https://openrouter.ai/api/v1;空=用 OPENAI_API_BASE
+    STORYBOARD_MODEL: str = ""         # 如 x-ai/grok-4.20;空=用 MODEL_NAME
+    # OpenRouter 可选归属头(base 含 openrouter 时自动带;非必填,用于排行/部分免费模型)
+    OPENROUTER_REFERER: str = ""       # 如 https://你的站点 或留空
+    OPENROUTER_TITLE: str = "Mirage"
     # 专用视频 Agent：聊天直达视频 Agent，不再过 supervisor 多路选择（功能专一）。false=恢复多 Agent 路由。
     VIDEO_AGENT_ONLY: bool = True
     # ── toC / 对外 API 预留口子（全部默认放行/不启用，不影响现有单用户面板）──
@@ -115,6 +124,11 @@ class Settings(BaseSettings):
     # 默认关(精修档)；出片时传 lightning=true(面板「极速档」开关/更多参数)或这里设 true 走极速档。
     WAN_LIGHTNING: bool = False
     COMFYUI_WORKFLOW_I2V_LIGHTNING: str = "comfyui_workflows/i2v_fp8_lightning_template.json"
+    # ── FLF2V 首尾帧·共享关键帧续段（治本:根治尾帧续段的接缝抖动）──────────────
+    # 每段用相邻两张关键帧做 first-last-frame-to-video,相邻段共用边界帧 → 交界像素相同、零抖、免 xfade,
+    # 且每段被两端约束、不累积漂移。需 ComfyUI v0.16+ 原生 WanFirstLastFrameToVideo;首跑前按官方模板核对脚手架。
+    COMFYUI_WORKFLOW_FLF2V: str = ""       # FLF2V workflow;空=用仓库自带 flf2v_template.json
+    FLF2V_DROP_SHARED_FRAME: bool = True   # 拼接时丢掉相邻段重复的共享关键帧,避免接缝处 1 帧卡顿
     # 极速档步数(可调):蒸馏 LoRA 按 4 步训,4=最快(贴训练点)、6=通常更干净、8=再稳更慢。
     # 模板用 %STEPS%/%BOUNDARY% 占位;切换步(高噪→低噪)取步数一半(高噪 0→BOUNDARY、低噪 BOUNDARY→end)。
     WAN_LIGHTNING_STEPS: int = 6
@@ -195,6 +209,14 @@ class Settings(BaseSettings):
     COMFYUI_FLUX_CKPT: str = ""
     # ComfyUI 后处理（放大/补帧）：合成后可选再过一道 workflow；留空=不做后处理
     COMFYUI_WORKFLOW_POST: str = ""       # 后处理 workflow 模板路径（空=关闭后处理）
+    # ── 一键转规格（对已生成的低清成片按需放大到目标分辨率，如 4K）──────────────
+    # 引擎可插拔：auto=配了 ComfyUI 走 AI 超分(RealESRGAN)、否则 ffmpeg 快缩；也可强制 comfyui / ffmpeg。
+    UPSCALE_METHOD: str = "auto"          # auto / comfyui / ffmpeg
+    UPSCALE_MODEL: str = "RealESRGAN_x2.pth"   # ComfyUI 超分模型名(放 models/upscale_models/;想更清下 RealESRGAN_x4.pth 改这里)
+    COMFYUI_WORKFLOW_UPSCALE: str = ""    # 超分 workflow；空=回退 COMFYUI_WORKFLOW_POST / 仓库自带 post_upscale_template.json
+    # 目标规格预设（名:宽*高，逗号分隔，可增减、不写死；前端下拉据此，API 也可直接传 width/height）
+    UPSCALE_TARGETS: str = ("4K竖屏:2160*3840,4K横屏:3840*2160,2K竖屏:1440*2560,"
+                            "1080P竖屏:1080*1920,1080P横屏:1920*1080,720P竖屏:720*1280")
     # Wan2.2-S2V 对口型（语音驱动）：人物开口说话的镜头用。图+音频→口型同步视频，走 ComfyUI。
     # 隐藏 Provider：不进用户模型下拉，由每镜「对口型」开关自动路由。端点门控同 COMFYUI_BASE_URL。
     COMFYUI_WORKFLOW_S2V: str = ""        # S2V workflow 模板路径；空=用仓库自带 comfyui_workflows/s2v_template.json

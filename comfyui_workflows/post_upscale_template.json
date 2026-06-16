@@ -15,7 +15,7 @@
   "2": {
     "class_type": "UpscaleModelLoader",
     "inputs": {
-      "model_name": "RealESRGAN_x2.pth"
+      "model_name": "%UPSCALE_MODEL%"
     }
   },
   "3": {

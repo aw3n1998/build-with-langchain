@@ -130,7 +130,7 @@ async def breakdown_storyboard(novel_text: str, n: int, *, style: str = "",
         f"小说/剧情文本：\n{(novel_text or '').strip()[:6000]}"
     )
     try:
-        resp = await ai_service._llm.ainvoke([
+        resp = await ai_service.storyboard_llm.ainvoke([   # 分镜专属 LLM(配了 STORYBOARD_*/OpenRouter 就走它)
             SystemMessage(content=_SYSTEM),
             HumanMessage(content=human),
         ])

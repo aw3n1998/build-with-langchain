@@ -1144,6 +1144,122 @@ def assemble_episode(project_id: str, voice: str = "", with_subtitles: bool = Tr
     return msg + f"\nVIDFILE::episode::{out}"
 
 
+def upscale_video(scene_id: str = "", project_id: str = "", kind: str = "scene",
+                  width: int = 0, height: int = 0, method: str = "auto") -> str:
+    """一键转规格：把某个已生成的低清成片放大到目标 width×height（如 4K），落**独立新文件**（不覆盖原片）。
+
+    kind='scene' → 转某个分镜成片；kind='episode' → 转整集成片。引擎 method=auto/comfyui/ffmpeg（可配）。
+    """
+    from mirage.app.pipeline import postprocess
+    from mirage.app.pipeline import log_bus
+    w, h = int(width or 0), int(height or 0)
+    if w <= 0 or h <= 0:
+        return "转规格失败：目标宽高无效。"
+    if kind == "episode":
+        if not project_id:
+            return "转规格失败：缺 project_id。"
+        src = os.path.join(video_dir(), f"episode_{project_id}.mp4")
+        tag = "episode"
+    else:
+        st = get_store()
+        scene = st.get_scene(scene_id)
+        if not scene:
+            return f"分镜不存在: {scene_id}"
+        src = (scene.get("video")
+               or os.path.join(video_dir(), f"{scene.get('scene_number', 0):02d}_{scene_id}.mp4"))
+        tag = scene_id
+    if not os.path.exists(src):
+        return f"转规格失败：找不到成片 {src}（先出片/合成）。"
+    out = os.path.splitext(src)[0] + f"_{w}x{h}.mp4"
+    log_bus.emit(f"[转规格] {os.path.basename(src)} → {w}×{h} …")
+    r = postprocess.upscale_to(src, out, width=w, height=h, method=method)
+    if not r.get("applied"):
+        return f"转规格失败：{r.get('note')}"
+    return (f"已转规格 {w}×{h}（{r.get('note')}）。原片保留：{os.path.basename(src)}\n"
+            f"VIDFILE::{tag}::{out}")
+
+
+def render_scene_flf2v(scene_id: str, asset_ids=None, motion_prompt: str = "",
+                       width: int = 0, height: int = 0, frames: int = 0) -> str:
+    """FLF2V 治本续段：用该分镜的多张【有序关键帧】(asset_ids，≥2，不同时刻/构图)做首尾帧拼接 → 无缝长片。
+
+    相邻段共用边界关键帧(像素相同的真值锚点)→ 接缝零抖、免 xfade，且每段被两端约束、不累积漂移。
+    """
+    from mirage.app.pipeline import flf2v, log_bus
+    from mirage.app.pipeline.gpu_client import parse_size
+    st = get_store()
+    scene = st.get_scene(scene_id)
+    if not scene:
+        return f"分镜不存在: {scene_id}"
+    ids = [i for i in (asset_ids or []) if i]
+    if len(ids) < 2:
+        return "FLF2V 至少要按顺序选 2 张关键帧(不同时刻/构图);只 1 张请用普通「出视频」。"
+    assets = st.list_assets(scene_id, asset_type="IMAGE")
+    by_id = {}
+    for a in assets:
+        aid = a.get("id") or a.get("assetId") or a.get("asset_id")
+        if aid:
+            by_id[aid] = a.get("storage_path") or a.get("path") or a.get("local_path") or ""
+    paths = [by_id.get(i, "") for i in ids]
+    missing = [i for i, p in zip(ids, paths) if not (p and os.path.exists(p))]
+    if missing:
+        return f"FLF2V 找不到这些关键帧的本地图: {missing}(先出图/确认图在本机)。"
+    if int(width) > 0 and int(height) > 0:
+        w, h = int(width), int(height)
+    else:
+        w, h = parse_size(None, settings.COMFYUI_SIZE)
+    prompt = _compose_wan_prompt(scene, motion_prompt)
+    out = os.path.join(video_dir(), f"{scene.get('scene_number', 0):02d}_{scene_id}_flf2v.mp4")
+    log_bus.emit(f"[FLF2V] 分镜 {scene_id}:{len(ids)} 关键帧 → {len(ids) - 1} 段无缝拼接 …")
+    r = flf2v.stitch_keyframes(paths, out, prompt=prompt, width=w, height=h, frames=int(frames or 0))
+    if not r.get("applied"):
+        return f"FLF2V 失败:{r.get('note')}"
+    st.set_scene_video(scene_id, out)
+    return (f"FLF2V 无缝续段完成({r.get('segments')} 段 / {len(ids)} 关键帧 / 共享帧零接缝)。\n"
+            f"VIDFILE::{scene_id}::{out}")
+
+
+def render_scene_flf2v_auto(scene_id: str, source_video: str = "", num_keyframes: int = 0,
+                            frames_per_seg: int = 0, motion_prompt: str = "",
+                            width: int = 0, height: int = 0) -> str:
+    """FLF2V 一键无缝化（**自动选帧、零人工**）：从该分镜【已有成片】等距抽关键帧 → FLF2V 在相邻关键帧
+    之间重渲 → 共享关键帧拼接、接缝抖动消失。单帧静图无时间抖动,所以从糊的续段成片抽帧也能洗成无缝。
+    """
+    import shutil as _sh
+    from mirage.app.pipeline import flf2v, log_bus
+    from mirage.app.pipeline.assembler import extract_frames_evenly
+    from mirage.app.pipeline.gpu_client import parse_size
+    st = get_store()
+    scene = st.get_scene(scene_id)
+    if not scene:
+        return f"分镜不存在: {scene_id}"
+    src = (source_video or scene.get("video")
+           or os.path.join(video_dir(), f"{scene.get('scene_number', 0):02d}_{scene_id}.mp4"))
+    if not os.path.exists(src):
+        return "FLF2V(自动)失败:这镜还没成片,先普通出片一次,再一键无缝化。"
+    seg = int(frames_per_seg or 0) or int(settings.COMFYUI_FRAMES)
+    work = src + ".kf"
+    kfs = extract_frames_evenly(src, work, num_keyframes=int(num_keyframes or 0),
+                                seg_frames=seg, fps=int(settings.COMFYUI_FPS))
+    if len(kfs) < 2:
+        _sh.rmtree(work, ignore_errors=True)
+        return "FLF2V(自动)失败:成片太短/抽帧失败,无法自动定关键帧。"
+    if int(width) > 0 and int(height) > 0:
+        w, h = int(width), int(height)
+    else:
+        w, h = parse_size(None, settings.COMFYUI_SIZE)
+    prompt = _compose_wan_prompt(scene, motion_prompt)
+    out = os.path.join(video_dir(), f"{scene.get('scene_number', 0):02d}_{scene_id}_flf2v.mp4")
+    log_bus.emit(f"[FLF2V·自动] 自动取 {len(kfs)} 关键帧 → {len(kfs) - 1} 段无缝精修 …")
+    r = flf2v.stitch_keyframes(kfs, out, prompt=prompt, width=w, height=h, frames=seg)
+    _sh.rmtree(work, ignore_errors=True)
+    if not r.get("applied"):
+        return f"FLF2V(自动)失败:{r.get('note')}"
+    st.set_scene_video(scene_id, out)
+    return (f"FLF2V 自动无缝化完成({r.get('segments')} 段 / 自动 {len(kfs)} 关键帧 / 零接缝、零选帧)。\n"
+            f"VIDFILE::{scene_id}::{out}")
+
+
 @tool
 def configure_character(trigger_word: str = "", flux_lora: str = "", negative_prompt: str = "") -> str:
     """配置本工作目录的角色/风格（写入 .agent/config.json），出图时自动注入，无需写死在提示词里。

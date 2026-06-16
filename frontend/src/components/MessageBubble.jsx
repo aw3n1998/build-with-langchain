@@ -17,7 +17,7 @@ function usePersistedState(key, initial) {
 }
 import ReactMarkdown from 'react-markdown'
 import { fileUrl, getVideoProviders, getImageProviders, getProject, batchGenerate, batchFinish,
-         pipelineSelect, streamJobEvents, uploadCandidate, uploadContinueVideo, updateScenePrompts,
+         pipelineSelect, streamJobEvents, pipelineUpscale, pipelineFlf2v, uploadCandidate, uploadContinueVideo, updateScenePrompts,
          deleteCandidate, deleteSceneVideo, sceneUndoAppend, deleteEpisode, suggestSegmentPrompts,
          autoStoryboard, autoFill, characters as charactersApi, templatesApi,
          loraCreate, loraAction, loraUploadImage, loraUploadRef,
@@ -1126,6 +1126,86 @@ export function ProductionPanel({ message, workspace, sessionId }) {
     try { await deleteEpisode(pid, workspace); load() } catch { /* ignore */ }
   }
 
+  // ── 一键转规格（放大到 4K 等；输出独立文件、不覆盖原片；引擎 auto=AI超分/ffmpeg）──
+  const UPSCALE_PRESETS = [
+    ['4K竖屏', 2160, 3840], ['4K横屏', 3840, 2160], ['2K竖屏', 1440, 2560],
+    ['1080P竖屏', 1080, 1920], ['1080P横屏', 1920, 1080], ['自定义', 0, 0],
+  ]
+  const [upSpec, setUpSpec] = useState({})   // tag -> 预设名
+  const [upWH, setUpWH] = useState({})       // tag -> {w,h}（自定义）
+  const [upBusy, setUpBusy] = useState({})   // tag -> 转换中
+  const [upUrl, setUpUrl] = useState({})     // tag -> 高清版 url
+  const doUpscale = async (tag, kind, sceneId, projectId) => {
+    const spec = upSpec[tag] || '4K竖屏'
+    let w, h
+    if (spec === '自定义') { w = Number(upWH[tag]?.w) || 0; h = Number(upWH[tag]?.h) || 0 }
+    else { const p = UPSCALE_PRESETS.find(x => x[0] === spec); w = p?.[1]; h = p?.[2] }
+    if (!w || !h) { setProgress('请填有效的目标宽高'); return }
+    setUpBusy(b => ({ ...b, [tag]: true })); setShowLogs(true)
+    setProgress(`转规格 ${spec} ${w}×${h}…（AI 超分会慢些）`)
+    try {
+      const jobId = await pipelineUpscale({
+        kind, scene_id: sceneId || '', project_id: projectId || '',
+        width: w, height: h, workspace, session_id: sessionId,
+      })
+      for await (const ev of streamJobEvents(jobId)) {
+        if (ev.type === 'log') setLogs(prev => [...prev, ev.line].slice(-300))
+        else if (ev.type === 'video' && ev.url) setUpUrl(u => ({ ...u, [tag]: fileUrl(ev.url) + '&v=' + Date.now() }))
+        else if (ev.type === 'tool_result' && ev.content) { setProgress(ev.content); setLogs(prev => [...prev, '» ' + ev.content].slice(-300)) }
+        else if (ev.type === 'error') setProgress(ev.content || '转规格已停止')
+      }
+    } catch (e) { setProgress('转规格失败：' + String(e.message || e)) }
+    finally { setUpBusy(b => { const n = { ...b }; delete n[tag]; return n }) }
+  }
+  const upscaleRow = (tag, kind, sceneId, projectId) => {
+    const spec = upSpec[tag] || '4K竖屏'; const bz = !!upBusy[tag]
+    return (
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 6, alignItems: 'center' }}>
+        <span style={{ fontSize: 11, color: 'var(--text-muted)' }}
+          title="把这个低清成片放大转成目标规格；输出独立新文件、不覆盖原片。引擎 auto：有 ComfyUI 走 AI 超分(RealESRGAN)、否则 ffmpeg 快缩。">转规格</span>
+        <select value={spec} disabled={bz} onChange={e => setUpSpec(p => ({ ...p, [tag]: e.target.value }))}
+          style={{ ...inputStyle, width: 'auto', height: 26, fontSize: 11.5 }}>
+          {UPSCALE_PRESETS.map(p => <option key={p[0]} value={p[0]}>{p[0]}{p[1] ? ` ${p[1]}×${p[2]}` : ''}</option>)}
+        </select>
+        {spec === '自定义' && (<>
+          <input type="number" placeholder="宽" value={upWH[tag]?.w || ''} disabled={bz}
+            onChange={e => setUpWH(p => ({ ...p, [tag]: { ...(p[tag] || {}), w: e.target.value } }))}
+            style={{ ...inputStyle, width: 58, height: 26, fontSize: 11 }} />
+          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>×</span>
+          <input type="number" placeholder="高" value={upWH[tag]?.h || ''} disabled={bz}
+            onChange={e => setUpWH(p => ({ ...p, [tag]: { ...(p[tag] || {}), h: e.target.value } }))}
+            style={{ ...inputStyle, width: 58, height: 26, fontSize: 11 }} />
+        </>)}
+        <button onClick={() => doUpscale(tag, kind, sceneId, projectId)} disabled={bz} style={miniAct(false)}>
+          {bz ? '转换中…' : '一键转'}
+        </button>
+        {upUrl[tag] && (<>
+          <span style={{ fontSize: 11, color: 'rgba(134,239,172,1)', width: '100%' }}>✓ 高清版（原片保留，可对比）</span>
+          <video key={upUrl[tag]} src={upUrl[tag]} controls
+            style={{ width: '100%', maxHeight: 320, borderRadius: 8, display: 'block', border: '1px solid rgba(134,239,172,0.4)' }} />
+        </>)}
+      </div>
+    )
+  }
+
+  // ── FLF2V 一键无缝化(自动选帧、零人工):从该镜已有成片等距抽关键帧→FLF2V 重渲→消接缝抖动 ──
+  const [flf2vBusy, setFlf2vBusy] = useState({})
+  const doFlf2v = async (sceneId) => {
+    setFlf2vBusy(b => ({ ...b, [sceneId]: true })); setShowLogs(true)
+    setProgress('FLF2V 自动无缝化中(抽关键帧 → 逐段重渲,会慢些)…')
+    try {
+      const jobId = await pipelineFlf2v({ scene_id: sceneId, auto: true, workspace, session_id: sessionId })
+      for await (const ev of streamJobEvents(jobId)) {
+        if (ev.type === 'log') setLogs(prev => [...prev, ev.line].slice(-300))
+        else if (ev.type === 'video') load()   // 后端已 set_scene_video → 刷新显示无缝版
+        else if (ev.type === 'tool_result' && ev.content) { setProgress(ev.content); setLogs(prev => [...prev, '» ' + ev.content].slice(-300)) }
+        else if (ev.type === 'error') setProgress(ev.content || 'FLF2V 已停止')
+      }
+      load()
+    } catch (e) { setProgress('FLF2V 失败：' + String(e.message || e)) }
+    finally { setFlf2vBusy(b => { const n = { ...b }; delete n[sceneId]; return n }) }
+  }
+
   const c = proj?.counts || { total: 0, with_candidates: 0, selected: 0, done: 0 }
   const allSelected = c.total > 0 && c.selected === c.total
   const someSelected = c.selected > 0
@@ -1518,6 +1598,7 @@ export function ProductionPanel({ message, workspace, sessionId }) {
           </div>
           <video src={fileUrl(proj.episode.url)} controls
                  style={{ width: '100%', maxHeight: 420, borderRadius: 8, display: 'block' }} />
+          {upscaleRow('episode', 'episode', '', pid)}
         </div>
       )}
 
@@ -1623,6 +1704,15 @@ export function ProductionPanel({ message, workspace, sessionId }) {
                   {/* key 绑 url（含 &v=mtime）：追加后文件变了，强制 <video> 重建、不吃旧缓存 */}
                   <video key={s.video.url} src={fileUrl(s.video.url)} controls
                          style={{ width: '100%', maxHeight: 300, borderRadius: 8, display: 'block' }} />
+                  <div style={{ marginTop: 6 }}>
+                    <button onClick={() => doFlf2v(s.scene_id)}
+                      disabled={!!flf2vBusy[s.scene_id] || !!busy || !!sceneBusy[s.scene_id]}
+                      title="续段接缝抖动？一键自动:从这条成片等距抽关键帧→FLF2V 在关键帧间重渲→共享关键帧拼接,接缝零抖。零选帧,稍慢。"
+                      style={miniAct(false)}>
+                      {flf2vBusy[s.scene_id] ? 'FLF2V 无缝化中…' : '✨ FLF2V 一键无缝(治接缝抖)'}
+                    </button>
+                  </div>
+                  {upscaleRow(s.scene_id, 'scene', s.scene_id, '')}
                   {/* 看效果再加长：取现有成片末帧续生成、拼到末尾，可反复点。段数不写死。 */}
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 6, alignItems: 'center' }}>
                     <input value={appendPrompt[s.scene_id] || ''} disabled={busy || !!sceneBusy[s.scene_id]}

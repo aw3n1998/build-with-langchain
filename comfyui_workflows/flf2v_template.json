@@ -1,0 +1,126 @@
+{
+  "37": {
+    "class_type": "UNETLoader",
+    "_meta": { "title": "高噪专家 fp16(派生自 i2v_bf16;按需换 fp8 文件名)" },
+    "inputs": { "unet_name": "wan2.2_i2v_high_noise_14B_fp16.safetensors", "weight_dtype": "default" }
+  },
+  "41": {
+    "class_type": "UNETLoader",
+    "_meta": { "title": "低噪专家 fp16" },
+    "inputs": { "unet_name": "wan2.2_i2v_low_noise_14B_fp16.safetensors", "weight_dtype": "default" }
+  },
+  "65": {
+    "class_type": "ModelSamplingSD3",
+    "_meta": { "title": "高噪 shift(Wan必需)" },
+    "inputs": { "shift": "%SHIFT%", "model": ["37", 0] }
+  },
+  "66": {
+    "class_type": "ModelSamplingSD3",
+    "_meta": { "title": "低噪 shift" },
+    "inputs": { "shift": "%SHIFT%", "model": ["41", 0] }
+  },
+  "38": {
+    "class_type": "CLIPLoader",
+    "_meta": { "title": "文本编码器 umt5(fp16)" },
+    "inputs": { "clip_name": "umt5_xxl_fp16.safetensors", "type": "wan", "device": "default" }
+  },
+  "39": {
+    "class_type": "VAELoader",
+    "_meta": { "title": "VAE — A14B 用 wan_2.1_vae(用错 wan2.2_vae 会 64≠36 崩)" },
+    "inputs": { "vae_name": "wan_2.1_vae.safetensors" }
+  },
+  "6": {
+    "class_type": "CLIPTextEncode",
+    "_meta": { "title": "正向 %PROMPT%" },
+    "inputs": { "text": "%PROMPT%", "clip": ["38", 0] }
+  },
+  "7": {
+    "class_type": "CLIPTextEncode",
+    "_meta": { "title": "负向 %NEG_PROMPT%" },
+    "inputs": { "text": "%NEG_PROMPT%", "clip": ["38", 0] }
+  },
+  "52": {
+    "class_type": "LoadImage",
+    "_meta": { "title": "起始关键帧 %START_IMAGE%" },
+    "inputs": { "image": "%START_IMAGE%", "upload": "image" }
+  },
+  "53": {
+    "class_type": "LoadImage",
+    "_meta": { "title": "结束关键帧 %END_IMAGE%（FLF2V 的另一端真值锚点）" },
+    "inputs": { "image": "%END_IMAGE%", "upload": "image" }
+  },
+  "55": {
+    "class_type": "WanFirstLastFrameToVideo",
+    "_meta": { "title": "⚠️脚手架·待真机核对 — 首尾帧生视频(FLF2V)。节点名/输入键据 ComfyUI v0.16+ 官方 Wan2.2 FLF2V 模板(comfy.org)写,medium-confidence;首跑前用官方模板 Save(API格式) 核对本节点的输入(尤其是否需 clip_vision_start/end_image)。其余结构沿用你跑通的 i2v_bf16，可信。" },
+    "inputs": {
+      "positive": ["6", 0],
+      "negative": ["7", 0],
+      "vae": ["39", 0],
+      "width": "%WIDTH%",
+      "height": "%HEIGHT%",
+      "length": "%FRAMES%",
+      "batch_size": 1,
+      "start_image": ["52", 0],
+      "end_image": ["53", 0]
+    }
+  },
+  "63": {
+    "class_type": "KSamplerAdvanced",
+    "_meta": { "title": "高噪采样 0→boundary" },
+    "inputs": {
+      "model": ["65", 0],
+      "positive": ["55", 0],
+      "negative": ["55", 1],
+      "latent_image": ["55", 2],
+      "add_noise": "enable",
+      "noise_seed": "%SEED%",
+      "steps": "%STEPS%",
+      "cfg": 3.5,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "start_at_step": 0,
+      "end_at_step": "%BOUNDARY%",
+      "return_with_leftover_noise": "enable"
+    }
+  },
+  "64": {
+    "class_type": "KSamplerAdvanced",
+    "_meta": { "title": "低噪采样 boundary→end" },
+    "inputs": {
+      "model": ["66", 0],
+      "positive": ["55", 0],
+      "negative": ["55", 1],
+      "latent_image": ["63", 0],
+      "add_noise": "disable",
+      "noise_seed": "%SEED%",
+      "steps": "%STEPS%",
+      "cfg": 3.5,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "start_at_step": "%BOUNDARY%",
+      "end_at_step": 10000,
+      "return_with_leftover_noise": "disable"
+    }
+  },
+  "8": {
+    "class_type": "VAEDecode",
+    "_meta": { "title": "解码" },
+    "inputs": { "samples": ["64", 0], "vae": ["39", 0] }
+  },
+  "57": {
+    "class_type": "VHS_VideoCombine",
+    "_meta": { "title": "合成 mp4" },
+    "inputs": {
+      "images": ["8", 0],
+      "frame_rate": "%FPS%",
+      "loop_count": 0,
+      "filename_prefix": "mirage_flf2v",
+      "format": "video/h264-mp4",
+      "pix_fmt": "yuv420p",
+      "crf": 19,
+      "save_metadata": true,
+      "pingpong": false,
+      "save_output": true
+    }
+  }
+}

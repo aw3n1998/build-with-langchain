@@ -215,6 +215,16 @@ export async function pipelineRender(params) {
   return submitJob('/pipeline/render', params)
 }
 
+// ── 一键转规格（放大到 4K 等）：提交后台任务，返回 job_id；事件里 type==='video' 的 url 即高清版 ──
+export async function pipelineUpscale(params) {
+  return submitJob('/pipeline/upscale', params)
+}
+
+// ── FLF2V 一键无缝化（自动从已有成片抽关键帧、FLF2V 重渲，消接缝抖动；默认 auto=true，零选帧）──
+export async function pipelineFlf2v(params) {
+  return submitJob('/pipeline/flf2v_render', params)
+}
+
 // ── 制作面板：项目状态 + 一键批量出图 / 出片合成 ─────────────────
 export async function getProject(projectId, workspace = null) {
   const q = workspace ? `?workspace=${encodeURIComponent(workspace)}` : ''

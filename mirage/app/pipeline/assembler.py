@@ -100,6 +100,40 @@ def conform_video(src: str, out: str, width: int = 0, height: int = 0, fps: int 
     return out
 
 
+def extract_frames_evenly(video_path: str, out_dir: str, *, num_keyframes: int = 0,
+                          seg_frames: int = 81, fps: int = 16) -> list[str]:
+    """从视频**等距抽若干帧**当 FLF2V 关键帧(含首尾、有序)。返回 png 路径列表。
+
+    num_keyframes<=0 时按时长自动定段数+1(每段约 seg_frames/fps 秒)——自动选帧、零人工。
+    """
+    os.makedirs(out_dir, exist_ok=True)
+    try:
+        dur = _duration(video_path)
+    except Exception:  # noqa: BLE001
+        return []
+    if dur <= 0:
+        return []
+    n = int(num_keyframes or 0)
+    if n <= 0:
+        import math
+        seg_sec = max(1.0, float(seg_frames) / float(fps or 16))
+        n = max(2, math.ceil(dur / seg_sec) + 1)
+    n = max(2, n)
+    paths: list[str] = []
+    for i in range(n):
+        png = os.path.join(out_dir, f"kf_{i:03d}.png")
+        if i == n - 1:   # 末帧用 -sseof 防取空
+            res = _run([_ffmpeg(), "-y", "-hide_banner", "-sseof", "-0.2", "-i", video_path,
+                        "-frames:v", "1", "-q:v", "2", png])
+        else:
+            t = dur * i / (n - 1)
+            res = _run([_ffmpeg(), "-y", "-hide_banner", "-ss", f"{t:.3f}", "-i", video_path,
+                        "-frames:v", "1", "-q:v", "2", png])
+        if res.returncode == 0 and os.path.exists(png):
+            paths.append(png)
+    return paths
+
+
 def extract_last_frame(video_path: str, out_png: str) -> str:
     """抽取视频最后一帧（尾帧接续用：作为下一段 i2v 的输入图）。"""
     os.makedirs(os.path.dirname(os.path.abspath(out_png)), exist_ok=True)

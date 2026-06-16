@@ -485,6 +485,31 @@ class RenderRequest(BaseModel):
     session_id: str | None = None
 
 
+class UpscaleRequest(BaseModel):
+    kind: str = "scene"          # scene / episode
+    scene_id: str = ""
+    project_id: str = ""
+    width: int = 0               # 目标宽高（前端按规格预设或自定义解析后传入）
+    height: int = 0
+    method: str = "auto"         # auto / comfyui(AI 超分) / ffmpeg(快缩)
+    workspace: str | None = None
+    session_id: str | None = None
+
+
+class Flf2vRequest(BaseModel):
+    scene_id: str
+    auto: bool = True            # True=自动从已有成片等距抽关键帧(零人工);False=用下方 asset_ids 手动关键帧
+    asset_ids: list[str] = []    # 手动模式:有序关键帧(≥2，不同时刻/构图)
+    source_video: str = ""       # 自动模式可选:指定源成片路径;空=用该分镜当前成片
+    num_keyframes: int = 0       # 自动模式:关键帧数;0=按时长自动定
+    motion_prompt: str = ""
+    width: int = 0
+    height: int = 0
+    frames: int = 0              # 每段(相邻关键帧之间)帧数;0=用默认
+    workspace: str | None = None
+    session_id: str | None = None
+
+
 @router.get("/agents")
 async def list_agents():
     """列出当前可用的 Agent（supervisor + 所有热插拔注册的子 Agent）。
@@ -751,6 +776,77 @@ async def pipeline_render(req: RenderRequest):
     """出视频参数卡确认后出片：提交为后台任务，立即返回 job_id（单飞队列）。"""
     from mirage.app.services.job_manager import job_manager
     job_id = job_manager.submit("render", lambda: _render_events(req))
+    return {"job_id": job_id}
+
+
+async def _upscale_events(req: UpscaleRequest):
+    """一键转规格任务事件流（后台 worker 消费）：放大某成片到目标分辨率，产物落独立新文件。"""
+    import asyncio
+    from mirage.app.pipeline.runtime import set_workspace
+    from mirage.app.pipeline.pipeline_tools import upscale_video
+
+    set_workspace(req.workspace)
+    yield {"type": "tool_call", "name": "upscale_video",
+           "args": {"kind": req.kind, "scene_id": req.scene_id, "project_id": req.project_id,
+                    "width": req.width, "height": req.height, "method": req.method}}
+    try:
+        out = await asyncio.to_thread(
+            upscale_video, req.scene_id, req.project_id, req.kind, req.width, req.height, req.method,
+        )
+    except Exception as e:  # noqa: BLE001
+        yield {"type": "tool_result", "name": "upscale_video",
+               "content": f"转规格失败: {type(e).__name__}: {e}"}
+        return
+    clean, events = ai_service._extract_tool_markers(out)
+    yield {"type": "tool_result", "name": "upscale_video", "content": clean[:600]}
+    for ev in events:
+        yield ev
+
+
+@router.post("/pipeline/upscale")
+async def pipeline_upscale(req: UpscaleRequest):
+    """一键转规格（4K/2K/1080p/自定义）：提交后台任务，立即返回 job_id（单飞队列）。"""
+    from mirage.app.services.job_manager import job_manager
+    job_id = job_manager.submit("upscale", lambda: _upscale_events(req))
+    return {"job_id": job_id}
+
+
+async def _flf2v_events(req: Flf2vRequest):
+    """FLF2V 治本续段任务事件流：用有序关键帧做首尾帧无缝拼接，结果回写为该分镜成片。"""
+    import asyncio
+    from mirage.app.pipeline.runtime import set_workspace
+    from mirage.app.pipeline.pipeline_tools import render_scene_flf2v, render_scene_flf2v_auto
+
+    set_workspace(req.workspace)
+    auto = bool(req.auto) and not (req.asset_ids and len(req.asset_ids) >= 2)
+    yield {"type": "tool_call", "name": "render_scene_flf2v",
+           "args": {"scene_id": req.scene_id, "auto": auto, "keyframes": len(req.asset_ids or [])}}
+    try:
+        if auto:
+            out = await asyncio.to_thread(
+                render_scene_flf2v_auto, req.scene_id, req.source_video, req.num_keyframes,
+                req.frames, req.motion_prompt, req.width, req.height,
+            )
+        else:
+            out = await asyncio.to_thread(
+                render_scene_flf2v, req.scene_id, req.asset_ids, req.motion_prompt,
+                req.width, req.height, req.frames,
+            )
+    except Exception as e:  # noqa: BLE001
+        yield {"type": "tool_result", "name": "render_scene_flf2v",
+               "content": f"FLF2V 失败: {type(e).__name__}: {e}"}
+        return
+    clean, events = ai_service._extract_tool_markers(out)
+    yield {"type": "tool_result", "name": "render_scene_flf2v", "content": clean[:600]}
+    for ev in events:
+        yield ev
+
+
+@router.post("/pipeline/flf2v_render")
+async def pipeline_flf2v_render(req: Flf2vRequest):
+    """FLF2V 共享关键帧·治本续段:提交后台任务,立即返回 job_id(单飞队列)。"""
+    from mirage.app.services.job_manager import job_manager
+    job_id = job_manager.submit("flf2v", lambda: _flf2v_events(req))
     return {"job_id": job_id}
 
 

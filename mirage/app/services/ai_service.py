@@ -22,6 +22,7 @@ class AIService:
     def __init__(self, db_path: str = "langgraph_checkpoint.db"):
         self._db_path = db_path
         self._llm = self._make_llm_from_config(None)   # 默认 LLM（来自 .env）
+        self._storyboard_llm = None                    # 分镜专属 LLM（懒构造；空配置=复用默认 _llm）
 
         embedder = FastEmbedEmbeddings(model_name="BAAI/bge-small-zh-v1.5")
         self._registry = SkillRegistry(embedder)
@@ -45,10 +46,21 @@ class AIService:
         """
         proxy_url = os.getenv("HTTPS_PROXY") or os.getenv("HTTP_PROXY") or None
         max_tokens = (cfg and getattr(cfg, "max_tokens", None)) or settings.MAX_TOKENS
+        api_key  = (cfg and cfg.api_key)  or settings.OPENAI_API_KEY
+        base_url = (cfg and cfg.api_base) or settings.OPENAI_API_BASE
+        model    = (cfg and cfg.model)    or settings.MODEL_NAME
+        extra: dict = {}
+        # OpenRouter 可选归属头(用了 openrouter base 才带;非必填,但部分免费模型/排行需要)。
+        if "openrouter" in (base_url or "").lower():
+            hdrs = {}
+            if settings.OPENROUTER_REFERER:
+                hdrs["HTTP-Referer"] = settings.OPENROUTER_REFERER
+            if settings.OPENROUTER_TITLE:
+                hdrs["X-Title"] = settings.OPENROUTER_TITLE
+            if hdrs:
+                extra["default_headers"] = hdrs
         return ChatOpenAI(
-            api_key  = (cfg and cfg.api_key)  or settings.OPENAI_API_KEY,
-            base_url = (cfg and cfg.api_base) or settings.OPENAI_API_BASE,
-            model    = (cfg and cfg.model)    or settings.MODEL_NAME,
+            api_key=api_key, base_url=base_url, model=model,
             max_tokens=max_tokens,
             http_async_client=httpx.AsyncClient(
                 verify=not settings.SKIP_SSL_VERIFY,
@@ -57,7 +69,29 @@ class AIService:
                 proxy=proxy_url,        # 显式传代理，绕过 langchain-openai 的 transport 覆盖
             ),
             max_retries=2,
+            **extra,
         )
+
+    @property
+    def storyboard_llm(self):
+        """分镜专属 LLM:配了 STORYBOARD_* 就用独立后端(如 OpenRouter/grok),否则复用默认 _llm。
+
+        通用解耦:未配=分镜跟全局走同一个 LLM;配了=分镜单独走它(其余 agent 不受影响)。
+        """
+        if self._storyboard_llm is not None:
+            return self._storyboard_llm
+        if settings.STORYBOARD_API_KEY or settings.STORYBOARD_API_BASE or settings.STORYBOARD_MODEL:
+            from types import SimpleNamespace
+            cfg = SimpleNamespace(
+                api_key=settings.STORYBOARD_API_KEY or settings.OPENAI_API_KEY,
+                api_base=settings.STORYBOARD_API_BASE or settings.OPENAI_API_BASE,
+                model=settings.STORYBOARD_MODEL or settings.MODEL_NAME,
+                max_tokens=None,
+            )
+            self._storyboard_llm = self._make_llm_from_config(cfg)
+        else:
+            self._storyboard_llm = self._llm
+        return self._storyboard_llm
 
     def _build_llms_dict(self, agent_configs: dict | None) -> dict:
         """
