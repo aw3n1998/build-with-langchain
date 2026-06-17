@@ -1079,7 +1079,7 @@ class BatchRequest(BaseModel):
     project_id: str
     workspace: str | None = None
     session_id: str | None = None
-    video_mode: str = "i2v"   # 出片模式: i2v(图生,默认) / t2v(文生视频,跳过出图/选图)
+    video_mode: str = "t2v"   # 出片模式: t2v(文生视频,默认,跳过出图/选图) / i2v(图生,休眠退路)
     # 出视频参数（面板可选）
     model: str = ""
     segments: int = 1
@@ -1981,6 +1981,8 @@ async def _scene_render_events(req: "SceneRenderRequest"):
     from mirage.app.pipeline.pipeline_tools import do_render_scene_video
     set_workspace(req.workspace)
     params: dict = dict(req.video_params or {})
+    if (req.video_mode or "t2v") == "t2v":   # t2v 文生视频：路由到 _do_render_t2v(不需选图)
+        params["video_mode"] = "t2v"
     if req.segments and req.segments > 1:
         params["segments"] = req.segments
     if req.size:
@@ -2028,6 +2030,7 @@ class SceneRenderRequest(BaseModel):
     scene_id: str
     workspace: str | None = None
     session_id: str | None = None
+    video_mode: str = "t2v"         # 出片模式: t2v(文生视频,默认) / i2v(图生,休眠退路)
     model: str = ""
     segments: int = 1
     size: str = ""
@@ -2222,7 +2225,7 @@ class OneClickRequest(BaseModel):
     project_id: str
     workspace: str | None = None
     session_id: str | None = None
-    video_mode: str = "i2v"           # i2v(图生,默认) / t2v(文生视频,跳过出图/选图)
+    video_mode: str = "t2v"           # t2v(文生视频,默认,跳过出图/选图) / i2v(图生,休眠退路)
     novel_text: str = ""              # 非空=先 auto_fill 拆分镜+角色+风格；空=用项目里已有的分镜
     target_sec: float = 60.0          # 目标成片时长(秒)：AI 按此自算分镜数 + 每镜段数
     coherence: bool = True            # True=少而长的连续长镜(更连贯)；False=多而短的快切

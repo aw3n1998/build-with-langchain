@@ -38,23 +38,34 @@ def _base() -> str:
     return b
 
 
-def _lora_configs(params: dict) -> list[dict]:
+def _lora_configs(params: dict | None = None) -> list[dict]:
     """组装 lightx2v lora_configs:角色 LoRA + 蒸馏 LoRA(★用 lora_configs 时蒸馏 LoRA 必须显式列,否则丢加速)。
 
-    Wan2.2 双专家高/低噪的逐专家配法以 lightx2v MoE 参考配置为准(待真机核对);这里先把 4 个 path 都列上。
+    Wan2.2 双专家:`name` 是路由键,**只能是 "high_noise_model"/"low_noise_model"**(精确大小写),
+    高/低噪各一条;同 name 多条会**叠加**(蒸馏加速 LoRA + 人物 LoRA 各 4 条)。缺 name 会被 server KeyError。
+
+    ★LoRA 必须挂在「起 server 的 config」里才生效——per-request 传 lora 会被 server 忽略,且改 LoRA 要重启
+    server(见部署笔记本 §5「挂 LoRA」)。本函数同时供部署侧据 .env 生成 server config 的 lora_configs。
     """
+    params = params or {}
     out: list[dict] = []
-    pairs = [
-        (params.get("wan_t2v_lora_high") or settings.WAN_T2V_LORA_HIGH, settings.WAN_T2V_LORA_STR_HIGH),
-        (params.get("wan_t2v_lora_low") or settings.WAN_T2V_LORA_LOW, settings.WAN_T2V_LORA_STR_LOW),
-        (settings.LIGHTX2V_DISTILL_LORA_HIGH, 1.0),
-        (settings.LIGHTX2V_DISTILL_LORA_LOW, 1.0),
+    triples = [   # (name 路由键, path, strength)
+        ("high_noise_model", params.get("wan_t2v_lora_high") or settings.WAN_T2V_LORA_HIGH, settings.WAN_T2V_LORA_STR_HIGH),
+        ("low_noise_model",  params.get("wan_t2v_lora_low") or settings.WAN_T2V_LORA_LOW,  settings.WAN_T2V_LORA_STR_LOW),
+        ("high_noise_model", settings.LIGHTX2V_DISTILL_LORA_HIGH, 1.0),
+        ("low_noise_model",  settings.LIGHTX2V_DISTILL_LORA_LOW, 1.0),
     ]
-    for path, strength in pairs:
+    for name, path, strength in triples:
         p = (path or "").strip()
         if p:
-            out.append({"path": p, "strength": float(strength)})
+            out.append({"name": name, "path": p, "strength": float(strength)})
     return out
+
+
+def server_lora_configs() -> list[dict]:
+    """部署侧(笔记本 §5)据 .env 的 WAN_T2V_LORA_* + LIGHTX2V_DISTILL_LORA_* 生成 server 启动 config 的
+    lora_configs(带正确 name)。挂在起 server 的 config json 里 → LoRA 才真正生效(per-request 传会被忽略)。"""
+    return _lora_configs({})
 
 
 def _extract_output(client: httpx.Client, base: str, task_id: str, status: dict, out_remote: str) -> None:
@@ -121,6 +132,8 @@ class Lightx2vT2VProvider(VideoProvider):
         }
         if settings.LIGHTX2V_MODEL_T2V:
             payload["model_path"] = settings.LIGHTX2V_MODEL_T2V
+        # ★LoRA 的权威挂载点是「起 server 的 config」(见 server_lora_configs() + 笔记本 §5);
+        #   per-request 这条多数 server 版本会忽略,这里仍带上(well-formed,带 name)做前向兼容,无害。
         loras = _lora_configs(params)
         if loras:
             payload["lora_configs"] = loras
