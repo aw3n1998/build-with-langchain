@@ -652,12 +652,12 @@ function AdvancedSection({ children }) {
   )
 }
 
-/* ── 制作面板：确定性整片流程（一键出图 → 点选 → 一键出片合成）──────── */
+/* ── 制作面板：纯 t2v 流程（拆分镜 → 逐镜文生视频 → 合成整集）──────── */
 const STATE_LABEL = {
-  DRAFT:                   { t: '待出图',     c: 'rgba(255,255,255,0.52)', bg: 'rgba(255,255,255,0.06)', bd: 'rgba(255,255,255,0.13)' },
+  DRAFT:                   { t: '待出片',     c: 'rgba(255,255,255,0.52)', bg: 'rgba(255,255,255,0.06)', bd: 'rgba(255,255,255,0.13)' },
   PENDING_FLUX_GEN:        { t: '出图中',     c: '#eab308', bg: 'rgba(234,179,8,0.12)',  bd: 'rgba(234,179,8,0.35)', spin: true },
   PENDING_HUMAN_SELECTION: { t: '待选图',     c: '#c084fc', bg: 'rgba(168,85,247,0.12)', bd: 'rgba(168,85,247,0.35)' },
-  PENDING_VIDEO_GEN:       { t: '已选·待出片', c: '#5fe8de', bg: 'rgba(0,189,176,0.12)',  bd: 'rgba(0,189,176,0.35)' },
+  PENDING_VIDEO_GEN:       { t: '出片中',     c: '#5fe8de', bg: 'rgba(0,189,176,0.12)',  bd: 'rgba(0,189,176,0.35)', spin: true },
   COMPLETED:               { t: '已出片',     c: '#34d399', bg: 'rgba(52,211,153,0.12)', bd: 'rgba(52,211,153,0.35)' },
   FAILED:                  { t: '失败',       c: '#f87171', bg: 'rgba(239,68,68,0.12)',  bd: 'rgba(239,68,68,0.35)' },
 }
@@ -709,14 +709,9 @@ export function ProductionPanel({ message, workspace, sessionId }) {
   // 一键 AI 分析填充（角色+风格+LoRA+分镜）
   const [afBusy, setAfBusy] = useState(false)
   const [afReplace, setAfReplace] = useState(false)
-  // 一键全自动出片（按目标秒数自算镜数 → 出图 → 自动/手动选图 → 出片 → 合成）
+  // 一键全自动出片（纯 t2v：按目标秒数自算镜数 → 拆镜 → 逐镜文生视频 → 合成整集）
   const [ocSec, setOcSec] = usePersistedState('ocSec', 60)      // 目标成片时长(秒)
   const [ocCoh, setOcCoh] = usePersistedState('ocCoh', true)    // true=少而长连贯档；false=快切
-  const [ocAuto, setOcAuto] = usePersistedState('ocAuto', true) // true=自动选图全自动到底；false=出完图停下手动选
-  // ★产品定为纯 t2v：图生视频(i2v)整套先停用——出片模式切换开关已注释，i2v 出图分步被 gated(ocMode!=='t2v')永不触发。
-  //   i2v 代码保留(等重构再清)；ocMode 锁死 't2v'。原: const [ocMode, setOcMode] = usePersistedState('ocVideoMode', 'i2v')
-  const ocMode = 't2v'
-  const [autoSelBusy, setAutoSelBusy] = useState(false)         // 面板内「自动选图」按钮忙
   // 角色/声音圣经
   const [showChars, setShowChars] = useState(false)
   const [charsBusy, setCharsBusy] = useState(false)
@@ -777,7 +772,7 @@ export function ProductionPanel({ message, workspace, sessionId }) {
     const ls = sceneLipsync[sceneId] ?? !!(proj?.scenes?.find(x => x.scene_id === sceneId)?.lipsync)
     return { scene_id: sceneId, workspace, session_id: sessionId,
       model, segments: segs, size: vidSize, video_params: vidParams, motion_prompts: mp, lipsync: ls,
-      video_mode: ocMode }   // t2v 模式：单镜「出片」直接文生(跳过出图/选图)；i2v 照旧
+      video_mode: 't2v' }   // 纯 t2v：单镜「出片」直接文生(跳过出图/选图)
   }
 
   // 让 AI 据画面 + 一句中文意图，把动作拆成 N 段递进运镜提示词
@@ -941,7 +936,7 @@ export function ProductionPanel({ message, workspace, sessionId }) {
     const hasContent = (proj?.characters?.length || 0) > 0 || (proj?.scenes?.length || 0) > 0 || !!(proj?.style?.style_prompt)
     if (hasContent) {
       if (!await dialog.confirm('一键全自动会重拆分镜并覆盖现有 角色 / 风格 / 分镜，继续？', {
-        message: '按目标时长自动拆镜 → 出图 → ' + (ocAuto ? '自动选图' : '手动选图') + ' → 出片 → 合成整集（LoRA 任务保留）。',
+        message: '按目标时长自动拆镜 → 逐镜文生视频(t2v) → 合成整集（LoRA 任务保留）。',
         danger: true, confirmText: '开始',
       })) return
     }
@@ -952,35 +947,12 @@ export function ProductionPanel({ message, workspace, sessionId }) {
       const jobId = await oneClick({
         project_id: pid, workspace, session_id: sessionId,
         novel_text: novel, target_sec: Number(ocSec) || 60, coherence: ocCoh,
-        select_mode: ocAuto ? 'auto' : 'manual', select_strategy: 'first',
-        replace: true, lightning: true, model, size: vidSize, video_mode: ocMode,
+        replace: true, lightning: true, model, size: vidSize, video_mode: 't2v',
       })
       batchJob.current = jobId
       await consume(jobId)
     } catch (e) { setProgress('一键全自动失败：' + String(e.message || e)) }
     finally { batchJob.current = null; setBusy('') }
-  }
-  // 面板内「自动选图」（与逐张手动点选并存的双模式）：默认选第一张
-  const doAutoSelect = async () => {
-    if (busy || autoSelBusy) return
-    setAutoSelBusy(true); setProgress('自动选图中…')
-    try {
-      const r = await autoSelect(pid, 'first', workspace)
-      setProgress(`自动选图完成：选定 ${r.selected} 镜${r.skipped ? `（跳过已选 ${r.skipped}）` : ''}。可点「③ 一键出片并合成」。`)
-      await load()
-    } catch (e) { setProgress('自动选图失败：' + String(e.message || e)) }
-    finally { setAutoSelBusy(false) }
-  }
-  // PuLID 锁脸：给某角色上传 1 张参考脸（出图自动锁脸，跨镜同一张脸，免训练）
-  const uploadFace = async (charId, file) => {
-    if (!file) return
-    setCharsBusy(true); setProgress('上传参考脸中…')
-    try {
-      await uploadCharacterFace(charId, pid, file, workspace)
-      setProgress('参考脸已设定，该角色出图将自动 PuLID 锁脸。')
-      await load()
-    } catch (e) { setProgress('上传参考脸失败：' + String(e.message || e)) }
-    finally { setCharsBusy(false) }
   }
   // 角色/声音圣经
   const charOp = async (action, fields = {}) => {
@@ -1172,7 +1144,7 @@ export function ProductionPanel({ message, workspace, sessionId }) {
         segments: kind === 'finish' ? segments : 1,
         size: kind === 'finish' ? vidSize : '',
         video_params: kind === 'finish' ? vidParams : {},
-        video_mode: 'i2v',   // 手动「③出片」恒 i2v(分步本就有出图/选图);t2v 只走顶部✨一键,别继承一键面板的 ocMode
+        video_mode: 't2v',   // 纯 t2v：批量出片直接逐镜文生(跳过出图/选图)
         n: kind === 'generate' ? imgN : 0,
         width: kind === 'generate' ? (iw || 0) : 0,
         height: kind === 'generate' ? (ih || 0) : 0,
@@ -1364,9 +1336,7 @@ export function ProductionPanel({ message, workspace, sessionId }) {
           {proj?.title || pid}
         </div>
         <div style={{ display: 'flex', gap: 14, fontSize: 12, color: 'rgba(255,255,255,0.52)' }}>
-          <span>总数 <b style={{ color: 'rgba(255,255,255,0.87)', fontWeight: 600 }}>{c.total}</b></span>
-          <span>已出图 <b style={{ color: '#eab308', fontWeight: 600 }}>{c.with_candidates}</b></span>
-          <span>已选 <b style={{ color: '#c084fc', fontWeight: 600 }}>{c.selected}</b></span>
+          <span>分镜 <b style={{ color: 'rgba(255,255,255,0.87)', fontWeight: 600 }}>{c.total}</b></span>
           <span>已出片 <b style={{ color: '#34d399', fontWeight: 600 }}>{c.done}</b></span>
         </div>
         <button onClick={load} title="刷新" style={{ ...miniBtn, marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}><Icon.Refresh size={13} /></button>
@@ -1414,7 +1384,7 @@ export function ProductionPanel({ message, workspace, sessionId }) {
             </label>
             <span style={{ fontSize: 11, color: 'var(--text-dim)' }}>角色 + 风格 + LoRA + 分镜，全自动</span>
           </div>
-          {/* 终极一键：小说 → 按秒数自算镜数 → 出图 → 自动/手动选图 → 出片 → 合成整集，全自动到底 */}
+          {/* 终极一键：小说 → 按秒数自算镜数 → 逐镜文生视频(t2v) → 合成整集，全自动到底 */}
           <div style={{ border: '1px solid rgba(0,189,176,0.35)', background: 'rgba(0,189,176,0.07)',
                         borderRadius: 8, padding: 10, marginBottom: 8 }}>
             <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -1432,8 +1402,6 @@ export function ProductionPanel({ message, workspace, sessionId }) {
                 title="少而长的连续长镜头，切换点少 → 更连贯；关掉=多而短的快切">
                 <input type="checkbox" checked={ocCoh} onChange={e => setOcCoh(e.target.checked)} />连贯优先
               </label>
-              {/* ★纯 t2v：「自动选图」(i2v 选图) + 「出片 i2v/t2v 切换」已停用注释，等重构再清。
-                  原 i2v 自动选图开关：<input checked={ocAuto} onChange={...}/>；原模式切换 <select value={ocMode} onChange={setOcMode}>i2v/t2v</select> */}
             </div>
             <div style={{ fontSize: 10.5, color: 'var(--text-dim)', marginTop: 6 }}>
               t2v 文生视频：跳过出图/选图，AI 按秒数拆镜 → 逐镜文生 → 合成。身份靠训好的 Wan-T2V 角色 LoRA（在「角色 &amp; LoRA」训）。
@@ -1471,16 +1439,6 @@ export function ProductionPanel({ message, workspace, sessionId }) {
                 </select>
                 <button onClick={() => charOp('delete', { char_id: c.id })} disabled={charsBusy}
                   style={{ ...miniBtn2, color: '#fca5a5', borderColor: 'rgba(239,68,68,0.4)' }}>删除</button>
-              </div>
-              <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 4 }}>
-                <label style={{ ...miniBtn2, cursor: charsBusy ? 'default' : 'pointer', display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-                  <Icon.Plus size={12} />{c.ref_image_path ? '换参考脸' : '传参考脸(锁脸)'}
-                  <input type="file" accept="image/*" style={{ display: 'none' }} disabled={charsBusy}
-                    onChange={e => { uploadFace(c.id, (e.target.files || [])[0]); e.target.value = '' }} />
-                </label>
-                {c.ref_image_path
-                  ? <span style={{ fontSize: 10.5, color: '#5fe8de' }} title="出图自动 PuLID 锁脸，跨镜同一张脸">已锁脸(PuLID)</span>
-                  : <span style={{ fontSize: 10.5, color: 'var(--text-dim)' }}>传 1 张脸 → 跨镜同一张脸（免训练）</span>}
               </div>
             </div>
           ))}
@@ -1592,80 +1550,36 @@ export function ProductionPanel({ message, workspace, sessionId }) {
           {addField('运镜提示词', 'motion_prompt')}
           {addField('旁白 / 台词', 'narration')}
           {addField('字幕（可空，留空=用旁白）', 'subtitle')}
-          {ocMode !== 't2v' && (
-          <label style={{ fontSize: 12, display: 'flex', gap: 6, alignItems: 'center', margin: '4px 0 8px' }}>
-            <input type="checkbox" checked={newScene.lipsync}
-              onChange={e => setNewScene(s => ({ ...s, lipsync: e.target.checked }))} />
-            <Icon.Mic size={13} style={{ opacity: 0.75 }} />对口型镜头（人物开口说话，走 S2V）
-          </label>
-          )}
           <button onClick={addScene} disabled={addBusy} style={panelBtn(addBusy)}>
             {addBusy ? '添加中…' : '添加到本集'}
           </button>
         </div>
       )}
 
-      {ocMode === 't2v' ? (
-        <div style={{ fontSize: 12, color: 'var(--text-dim)', marginBottom: 12, padding: '10px 12px',
-          border: '1px dashed var(--border)', borderRadius: 8, lineHeight: 1.7 }}>
-          🎬 <b style={{ color: 'var(--text-secondary)' }}>t2v 文生视频模式</b>：不需要出图 / 选图。
-          每镜在下方直接点「<b style={{ color: '#5fe8de' }}>出片(t2v)</b>」文本直接生成，或用顶部「✨ 一键」自动出整集（文本→逐镜文生→合成）。
-          身份靠训好的 Wan-T2V 角色 LoRA；切回 i2v 见「剧本」tab 的出片模式开关。
-        </div>
-      ) : (<>
-      {/* 第①步：出图（张数/尺寸可选）*/}
-      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-        <button onClick={() => runJob('generate')} disabled={!!busy}
-          style={panelBtn(busy === 'generate')}>
-          {busy === 'generate' ? '出图中…' : '① 一键全部出图'}
-        </button>
-        <select value={imgN} disabled={!!busy} onChange={e => setImgN(Number(e.target.value))}
-          title="每个分镜出几张候选" style={{ ...inputStyle, width: 'auto', height: 32 }}>
-          <option value={2}>每镜2张</option>
-          <option value={4}>每镜4张</option>
-          <option value={6}>每镜6张</option>
-        </select>
-        <select value={imgSize} disabled={!!busy} onChange={e => setImgSize(e.target.value)}
-          title="出图尺寸" style={{ ...inputStyle, width: 'auto', height: 32 }}>
-          <option value="768x1024">768×1024 竖屏</option>
-          <option value="1024x768">1024×768 横屏</option>
-          <option value="1024x1024">1024×1024 方形</option>
-        </select>
-        <span style={{ fontSize: 11, color: 'var(--text-dim)' }}>已有图的分镜可在下方直接「上传图片」跳过生图</span>
+      {/* 文生视频(t2v)：不出图/不选图——分镜文本直接生成视频。每镜单出，或下面批量出整集，或顶部「✨ 一键」从小说全自动。 */}
+      <div style={{ fontSize: 12, color: 'var(--text-dim)', marginBottom: 10, padding: '10px 12px',
+        border: '1px dashed var(--border)', borderRadius: 8, lineHeight: 1.7 }}>
+        🎬 <b style={{ color: 'var(--text-secondary)' }}>文生视频 (t2v)</b>：不出图、不选图——分镜文本直接生成视频。
+        每镜点「<b style={{ color: '#5fe8de' }}>出片(t2v)</b>」单出，或用下面「批量出片并合成」整集出。
+        人物一致靠训好的 Wan-T2V 角色 LoRA（在「角色 &amp; LoRA」里训）。
       </div>
 
-      {/* 第②步可选：自动选图（与逐张手动点选并存的双模式；默认选第一张）*/}
-      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-        <button onClick={doAutoSelect} disabled={!!busy || autoSelBusy}
-          style={{ ...miniBtn2, height: 32, padding: '0 12px' }}
-          title="给每个有候选图但还没选的分镜自动选第一张；想自己挑就在下方图墙逐张点（两种都行）">
-          {autoSelBusy ? '自动选图中…' : '② 自动选图（选第一张）'}
-        </button>
-        <span style={{ fontSize: 11, color: 'var(--text-dim)' }}>或在下方图墙逐张手动点选（两种模式都行）</span>
-      </div>
-
-      {/* 第③步：出片并合成（模型/段数/分辨率可选）*/}
+      {/* 批量出片并合成（t2v）：对所有未出片分镜逐镜文生 → 合成整集（模型/分辨率可选）*/}
       <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-        <button onClick={() => runJob('finish')} disabled={!!busy || !someSelected}
-          style={!someSelected ? panelBtn(false, true) : {
-            height: 32, padding: '0 14px', borderRadius: 8, border: 'none',
+        <button onClick={() => runJob('finish')} disabled={!!busy || !(c.total > 0)}
+          style={!(c.total > 0) ? panelBtn(false, true) : {
+            height: 34, padding: '0 16px', borderRadius: 8, border: 'none',
             background: busy === 'finish' ? 'rgba(0,189,176,0.7)' : '#00bdb0',
-            color: '#04201e', fontSize: 12.5, fontWeight: 600, cursor: 'pointer',
+            color: '#04201e', fontSize: 13, fontWeight: 700, cursor: 'pointer',
           }}>
-          {busy === 'finish' ? '出片合成中…' : (allSelected ? '③ 一键出片并合成' : `③ 出片并合成（已选${c.selected}/${c.total}）`)}
+          {busy === 'finish' ? '出片合成中…' : `🎬 批量出片并合成（t2v · ${c.total} 镜）`}
         </button>
         {models.length > 0 && (
           <select value={model} disabled={!!busy} onChange={e => setModel(e.target.value)}
-            title="视频模型：LTX 快适合预演，Wan 慢画质高" style={{ ...inputStyle, width: 'auto', height: 32 }}>
+            title="文生视频后端（纯 t2v 走 lightx2v；具体由 T2V_PROVIDER 路由）" style={{ ...inputStyle, width: 'auto', height: 32 }}>
             {models.map(m => <option key={m.name} value={m.name}>{m.display_name}</option>)}
           </select>
         )}
-        <select value={segments} disabled={!!busy} onChange={e => setSegments(Number(e.target.value))}
-          title="接续段数的全局默认（批量出片用；每个分镜也可在自己那行单独设）" style={{ ...inputStyle, width: 'auto', height: 32 }}>
-          <option value={1}>单段</option>
-          <option value={2}>接续×2</option>
-          <option value={3}>接续×3</option>
-        </select>
         <select value={vidSize} disabled={!!busy} onChange={e => setVidSize(e.target.value)}
           title="出片分辨率 —— 480p 快(草稿/走量)，720p 精修(成片)。一键切，不用改 .env。" style={{ ...inputStyle, width: 'auto', height: 32 }}>
           <option value="">默认(跟随 .env)</option>
@@ -1694,7 +1608,6 @@ export function ProductionPanel({ message, workspace, sessionId }) {
         )}
         {busy && <span style={{ fontSize: 11, color: 'var(--text-muted)', alignSelf: 'center' }}>{progress}</span>}
       </div>
-      </>)}
 
       {/* 更多参数：专业档（默认收起，小白无感；进阶用户全量可调）*/}
       <div style={{ marginBottom: 12 }}>
@@ -1708,39 +1621,6 @@ export function ProductionPanel({ message, workspace, sessionId }) {
         {showAdv && (
           <div style={{ marginTop: 8, padding: '10px 12px', borderRadius: 8,
                         border: '1px solid var(--border)', background: 'rgba(255,255,255,0.02)' }}>
-            <div style={{ fontSize: 10.5, fontWeight: 700, color: 'rgba(165,168,255,0.8)', marginBottom: 6 }}>
-              出图（{imgModels.find(m => m.name === imgModel)?.display_name || imgModel || 'FLUX'}）· 留空=默认
-            </div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
-              {imgModels.length > 1 && (
-                <label style={{ display: 'flex', flexDirection: 'column', gap: 3, width: 180 }}>
-                  <span style={{ fontSize: 10.5, color: 'var(--text-muted)' }}>出图模型</span>
-                  <select value={imgModel} disabled={!!busy}
-                    onChange={e => setImgModel(e.target.value)}
-                    style={{ ...inputStyle, height: 28 }}>
-                    {imgModels.map(m => (<option key={m.name} value={m.name}>{m.display_name}</option>))}
-                  </select>
-                </label>
-              )}
-              {[['steps', '采样步数(默认28)'], ['guidance', 'guidance(默认3.5)'], ['seed', 'seed(-1随机)']].map(([k, label]) => (
-                <label key={k} style={{ display: 'flex', flexDirection: 'column', gap: 3, width: 130 }}>
-                  <span style={{ fontSize: 10.5, color: 'var(--text-muted)' }}>{label}</span>
-                  <input type="number" value={imgAdv[k]} disabled={!!busy} placeholder="默认"
-                    onChange={e => setImgAdv(p => ({ ...p, [k]: e.target.value }))}
-                    style={{ ...inputStyle, height: 28 }} />
-                </label>
-              ))}
-              <label style={{ display: 'flex', flexDirection: 'column', gap: 3, width: 150 }}>
-                <span style={{ fontSize: 10.5, color: 'var(--text-muted)' }}>显存策略</span>
-                <select value={imgAdv.offload} disabled={!!busy}
-                  onChange={e => setImgAdv(p => ({ ...p, offload: e.target.value }))}
-                  style={{ ...inputStyle, height: 28 }}>
-                  <option value="">默认</option>
-                  <option value="model">model（快）</option>
-                  <option value="sequential">sequential（省显存）</option>
-                </select>
-              </label>
-            </div>
             <div style={{ fontSize: 10.5, fontWeight: 700, color: 'rgba(94,234,212,0.8)', marginBottom: 6 }}>
               出片（{models.find(m => m.name === model)?.display_name || model}）· 按模型动态
             </div>
@@ -1853,71 +1733,21 @@ export function ProductionPanel({ message, workspace, sessionId }) {
                       <button onClick={() => stopScene(s.scene_id)} title="点击停止这个分镜的任务"
                         style={{ ...miniAct(false), border: '1px solid rgba(239,68,68,0.4)',
                                  background: 'rgba(239,68,68,0.16)', color: 'rgba(252,165,165,1)' }}>
-                        {sb === 'generate' ? '出图中' : '出片中'} {fmtElapsed(s.scene_id)} · 停止
+                        {sb === 'append' ? '续片中' : sb === 'undo' ? '撤销中' : '出片中'} {fmtElapsed(s.scene_id)} · 停止
                       </button>
                     )
                   }
+                  if (s.video) return null   // 已出片 → 操作都在下方成片区
                   const disabled = !!busy
-                  return (<>
-                    {ocMode !== 't2v' && (
-                    <button onClick={() => runScene('generate', s.scene_id)} disabled={disabled}
-                      title="只对这个分镜出图" style={miniAct(false)}>
-                      {s.candidates.length ? '重出图' : '出图'}
+                  const sec = estSec != null ? estSec : null
+                  // 纯 t2v：分镜文本直接出片(无出图/选图/对口型)。想长镜头先出 1 段、再用下方「再续一段」加长。
+                  return (
+                    <button onClick={() => runScene('render', s.scene_id)} disabled={disabled}
+                      title="文本直接生成这镜视频(t2v)" style={miniAct(false, true)}>
+                      {`出片(t2v)${sec != null ? ` ≈${sec.toFixed(0)}s` : ''}`}
                     </button>
-                    )}
-                    {((s.selected || ocMode === 't2v') && !s.video) && (() => {
-                      const segs = sceneSegments[s.scene_id] ?? segments
-                      const sec = estSec != null ? estSec / Math.max(1, segments) * segs : null
-                      // t2v 模式没有 S2V(lightx2v 不支持)→ 对口型在 t2v 上是无效开关，隐藏 + 强制 ls=false
-                      const ls = (ocMode !== 't2v') && (sceneLipsync[s.scene_id] ?? !!s.lipsync)
-                      return (<>
-                        {ocMode !== 't2v' && (
-                        <label title="勾上=人物开口说话、嘴型跟「旁白(=台词)」同步(Wan2.2-S2V 语音驱动)；不勾=普通运镜出片。"
-                          style={{ fontSize: 11, display: 'inline-flex', alignItems: 'center', gap: 3,
-                                   cursor: disabled ? 'default' : 'pointer',
-                                   color: ls ? 'rgba(94,234,212,1)' : 'var(--text-muted)' }}>
-                          <input type="checkbox" checked={ls} disabled={disabled}
-                            onChange={e => toggleLipsync(s.scene_id, e.target.checked)} />
-                          <Icon.Mic size={12} />对口型
-                        </label>
-                        )}
-                        {!ls && ocMode !== 't2v' && (
-                          <label style={{ fontSize: 11, color: 'var(--text-muted)', display: 'inline-flex',
-                                          alignItems: 'center', gap: 3 }}
-                            title="这个分镜的接续段数（1=单段；越多越长越连贯，想多长填多少、没有上限）。也可先出 1 段、看效果后用「再续一段」逐段加长。">
-                            接续
-                            <input type="number" min={1} value={segs} disabled={disabled}
-                              onChange={e => setSceneSegments(p => ({ ...p, [s.scene_id]: Math.max(1, Number(e.target.value) || 1) }))}
-                              style={{ ...inputStyle, width: 48, height: 22, fontSize: 11 }} />
-                            段
-                          </label>
-                        )}
-                        <button onClick={() => runScene('render', s.scene_id)} disabled={disabled}
-                          title={ls ? '人物开口说话、对口型出片(Wan2.2-S2V)' : (ocMode === 't2v' ? '文本直接生成这镜视频(t2v)' : '只对这个分镜出视频')}
-                          style={miniAct(false, true)}>
-                          {ls ? '对口型出片' : (ocMode === 't2v' ? '出片(t2v)' : `出视频${sec != null ? ` ≈${sec.toFixed(0)}s` : ''}`)}
-                        </button>
-                      </>)
-                    })()}
-                  </>)
+                  )
                 })()}
-
-                {!s.video && ocMode !== 't2v' && (
-                  <label title="已有这镜的图？直接上传当候选，跳过生图"
-                    style={{ fontSize: 11, color: 'rgba(165,168,255,0.9)', cursor: 'pointer',
-                             border: '1px solid rgba(99,102,241,0.35)', borderRadius: 6, padding: '2px 8px' }}>
-                    上传图片
-                    <input type="file" accept=".png,.jpg,.jpeg,.webp" style={{ display: 'none' }}
-                      onChange={async e => {
-                        const f = e.target.files?.[0]
-                        e.target.value = ''
-                        if (!f) return
-                        setProgress(`上传 #${s.scene_number} 的图片…`)
-                        try { await uploadCandidate(s.scene_id, f, workspace); setProgress(''); load() }
-                        catch (err) { setProgress('上传失败：' + String(err.message || err)) }
-                      }} />
-                  </label>
-                )}
                 {!s.video && (
                   <label title="已有这镜的视频？直接上传当成片，跳过出图/出片。之后可在下方继续 AI 续接 / 换脸 / 无缝化。"
                     style={{ fontSize: 11, color: 'rgba(94,234,212,0.95)',
@@ -2014,34 +1844,10 @@ export function ProductionPanel({ message, workspace, sessionId }) {
                       }}>删除成片 · 重出</button>
                   </div>
                 </div>
-              ) : s.candidates.length > 0 ? (
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(96px,1fr))', gap: 8 }}>
-                  {s.candidates.map(img => (
-                    <div key={img.assetId} style={{
-                      position: 'relative', borderRadius: 9, overflow: 'hidden', cursor: 'pointer',
-                      border: img.selected ? '2px solid #34d399' : '1px solid rgba(255,255,255,0.1)',
-                    }}>
-                      <img src={fileUrl(img.url)} alt={img.name} onClick={() => setZoom(img)}
-                           style={{ width: '100%', aspectRatio: '3/4', objectFit: 'cover', display: 'block' }} />
-                      <button onClick={() => select(s.scene_id, img.assetId)}
-                        title={img.selected ? '已选' : '选这张'}
-                        style={{
-                          position: 'absolute', top: 4, right: 4, width: 22, height: 22, borderRadius: 6,
-                          border: 'none', cursor: 'pointer', fontSize: 12,
-                          color: img.selected ? '#04201a' : '#fff',
-                          background: img.selected ? '#34d399' : 'rgba(0,0,0,0.55)',
-                        }}>{img.selected ? '✓' : '○'}</button>
-                      <button onClick={() => delCandidate(img.assetId)} title="删除这张候选图"
-                        style={{
-                          position: 'absolute', top: 4, left: 4, width: 22, height: 22, borderRadius: 6,
-                          border: 'none', cursor: 'pointer', fontSize: 13, lineHeight: 1, color: '#fff',
-                          background: 'rgba(239,68,68,0.7)',
-                        }}>×</button>
-                    </div>
-                  ))}
-                </div>
               ) : (
-                <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>尚未出图</div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                  还没出片 —— 点上方「出片(t2v)」生成这镜视频，或用顶部「批量出片并合成」整集出。
+                </div>
               )}
 
               {/* 多段接续：AI 把动作拆成每段独立运镜提示词（你想不出提示词时用），可改可不改 */}
@@ -2068,7 +1874,7 @@ export function ProductionPanel({ message, workspace, sessionId }) {
       {tab === 'export' && (
         <div style={subBox}>
           <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 8 }}>
-            导出 —— 全部分镜出完片后，「③ 一键出片并合成」在「分镜制作」里点；成片在这里下载。
+            导出 —— 全部分镜出完片后，「批量出片并合成（t2v）」在「分镜制作」里点；成片在这里下载。
           </div>
           {proj?.episode ? (
             <div>
@@ -2076,7 +1882,7 @@ export function ProductionPanel({ message, workspace, sessionId }) {
               <a href={fileUrl(proj.episode.url)} download style={{ ...panelBtn(false), textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 6 }}><Icon.Download size={14} />下载整集 mp4</a>
             </div>
           ) : (
-            <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>还没有整集成片。去「分镜制作」点「③ 一键出片并合成」。</div>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>还没有整集成片。去「分镜制作」点「批量出片并合成（t2v）」。</div>
           )}
           <div style={{ fontSize: 10.5, color: '#ffb454', marginTop: 8 }}>平台导出预设（抖音 1080×1920 等）待补。</div>
         </div>
