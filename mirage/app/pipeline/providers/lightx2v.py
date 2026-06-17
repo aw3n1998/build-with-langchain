@@ -1,6 +1,6 @@
 """lightx2v 文生视频 Provider —— 不走 ComfyUI，直接调 lightx2v(ModelTC/LightX2V)推理引擎。
 
-lightx2v 是你那套 4 步蒸馏 LoRA 的娘家,专做 Wan 快速推理(t2v/i2v/s2v),自带 FastAPI HTTP server。
+lightx2v 是你那套 4 步蒸馏 LoRA 的娘家,专做 Wan 快速推理(t2v/i2v;★不支持 s2v/音频驱动对口型),自带 FastAPI HTTP server。
 本 provider 把 Mirage 的 t2v 出片指向 lightx2v server(POST 建任务 → 轮询 → 取回成片),
 **纯 t2v 工作流可彻底不用 ComfyUI**(t2v 不出图/不选图/不锁脸,ComfyUI 那套本就用不到)。
 
