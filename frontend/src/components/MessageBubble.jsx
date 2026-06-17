@@ -774,7 +774,8 @@ export function ProductionPanel({ message, workspace, sessionId }) {
     const mp = segs > 1 ? (sceneSegPrompts[sceneId] || []).slice(0, segs) : []
     const ls = sceneLipsync[sceneId] ?? !!(proj?.scenes?.find(x => x.scene_id === sceneId)?.lipsync)
     return { scene_id: sceneId, workspace, session_id: sessionId,
-      model, segments: segs, size: vidSize, video_params: vidParams, motion_prompts: mp, lipsync: ls }
+      model, segments: segs, size: vidSize, video_params: vidParams, motion_prompts: mp, lipsync: ls,
+      video_mode: ocMode }   // t2v 模式：单镜「出片」直接文生(跳过出图/选图)；i2v 照旧
   }
 
   // 让 AI 据画面 + 一句中文意图，把动作拆成 N 段递进运镜提示词
@@ -1614,6 +1615,14 @@ export function ProductionPanel({ message, workspace, sessionId }) {
         </div>
       )}
 
+      {ocMode === 't2v' ? (
+        <div style={{ fontSize: 12, color: 'var(--text-dim)', marginBottom: 12, padding: '10px 12px',
+          border: '1px dashed var(--border)', borderRadius: 8, lineHeight: 1.7 }}>
+          🎬 <b style={{ color: 'var(--text-secondary)' }}>t2v 文生视频模式</b>：不需要出图 / 选图。
+          每镜在下方直接点「<b style={{ color: '#5fe8de' }}>出片(t2v)</b>」文本直接生成，或用顶部「✨ 一键」自动出整集（文本→逐镜文生→合成）。
+          身份靠训好的 Wan-T2V 角色 LoRA；切回 i2v 见「剧本」tab 的出片模式开关。
+        </div>
+      ) : (<>
       {/* 第①步：出图（张数/尺寸可选）*/}
       <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginBottom: 8 }}>
         <button onClick={() => runJob('generate')} disabled={!!busy}
@@ -1695,6 +1704,7 @@ export function ProductionPanel({ message, workspace, sessionId }) {
         )}
         {busy && <span style={{ fontSize: 11, color: 'var(--text-muted)', alignSelf: 'center' }}>{progress}</span>}
       </div>
+      </>)}
 
       {/* 更多参数：专业档（默认收起，小白无感；进阶用户全量可调）*/}
       <div style={{ marginBottom: 12 }}>
@@ -1859,11 +1869,13 @@ export function ProductionPanel({ message, workspace, sessionId }) {
                   }
                   const disabled = !!busy
                   return (<>
+                    {ocMode !== 't2v' && (
                     <button onClick={() => runScene('generate', s.scene_id)} disabled={disabled}
                       title="只对这个分镜出图" style={miniAct(false)}>
                       {s.candidates.length ? '重出图' : '出图'}
                     </button>
-                    {s.selected && !s.video && (() => {
+                    )}
+                    {((s.selected || ocMode === 't2v') && !s.video) && (() => {
                       const segs = sceneSegments[s.scene_id] ?? segments
                       const sec = estSec != null ? estSec / Math.max(1, segments) * segs : null
                       // t2v 模式没有 S2V(lightx2v 不支持)→ 对口型在 t2v 上是无效开关，隐藏 + 强制 ls=false
@@ -1879,7 +1891,7 @@ export function ProductionPanel({ message, workspace, sessionId }) {
                           <Icon.Mic size={12} />对口型
                         </label>
                         )}
-                        {!ls && (
+                        {!ls && ocMode !== 't2v' && (
                           <label style={{ fontSize: 11, color: 'var(--text-muted)', display: 'inline-flex',
                                           alignItems: 'center', gap: 3 }}
                             title="这个分镜的接续段数（1=单段；越多越长越连贯，想多长填多少、没有上限）。也可先出 1 段、看效果后用「再续一段」逐段加长。">
@@ -1891,16 +1903,16 @@ export function ProductionPanel({ message, workspace, sessionId }) {
                           </label>
                         )}
                         <button onClick={() => runScene('render', s.scene_id)} disabled={disabled}
-                          title={ls ? '人物开口说话、对口型出片(Wan2.2-S2V)' : '只对这个分镜出视频'}
+                          title={ls ? '人物开口说话、对口型出片(Wan2.2-S2V)' : (ocMode === 't2v' ? '文本直接生成这镜视频(t2v)' : '只对这个分镜出视频')}
                           style={miniAct(false, true)}>
-                          {ls ? '对口型出片' : `出视频${sec != null ? ` ≈${sec.toFixed(0)}s` : ''}`}
+                          {ls ? '对口型出片' : (ocMode === 't2v' ? '出片(t2v)' : `出视频${sec != null ? ` ≈${sec.toFixed(0)}s` : ''}`)}
                         </button>
                       </>)
                     })()}
                   </>)
                 })()}
 
-                {!s.video && (
+                {!s.video && ocMode !== 't2v' && (
                   <label title="已有这镜的图？直接上传当候选，跳过生图"
                     style={{ fontSize: 11, color: 'rgba(165,168,255,0.9)', cursor: 'pointer',
                              border: '1px solid rgba(99,102,241,0.35)', borderRadius: 6, padding: '2px 8px' }}>
