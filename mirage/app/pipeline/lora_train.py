@@ -50,6 +50,22 @@ def is_local_runner() -> bool:
     return not (settings.LORA_TRAIN_ENDPOINT or "").strip()
 
 
+def _resolve_low_vram() -> bool:
+    """是否开 low_vram(把闲置专家挪 CPU 省显存)。auto=按显存：>48G 全 GPU 训(快、GPU 吃满)、≤48G 省显存。
+    也可 LORA_TRAIN_LOW_VRAM=true/false 强制。"""
+    v = str(settings.LORA_TRAIN_LOW_VRAM or "auto").strip().lower()
+    if v in ("true", "1", "yes", "on"):
+        return True
+    if v in ("false", "0", "no", "off"):
+        return False
+    try:  # auto：按显存决定
+        import torch
+        gb = torch.cuda.get_device_properties(0).total_memory / (1024 ** 3)
+        return gb <= 48     # >48G(A100-80/H100/大卡)→全 GPU 训；≤48G→挪 CPU 省显存
+    except Exception:  # noqa: BLE001
+        return True         # 探测不到显存 → 保守省显存
+
+
 def count_images(dataset_dir: str) -> int:
     if not os.path.isdir(dataset_dir):
         return 0
@@ -97,7 +113,7 @@ def build_aitk_config(name: str, dataset_dir: str, trigger: str, base: str,
                 },
                 # ★arch=wan22_14b → ai-toolkit 走 MoE 双专家、一次出 high+low 两个 LoRA(别用 is_flux)
                 "model": {"name_or_path": base, "arch": "wan22_14b", "quantize": True,
-                          "low_vram": bool(settings.LORA_TRAIN_LOW_VRAM),
+                          "low_vram": _resolve_low_vram(),   # 大卡(>48G)全 GPU 训、不挪 CPU；小卡才省显存
                           "model_kwargs": {"train_high_noise": True, "train_low_noise": True}},
                 # ★不生成训练中预览样图★：ai-toolkit 的 Wan2.2 采样路径调 diffusers encode_prompt 时把负向
                 # prompt 传成 bool → ftfy.fix_text 崩(object of type 'bool' has no len())。角色 LoRA 不需要

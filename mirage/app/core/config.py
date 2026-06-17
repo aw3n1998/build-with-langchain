@@ -80,7 +80,8 @@ class Settings(BaseSettings):
     # ★训练底模(diffusers)与 t2v 出片底模(lightx2v / ComfyUI fp8)是两套，各管训练/推理。
     # Colab 上 LW1 下到本地持久化目录后，把本项设成那个本地路径更省(免训练时重下 ~56G)。仅原创虚构成年角色，遵守合规前置。
     LORA_TRAIN_BASE: str = "ai-toolkit/Wan2.2-T2V-A14B-Diffusers-bf16"
-    LORA_TRAIN_LOW_VRAM: bool = True     # 训练省显存(<=48G 必开)；80G 卡可 .env 设 False 更快
+    # 训练显存策略：auto(按显存自动：>48G 全 GPU 训、GPU 吃满更快；≤48G 把闲置专家挪 CPU 省显存) / true(强制省显存) / false(强制全 GPU)
+    LORA_TRAIN_LOW_VRAM: str = "auto"
     # 本地训练执行器(照搬 notebook LW1/LW2 已验证的 ai-toolkit Wan 配方)。均可 .env 覆盖、不写死。
     AI_TOOLKIT_DIR: str = "/content/ai-toolkit"            # ai-toolkit 仓库目录(notebook L1 软链于此)
     COMFYUI_LORA_DIR: str = "/content/ComfyUI/models/loras"  # 训出 LoRA 拷到此(出片按文件名加载)
