@@ -1097,7 +1097,7 @@ export function ProductionPanel({ message, workspace, sessionId }) {
     </div>
   )
   const subBox = { background: '#161616', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 12, padding: '16px 18px', marginBottom: 12 }
-  useEffect(() => { cancelled.current = false; load(); return () => { cancelled.current = true } }, [pid])  // eslint-disable-line
+  useEffect(() => { cancelled.current = false; load(); loadLoras(); return () => { cancelled.current = true } }, [pid])  // eslint-disable-line loadLoras 全局拿 comfyui 标志,门控换脸/造图入口
   useEffect(() => {
     if (tab === 'script' && !style) loadStyle()
     if (tab === 'script' || tab === 'cast') loadLoras()   // cast tab 也要 loras.comfyui 决定「造图自训」入口显不显示
@@ -1313,6 +1313,7 @@ export function ProductionPanel({ message, workspace, sessionId }) {
     }
   }
   const faceswapRow = (tag, kind, sceneId, projectId) => {
+    if (!loras.comfyui) return null   // 换脸靠 ComfyUI(ReActor)，纯 t2v 无 ComfyUI → 不显示，免点了报「未配置」
     const bz = !!swBusy[tag]
     const f = swFile[tag]
     return (
@@ -1600,11 +1601,13 @@ export function ProductionPanel({ message, workspace, sessionId }) {
           {addField('运镜提示词', 'motion_prompt')}
           {addField('旁白 / 台词', 'narration')}
           {addField('字幕（可空，留空=用旁白）', 'subtitle')}
+          {ocMode !== 't2v' && (
           <label style={{ fontSize: 12, display: 'flex', gap: 6, alignItems: 'center', margin: '4px 0 8px' }}>
             <input type="checkbox" checked={newScene.lipsync}
               onChange={e => setNewScene(s => ({ ...s, lipsync: e.target.checked }))} />
             <Icon.Mic size={13} style={{ opacity: 0.75 }} />对口型镜头（人物开口说话，走 S2V）
           </label>
+          )}
           <button onClick={addScene} disabled={addBusy} style={panelBtn(addBusy)}>
             {addBusy ? '添加中…' : '添加到本集'}
           </button>
@@ -1863,8 +1866,10 @@ export function ProductionPanel({ message, workspace, sessionId }) {
                     {s.selected && !s.video && (() => {
                       const segs = sceneSegments[s.scene_id] ?? segments
                       const sec = estSec != null ? estSec / Math.max(1, segments) * segs : null
-                      const ls = sceneLipsync[s.scene_id] ?? !!s.lipsync
+                      // t2v 模式没有 S2V(lightx2v 不支持)→ 对口型在 t2v 上是无效开关，隐藏 + 强制 ls=false
+                      const ls = (ocMode !== 't2v') && (sceneLipsync[s.scene_id] ?? !!s.lipsync)
                       return (<>
+                        {ocMode !== 't2v' && (
                         <label title="勾上=人物开口说话、嘴型跟「旁白(=台词)」同步(Wan2.2-S2V 语音驱动)；不勾=普通运镜出片。"
                           style={{ fontSize: 11, display: 'inline-flex', alignItems: 'center', gap: 3,
                                    cursor: disabled ? 'default' : 'pointer',
@@ -1873,6 +1878,7 @@ export function ProductionPanel({ message, workspace, sessionId }) {
                             onChange={e => toggleLipsync(s.scene_id, e.target.checked)} />
                           <Icon.Mic size={12} />对口型
                         </label>
+                        )}
                         {!ls && (
                           <label style={{ fontSize: 11, color: 'var(--text-muted)', display: 'inline-flex',
                                           alignItems: 'center', gap: 3 }}

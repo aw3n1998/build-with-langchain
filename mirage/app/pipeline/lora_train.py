@@ -99,7 +99,9 @@ def build_aitk_config(name: str, dataset_dir: str, trigger: str, base: str,
                 "model": {"name_or_path": base, "arch": "wan22_14b", "quantize": True,
                           "low_vram": bool(settings.LORA_TRAIN_LOW_VRAM),
                           "model_kwargs": {"train_high_noise": True, "train_low_noise": True}},
-                "sample": {"sample_every": 100000, "prompts": [f"{trigger}, portrait"]},
+                # ★不生成训练中预览样图★：ai-toolkit 的 Wan2.2 采样路径调 diffusers encode_prompt 时把负向
+                # prompt 传成 bool → ftfy.fix_text 崩(object of type 'bool' has no len())。角色 LoRA 不需要
+                # 预览样图，直接不配 sample 段 → 跳过采样，训练照常出 high/low LoRA。
             }],
         },
     }
