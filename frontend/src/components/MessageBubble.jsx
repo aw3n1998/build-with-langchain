@@ -713,7 +713,9 @@ export function ProductionPanel({ message, workspace, sessionId }) {
   const [ocSec, setOcSec] = usePersistedState('ocSec', 60)      // 目标成片时长(秒)
   const [ocCoh, setOcCoh] = usePersistedState('ocCoh', true)    // true=少而长连贯档；false=快切
   const [ocAuto, setOcAuto] = usePersistedState('ocAuto', true) // true=自动选图全自动到底；false=出完图停下手动选
-  const [ocMode, setOcMode] = usePersistedState('ocVideoMode', 'i2v') // 出片模式 i2v(图生)/t2v(文生视频,需角色 LoRA)
+  // ★产品定为纯 t2v：图生视频(i2v)整套先停用——出片模式切换开关已注释，i2v 出图分步被 gated(ocMode!=='t2v')永不触发。
+  //   i2v 代码保留(等重构再清)；ocMode 锁死 't2v'。原: const [ocMode, setOcMode] = usePersistedState('ocVideoMode', 'i2v')
+  const ocMode = 't2v'
   const [autoSelBusy, setAutoSelBusy] = useState(false)         // 面板内「自动选图」按钮忙
   // 角色/声音圣经
   const [showChars, setShowChars] = useState(false)
@@ -1430,23 +1432,11 @@ export function ProductionPanel({ message, workspace, sessionId }) {
                 title="少而长的连续长镜头，切换点少 → 更连贯；关掉=多而短的快切">
                 <input type="checkbox" checked={ocCoh} onChange={e => setOcCoh(e.target.checked)} />连贯优先
               </label>
-              <label style={{ fontSize: 12, display: 'inline-flex', gap: 4, alignItems: 'center', color: 'var(--text-muted)' }}
-                title="勾选=自动选图全自动到底；取消=出完图停下，到「分镜制作」手动逐镜点选后再出片">
-                <input type="checkbox" checked={ocAuto} onChange={e => setOcAuto(e.target.checked)} />自动选图
-              </label>
-              <label style={{ fontSize: 12, display: 'inline-flex', gap: 4, alignItems: 'center', color: 'var(--text-muted)' }}
-                title="i2v=先出图(可锁脸/挑图)再让图动；t2v=文本直接生成视频(身份靠训好的 Wan-T2V 角色 LoRA，跳过出图/选图)">
-                出片<select value={ocMode} onChange={e => setOcMode(e.target.value)}
-                  style={{ ...inputStyle, width: 'auto', height: 28, margin: '0 0 0 4px' }}>
-                  <option value="i2v">i2v 图生</option>
-                  <option value="t2v">t2v 文生</option>
-                </select>
-              </label>
+              {/* ★纯 t2v：「自动选图」(i2v 选图) + 「出片 i2v/t2v 切换」已停用注释，等重构再清。
+                  原 i2v 自动选图开关：<input checked={ocAuto} onChange={...}/>；原模式切换 <select value={ocMode} onChange={setOcMode}>i2v/t2v</select> */}
             </div>
             <div style={{ fontSize: 10.5, color: 'var(--text-dim)', marginTop: 6 }}>
-              {ocMode === 't2v'
-                ? 't2v 文生视频：跳过出图/选图，AI 按秒数拆镜 → 逐镜文生 → 合成。身份靠训好的 Wan-T2V 角色 LoRA（笔记本 LW1/LW2 训 + 出片端 DOWNLOAD_T2V=1 下权重）。'
-                : `AI 按秒数自算镜数：拆镜 → 出图 → ${ocAuto ? '自动选图' : '手动选图'} → 出片 → 合成整集，一步到底。脸要一致：先到「角色」给主角传 1 张参考脸（PuLID 锁脸）。`}
+              t2v 文生视频：跳过出图/选图，AI 按秒数拆镜 → 逐镜文生 → 合成。身份靠训好的 Wan-T2V 角色 LoRA（在「角色 &amp; LoRA」训）。
             </div>
           </div>
           {/* 次要：角色/风格已设好、只想补分镜 */}
