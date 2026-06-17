@@ -42,5 +42,9 @@ if settings.COMFYUI_BASE_URL:
 if settings.COMFYUI_BASE_URL:
     from mirage.app.pipeline.providers.comfyui_t2v import ComfyUIT2VProvider
     video_provider_registry.register(ComfyUIT2VProvider())
+# lightx2v 文生视频后端(不走 ComfyUI):配了 LIGHTX2V_ENABLED + 端点才注册。纯 t2v 可只用它、彻底不开 ComfyUI。
+if settings.LIGHTX2V_ENABLED and settings.LIGHTX2V_BASE_URL:
+    from mirage.app.pipeline.providers.lightx2v import Lightx2vT2VProvider
+    video_provider_registry.register(Lightx2vT2VProvider())
 
 __all__ = ["VideoProvider", "video_provider_registry"]

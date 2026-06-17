@@ -153,6 +153,15 @@ class Settings(BaseSettings):
     # t2v 极速档蒸馏 LoRA(★与 i2v 的不同文件!)。文件名以 HF lightx2v/Wan2.2-Distill-Loras 实际为准,可在 .env 覆盖。
     WAN_T2V_LIGHTNING_LORA_HIGH: str = "wan2.2_t2v_A14b_high_noise_lora_rank64_lightx2v_4step.safetensors"
     WAN_T2V_LIGHTNING_LORA_LOW: str = "wan2.2_t2v_A14b_low_noise_lora_rank64_lightx2v_4step.safetensors"
+    # ── t2v 出片后端选择 ──────────────────────────────────────────
+    # comfyui-t2v = 走 ComfyUI(默认)；lightx2v-t2v = 走 lightx2v 引擎(纯 t2v 可彻底不用 ComfyUI、更快)。
+    T2V_PROVIDER: str = "comfyui-t2v"
+    # lightx2v(ModelTC/LightX2V)文生视频后端:专做 Wan 快速推理(你的 4 步蒸馏 LoRA 娘家),起 HTTP server 接入。
+    LIGHTX2V_ENABLED: bool = False          # 配了端点 + 起了 server 才注册;默认关(免没装时选了跑不了)
+    LIGHTX2V_BASE_URL: str = ""             # 如 http://127.0.0.1:8189(与 ComfyUI 8188 错开)
+    LIGHTX2V_MODEL_T2V: str = ""            # lightx2v 端 Wan2.2-T2V 权重目录/标识(按 lightx2v 文档)
+    LIGHTX2V_DISTILL_LORA_HIGH: str = ""    # 蒸馏 LoRA(高噪);走 lora_configs 时必须显式列,否则丢 4 步加速
+    LIGHTX2V_DISTILL_LORA_LOW: str = ""     # 蒸馏 LoRA(低噪)
     # ── 视频模型解耦：默认 Provider + LTX-Video 配置 ──────────────
     # 默认用哪个视频模型（对应 providers 注册名：wan2.2 / ltx）
     VIDEO_PROVIDER_DEFAULT: str = "wan2.2"

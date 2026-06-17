@@ -680,10 +680,11 @@ def _do_render_t2v(scene_id, scene, motion_prompt, params) -> str:
     身份靠项目级 Wan-T2V 角色 LoRA(没训就纯提示词，身份不稳)。t2v 是隐藏 Provider，端点门控。
     """
     store = get_store()
-    if not video_provider_registry.has("comfyui-t2v"):
-        return ("文生视频(t2v)还没就绪：需在 .env 配 COMFYUI_BASE_URL 且在 ComfyUI 部署 Wan2.2-T2V 权重。"
-                "暂未配置时，请把「出片模式」切回 i2v。")
-    t2v = video_provider_registry.get("comfyui-t2v")
+    _prov = settings.T2V_PROVIDER or "comfyui-t2v"   # comfyui-t2v / lightx2v-t2v(纯 t2v 可不用 ComfyUI)
+    if not video_provider_registry.has(_prov):
+        return (f"文生视频(t2v)后端 '{_prov}' 未就绪：lightx2v 需 LIGHTX2V_ENABLED + LIGHTX2V_BASE_URL 且已起 server；"
+                "ComfyUI 需 COMFYUI_BASE_URL。暂未就绪时把「出片模式」切回 i2v。")
+    t2v = video_provider_registry.get(_prov)
     local_dir = video_dir()
     final_local = os.path.join(local_dir, f"{scene['scene_number']:02d}_{scene_id}.mp4")
     # 项目级风格/触发词/角色 LoRA：本镜读一次复用(出 prompt + 挂 LoRA 共用，避免逐镜重复读)
