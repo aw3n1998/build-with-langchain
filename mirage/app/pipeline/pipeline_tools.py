@@ -680,6 +680,7 @@ def _do_render_t2v(scene_id, scene, motion_prompt, params) -> str:
     身份靠项目级 Wan-T2V 角色 LoRA(没训就纯提示词，身份不稳)。t2v 是隐藏 Provider，端点门控。
     """
     store = get_store()
+    store.set_scene_video_mode(scene_id, "t2v")   # 标记本镜=t2v：合成时据此走 TTS 配音(t2v 无自带音轨)
     _prov = settings.T2V_PROVIDER or "comfyui-t2v"   # comfyui-t2v / lightx2v-t2v(纯 t2v 可不用 ComfyUI)
     if not video_provider_registry.has(_prov):
         return (f"文生视频(t2v)后端 '{_prov}' 未就绪：lightx2v 需 LIGHTX2V_ENABLED + LIGHTX2V_BASE_URL 且已起 server；"
@@ -1240,7 +1241,8 @@ def assemble_episode(project_id: str, voice: str = "", with_subtitles: bool = Tr
         clip = {"path": p, "narration": s.get("narration") or "",
                 "subtitle": s.get("subtitle") or "", "title": s.get("title") or "",
                 "voice": s.get("voice") or "",   # 每镜音色(角色圣经)；空=用全集默认
-                "keep_audio": bool(s.get("lipsync"))}  # 对口型片自带人声，别重配音(否则口型错位)
+                # 对口型(S2V)片自带人声→别重配音(否则口型错位)；但 t2v 片无音轨,必须走 TTS 配音 → 不 keep_audio
+                "keep_audio": bool(s.get("lipsync")) and (s.get("video_mode") or "i2v") != "t2v"}
         # 多角色对话「说话人：台词」逐行 → 各自匹配角色音色；字幕用对话原文。仅非对口型镜生效。
         _dlg = []
         for _raw in (s.get("dialogue") or "").splitlines():
