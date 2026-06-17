@@ -1098,7 +1098,10 @@ export function ProductionPanel({ message, workspace, sessionId }) {
   )
   const subBox = { background: '#161616', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 12, padding: '16px 18px', marginBottom: 12 }
   useEffect(() => { cancelled.current = false; load(); return () => { cancelled.current = true } }, [pid])  // eslint-disable-line
-  useEffect(() => { if (tab === 'script') { if (!style) loadStyle(); loadLoras() } }, [tab])  // eslint-disable-line 进剧本 tab 时加载本集风格 + 可用 LoRA
+  useEffect(() => {
+    if (tab === 'script' && !style) loadStyle()
+    if (tab === 'script' || tab === 'cast') loadLoras()   // cast tab 也要 loras.comfyui 决定「造图自训」入口显不显示
+  }, [tab])  // eslint-disable-line
   useEffect(() => {
     getVideoProviders().then(d => {
       setModels(d.providers || [])
@@ -1528,6 +1531,7 @@ export function ProductionPanel({ message, workspace, sessionId }) {
                   {loraLog[t.id] || '加载中…'}
                 </pre>
               )}
+              {loras.comfyui ? (
               <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 6, flexWrap: 'wrap' }}>
                 <span style={{ fontSize: 10.5, color: '#5fe8de', whiteSpace: 'nowrap' }}>免上传自训：</span>
                 <select value={bootOf(t.id).mode} onChange={e => setBootOf(t.id, { mode: e.target.value })}
@@ -1547,6 +1551,11 @@ export function ProductionPanel({ message, workspace, sessionId }) {
                   style={{ ...inputStyle, height: 26, width: 56 }} />
                 <button onClick={() => loraBootstrap(t.id)} disabled={loraBusy} style={panelBtn(loraBusy)}>造图+开训</button>
               </div>
+              ) : (
+                <div style={{ fontSize: 10.5, color: 'var(--text-dim)', marginTop: 6 }}>
+                  「免上传自训·造图」需 ComfyUI 出图后端，纯 t2v 未配 → 已停用。请用上方「传参考图」手动上传 16-20 张同脸图再「开始训练」。
+                </div>
+              )}
             </div>
           ))}
           <button onClick={newLora} disabled={loraBusy} style={{ ...panelBtn(loraBusy), display: 'inline-flex', alignItems: 'center', gap: 6 }}><Icon.Plus size={14} />新建 LoRA 训练</button>

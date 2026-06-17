@@ -1351,7 +1351,9 @@ async def pipeline_loras(workspace: str = ""):
         avail = ch.available_loras(ch.base_url())
     except Exception:  # noqa: BLE001
         avail = None
-    return {"loras": sorted(avail) if avail else [], "model": model_config()}
+    return {"loras": sorted(avail) if avail else [], "model": model_config(),
+            # 前端据此决定「免上传自训·造图」入口是否可用：造图靠 ComfyUI 出图，纯 t2v 无 ComfyUI → 前端隐藏该入口
+            "comfyui": bool((settings.COMFYUI_BASE_URL or "").strip())}
 
 
 @router.post("/pipeline/scene_add")
