@@ -1056,19 +1056,14 @@ export function ProductionPanel({ message, workspace, sessionId }) {
     </div>
   )
   const styleLoraField = () => {
-    const cur = (style && style.flux_lora) || ''
-    const avail = loras.loras || []
-    const missing = cur && cur !== 'none' && !avail.includes(cur)
+    const hi = (style && style.wan_t2v_lora_high) || ''
+    const lo = (style && style.wan_t2v_lora_low) || ''
     return (
       <div style={{ marginBottom: 6 }}>
-        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 2 }}>FLUX LoRA（出图锁人物；下拉选真实文件，免得手填到不存在的名字让出图整批失败）</div>
-        <select value={cur} onChange={e => setStyle(s => ({ ...(s || {}), flux_lora: e.target.value }))}
-          style={{ ...inputStyle, width: '100%', height: 30, boxSizing: 'border-box' }}>
-          <option value="">默认（.env / 不指定）</option>
-          <option value="none">none（不加载任何 LoRA）</option>
-          {avail.map(n => <option key={n} value={n}>{n}</option>)}
-          {missing && <option value={cur}>{cur}（⚠ ComfyUI 里没有此文件）</option>}
-        </select>
+        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 2 }}>本集 Wan-T2V 角色 LoRA（在「角色 &amp; LoRA」里训出后自动挂这里；t2v 出片锁人物）</div>
+        <div style={{ fontSize: 11.5, color: hi ? '#5fe8de' : 'var(--text-dim)' }}>
+          {hi ? `已挂 high+low：${hi} / ${lo || '(缺 low)'}` : '未训练 —— t2v 没首帧，人物一致全靠这套 LoRA（去「角色 & LoRA」训）'}
+        </div>
       </div>
     )
   }
@@ -1478,8 +1473,8 @@ export function ProductionPanel({ message, workspace, sessionId }) {
 
         <div style={subBox}>
           <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 8 }}>
-            人物 LoRA 训练 —— 训出专属 LoRA、出图锁定这张脸（最稳的人物一致）。可手动传 10-20 张，
-            也可<b style={{ color: '#5fe8de' }}>免上传自训</b>：纯文字零图，或传 1 张脸用 PuLID 批量造同人图，造完自动开训。
+            人物 LoRA 训练（Wan-T2V）—— 一次训出 high+low 两个 Wan LoRA、t2v 出片锁定这个角色（t2v 没首帧，人物一致全靠它）。
+            手动传 16-20 张同脸图开训。<b style={{ color: '#5fe8de' }}>免上传自训·造图</b> 需出图后端 ComfyUI；纯 lightx2v t2v 无 ComfyUI → 请手动上传。
           </div>
           {(proj?.lora_trainings || []).map(t => (
             <div key={t.id} style={{ border: '1px solid var(--border)', borderRadius: 6, padding: 8, marginBottom: 6 }}>
@@ -1491,7 +1486,7 @@ export function ProductionPanel({ message, workspace, sessionId }) {
                 <button onClick={async () => { if (await dialog.confirm('删除这个 LoRA 训练？', { message: '参考图也会一并删除，不可恢复。', danger: true, confirmText: '删除' })) loraOp('delete', t.id) }} disabled={loraBusy}
                   style={{ ...miniBtn2, color: '#fca5a5', borderColor: 'rgba(239,68,68,0.4)', flexShrink: 0 }}>删除</button>
               </div>
-              <input defaultValue={t.trigger_word || ''} placeholder="触发词 trigger_word（出图自动注入；没有可留空）"
+              <input defaultValue={t.trigger_word || ''} placeholder="触发词 trigger_word（t2v 出片自动注入；带下划线身份更粘，如 cael_an）"
                 onBlur={e => { if (e.target.value !== (t.trigger_word || '')) loraOp('update', t.id, { trigger_word: e.target.value }) }}
                 style={{ ...inputStyle, height: 26, width: '100%', boxSizing: 'border-box', marginBottom: 4 }} />
               {t.message && <div style={{ fontSize: 10.5, color: '#ffb454', marginBottom: 4 }}>{t.message}</div>}

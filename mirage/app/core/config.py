@@ -75,16 +75,18 @@ class Settings(BaseSettings):
     # 人物 LoRA 训练：训练执行器。LORA_TRAIN_ENDPOINT 空=Colab 单机本地跑 ai-toolkit 子进程(默认)；
     # 填了远程训练服务地址才改走 POST 远程(SSH/独立 GPU 场景)。可插拔，不改代码切换。
     LORA_TRAIN_ENDPOINT: str = ""        # 远程训练服务接入点；空=本地 ai-toolkit 子进程
-    LORA_TRAIN_STEPS: int = 1200         # 默认训练步数
-    # 人物 LoRA 训练底模。务必与出图底模(COMFYUI_FLUX_UNET / GPU_FLUX_BASE)同源，否则训出的 LoRA 不通用。
-    # 默认 FLUX-dev 系(含无审查 Fluxed Up 等微调，走 ai-toolkit is_flux 训练)；仅原创虚构成年角色，遵守合规前置(立项报告第 4 章)。
-    LORA_TRAIN_BASE: str = "black-forest-labs/FLUX.1-dev"
-    # 本地训练执行器(照搬 notebook L1/L3/L4 已验证跑通的 ai-toolkit 配方)。均可 .env 覆盖、不写死。
+    LORA_TRAIN_STEPS: int = 2000         # 默认训练步数(Wan 双专家比 FLUX 多)
+    # 人物 LoRA 训练底模 = Wan2.2-T2V-A14B diffusers(ai-toolkit 读；arch=wan22_14b 走 MoE 双专家)。
+    # ★训练底模(diffusers)与 t2v 出片底模(lightx2v / ComfyUI fp8)是两套，各管训练/推理。
+    # Colab 上 LW1 下到本地持久化目录后，把本项设成那个本地路径更省(免训练时重下 ~56G)。仅原创虚构成年角色，遵守合规前置。
+    LORA_TRAIN_BASE: str = "ai-toolkit/Wan2.2-T2V-A14B-Diffusers-bf16"
+    LORA_TRAIN_LOW_VRAM: bool = True     # 训练省显存(<=48G 必开)；80G 卡可 .env 设 False 更快
+    # 本地训练执行器(照搬 notebook LW1/LW2 已验证的 ai-toolkit Wan 配方)。均可 .env 覆盖、不写死。
     AI_TOOLKIT_DIR: str = "/content/ai-toolkit"            # ai-toolkit 仓库目录(notebook L1 软链于此)
-    COMFYUI_LORA_DIR: str = "/content/ComfyUI/models/loras"  # 训出 LoRA 拷到此(ComfyUI 出图按文件名加载)
-    LORA_TRAIN_RESOLUTION: int = 512     # 训练分辨率
+    COMFYUI_LORA_DIR: str = "/content/ComfyUI/models/loras"  # 训出 LoRA 拷到此(出片按文件名加载)
+    LORA_TRAIN_RESOLUTION: int = 512     # 训练分辨率(短边；长边自动取 1.5x)
     LORA_TRAIN_NETWORK_DIM: int = 32     # LoRA rank(linear)；alpha 取一半
-    LORA_TRAIN_BATCH: int = 2            # batch_size(A100-40G 友好)
+    LORA_TRAIN_BATCH: int = 1            # batch_size(Wan 双专家训练吃显存，默认 1)
     # 数据集自举(免上传自训)：每个角色自动生成多少张训练图、变体提示词(语言无关、可加可减、不写死)。
     LORA_BOOTSTRAP_COUNT: int = 16       # 自举默认生成张数(>=训练门槛 5)
     PULID_ENABLED: bool = True           # 单脸自举开关(需 ComfyUI 装 PuLID_Flux + 下配套模型)
