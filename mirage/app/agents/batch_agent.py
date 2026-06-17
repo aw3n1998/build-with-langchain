@@ -191,7 +191,7 @@ async def demo():
     import httpx
 
     llm = ChatOpenAI(
-        api_key=settings.OPENAI_API_KEY,
+        api_key=settings.OPENAI_API_KEY or "sk-no-llm-key-set",   # 占位兜底:无 key 不在构造时崩(真调用才报)
         base_url=settings.OPENAI_API_BASE,
         model=settings.MODEL_NAME,
         http_async_client=httpx.AsyncClient(verify=not settings.SKIP_SSL_VERIFY),

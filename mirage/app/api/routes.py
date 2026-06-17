@@ -1652,7 +1652,7 @@ class LoraActionRequest(BaseModel):
     workspace: str | None = None
     project_id: str
     training_id: str | None = None
-    action: str = "list"          # list / train / delete / update / bootstrap
+    action: str = "list"          # list / train / delete / update / bootstrap / log
     name: str | None = None       # update 用：改名
     trigger_word: str | None = None  # update 用：改触发词
     # bootstrap 用：免上传自训。mode=text(零图)/pulid(单脸)；count=造几张；appearance=外貌(空则取绑定角色)；
@@ -1705,6 +1705,18 @@ async def pipeline_lora_trainings(req: LoraActionRequest):
         lora_bootstrap.start_bootstrap(store, req.training_id, ddir, mode=(req.mode or "text"),
                                        appearance=appearance, count=(req.count or 0),
                                        auto_train=bool(req.auto_train))
+    elif act == "log" and req.training_id:
+        # 训练实时日志：tail ai-toolkit 的 _train.log + 当前状态/消息（前端轮询跟进度用）
+        ddir = _lora_dir(req.training_id)
+        tail = ""
+        try:
+            with open(os.path.join(ddir, "_train.log"), encoding="utf-8", errors="replace") as f:
+                tail = f.read()[-4000:]
+        except Exception:  # noqa: BLE001
+            pass
+        t = store.get_lora_training(req.training_id) or {}
+        return {"project_id": req.project_id, "training_id": req.training_id,
+                "status": t.get("status"), "message": t.get("message"), "log": tail}
     return {"project_id": req.project_id, "trainings": store.list_lora_trainings(req.project_id)}
 
 

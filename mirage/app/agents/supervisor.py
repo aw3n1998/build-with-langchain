@@ -284,7 +284,9 @@ from langchain_community.embeddings.fastembed import FastEmbedEmbeddings
 import httpx
 
 _llm = ChatOpenAI(
-    api_key=settings.OPENAI_API_KEY,
+    # 占位 key 兜底：没配 LLM 也能启动后端（纯出片/出图不调 LLM）。openai 在【构造时】就校验 key，
+    # 空 key 会让本模块导入即崩 → 整个后端起不来。真要用分镜/聊天，在 .env 配 OPENAI_API_KEY 即可。
+    api_key=settings.OPENAI_API_KEY or "sk-no-llm-key-set",
     base_url=settings.OPENAI_API_BASE,
     model=settings.MODEL_NAME,
     http_async_client=httpx.AsyncClient(

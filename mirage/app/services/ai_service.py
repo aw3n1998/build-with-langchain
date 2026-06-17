@@ -46,7 +46,8 @@ class AIService:
         """
         proxy_url = os.getenv("HTTPS_PROXY") or os.getenv("HTTP_PROXY") or None
         max_tokens = (cfg and getattr(cfg, "max_tokens", None)) or settings.MAX_TOKENS
-        api_key  = (cfg and cfg.api_key)  or settings.OPENAI_API_KEY
+        # 占位 key 兜底：没配 LLM 也能构造(后端启动不崩)；真调用时才因假 key 报 401，对纯出片/出图无影响。
+        api_key  = (cfg and cfg.api_key)  or settings.OPENAI_API_KEY or "sk-no-llm-key-set"
         base_url = (cfg and cfg.api_base) or settings.OPENAI_API_BASE
         model    = (cfg and cfg.model)    or settings.MODEL_NAME
         extra: dict = {}

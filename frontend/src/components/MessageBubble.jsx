@@ -999,9 +999,31 @@ export function ProductionPanel({ message, workspace, sessionId }) {
     try { const r = await loraAction(pid, action, tid, workspace, extra); await load()
       const t = (r.trainings || []).find(x => x.id === tid)
       if (action === 'train' && t && t.message) setProgress(t.message)
+      if (action === 'train') setLoraLogOpen(p => ({ ...p, [tid]: true }))   // 开训即展开日志
     } catch (e) { setProgress('LoRA 操作失败：' + String(e.message || e)) }
     finally { setLoraBusy(false) }
   }
+  // 训练实时日志 + 轮询进度（训练在后台线程跑，状态/日志要主动拉才更新，否则界面冻在 TRAINING）
+  const [loraLog, setLoraLog] = useState({})         // {tid: 日志尾部}
+  const [loraLogOpen, setLoraLogOpen] = useState({}) // {tid: 是否展开}
+  const fetchLoraLog = async (tid) => {
+    try { const r = await loraAction(pid, 'log', tid, workspace); setLoraLog(p => ({ ...p, [tid]: r.log || '(暂无日志——训练刚起/在造图;ai-toolkit 拉起底模约 1-2 分钟才出第一行)' })) }
+    catch { /* ignore */ }
+  }
+  const toggleLoraLog = async (tid) => {
+    const open = !loraLogOpen[tid]; setLoraLogOpen(p => ({ ...p, [tid]: open }))
+    if (open) await fetchLoraLog(tid)
+  }
+  // 有任务非终态(TRAINING/QUEUED/造图中)就每 4s 轮询：刷新状态 + 已展开的日志
+  useEffect(() => {
+    if (tab !== 'cast') return
+    const active = (proj?.lora_trainings || []).some(t => t.status && !['DONE', 'FAILED', 'DRAFT'].includes(t.status))
+    if (!active) return
+    const id = setInterval(() => {
+      load(); Object.keys(loraLogOpen).forEach(tid => loraLogOpen[tid] && fetchLoraLog(tid))
+    }, 4000)
+    return () => clearInterval(id)
+  }, [tab, proj?.lora_trainings, loraLogOpen])  // eslint-disable-line
   const loraUpload = async (tid, files) => {
     setLoraBusy(true)
     try { for (const f of files) await loraUploadImage(tid, f, workspace); await load() }
@@ -1497,7 +1519,15 @@ export function ProductionPanel({ message, workspace, sessionId }) {
                     onChange={e => { loraUpload(t.id, Array.from(e.target.files || [])); e.target.value = '' }} />
                 </label>
                 <button onClick={() => loraOp('train', t.id)} disabled={loraBusy} style={panelBtn(loraBusy)}>开始训练</button>
+                <button onClick={() => toggleLoraLog(t.id)} style={miniBtn2}>{loraLogOpen[t.id] ? '收起日志' : '日志/进度'}</button>
               </div>
+              {loraLogOpen[t.id] && (
+                <pre style={{ marginTop: 6, maxHeight: 220, overflow: 'auto', background: '#0d0d0d',
+                  border: '1px solid var(--border)', borderRadius: 6, padding: 8, fontSize: 10.5,
+                  lineHeight: 1.5, color: 'var(--text-secondary)', whiteSpace: 'pre-wrap', wordBreak: 'break-all', margin: '6px 0 0' }}>
+                  {loraLog[t.id] || '加载中…'}
+                </pre>
+              )}
               <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 6, flexWrap: 'wrap' }}>
                 <span style={{ fontSize: 10.5, color: '#5fe8de', whiteSpace: 'nowrap' }}>免上传自训：</span>
                 <select value={bootOf(t.id).mode} onChange={e => setBootOf(t.id, { mode: e.target.value })}
