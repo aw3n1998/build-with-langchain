@@ -1511,7 +1511,7 @@ export function ProductionPanel({ message, workspace, sessionId }) {
                 <select value={loraCharOf[t.id] || ''} onChange={e => setLoraCharOf(p => ({ ...p, [t.id]: e.target.value }))}
                   title="选角色后传的图会自动按该角色外貌打提示词；多角色就逐个角色选着传，全进这一个 LoRA"
                   style={{ ...inputStyle, height: 26, width: 'auto' }}>
-                  <option value="">不打标</option>
+                  <option value="">⚠ 不打标(训出会不像)</option>
                   {(proj?.characters || []).map(c => <option key={c.id} value={c.id}>{c.name || '(未命名)'}</option>)}
                 </select>
                 <button onClick={() => loraOp('train', t.id)} disabled={loraBusy} style={panelBtn(loraBusy)}>开始训练</button>
@@ -1520,6 +1520,9 @@ export function ProductionPanel({ message, workspace, sessionId }) {
                   title="用当前 server 已挂载的 LoRA 出一条 480p/4步/33帧 短测试片(约 1 分钟)，验证 LoRA 学的人对不对">
                   {loraPrevBusy[t.id] ? '出片中…' : '测试出片'}
                 </button>
+                <button onClick={async () => { if (await dialog.confirm('清空这个 LoRA 的所有参考图？', { message: '删掉已传的图和旧训练产物（保留触发词设置），用于「干净重训」——避免上一轮旧图/旧标注残留进新训练集导致训出来不像。清空后重新上传即可。', danger: true, confirmText: '清空' })) loraOp('clear_images', t.id) }} disabled={loraBusy}
+                  title="重训前清掉旧参考图，避免旧图/旧 caption 残留污染新训练集（训出来不像的头号坑）。清空后重新选角色上传。"
+                  style={{ ...miniBtn2, color: '#fca5a5', borderColor: 'rgba(239,68,68,0.4)' }}>清空重传</button>
               </div>
               <div style={{ fontSize: 10.5, color: 'var(--text-dim)', marginTop: 4 }}>
                 测试出片：预览当前 server 已挂载的 LoRA；先用笔记本 §5d 把这张卡训出的 LoRA 挂上再测。

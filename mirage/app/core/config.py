@@ -86,7 +86,7 @@ class Settings(BaseSettings):
     AI_TOOLKIT_DIR: str = "/content/ai-toolkit"            # ai-toolkit 仓库目录(notebook L1 软链于此)
     COMFYUI_LORA_DIR: str = "/content/ComfyUI/models/loras"  # 训出 LoRA 拷到此(出片按文件名加载)
     LORA_TRAIN_RESOLUTION: int = 512     # 训练分辨率(短边；长边自动取 1.5x)
-    LORA_TRAIN_NETWORK_DIM: int = 32     # LoRA rank(linear)；alpha 取一半
+    LORA_TRAIN_NETWORK_DIM: int = 64     # LoRA rank(linear)；alpha 取一半。64 比 32 学人脸高频细节更足(从「神似」到「形似」)，14B 上显存代价小；显存吃紧可降回 32
     LORA_TRAIN_BATCH: int = 1            # batch_size(Wan 双专家训练吃显存，默认 1)
     # 数据集自举(免上传自训)：每个角色自动生成多少张训练图、变体提示词(语言无关、可加可减、不写死)。
     LORA_BOOTSTRAP_COUNT: int = 16       # 自举默认生成张数(>=训练门槛 5)

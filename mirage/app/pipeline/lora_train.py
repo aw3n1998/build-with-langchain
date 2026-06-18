@@ -114,7 +114,8 @@ def build_aitk_config(name: str, dataset_dir: str, trigger: str, base: str,
     """生成 ai-toolkit **Wan2.2-T2V** 配置(照搬 notebook LW2；数值走 settings 可配，不写死)。
 
     arch=wan22_14b → MoE 双专家，一次出 high+low 两个 LoRA（给 t2v 文生视频锁人物）。
-    图片即可训身份（图片教外观、动作由底模出）；caption 只写外观、别写动作。
+    图片即可训身份（图片教外观、动作由底模出）；★caption 只写【触发词】、不写外观（外观写进 caption
+    会和「触发词→身份」绑定打架，训出来不像；外观留给出片时的画面提示词）。
     """
     dim = int(settings.LORA_TRAIN_NETWORK_DIM)
     res = int(settings.LORA_TRAIN_RESOLUTION)
@@ -210,10 +211,15 @@ def _do_train_local(store, tid: str, dataset_dir: str, trigger: str, name: str,
     """后台线程：跑 ai-toolkit → 拷贝产物到 loras → 更新 DB 状态。"""
     slug = _slug(trigger or name)
     job_name = f"{slug}_lora"
-    training_folder = os.path.join(dataset_dir, "_train_out")
+    # ★产物目录必须放在 dataset_dir **之外**：放里面的话 ai-toolkit 的图片 globber 会把这里的训练样图/
+    #   检查点也当成训练图喂进去（污染数据集 → 训出来不像）。dataset 同级建 {tid}_out。
+    training_folder = dataset_dir.rstrip("/\\") + "_out"
     log_path = os.path.join(dataset_dir, "_train.log")
     run_py = os.path.join(settings.AI_TOOLKIT_DIR, "run.py")
     try:
+        # 每次训练前清干净产物目录 + 清掉历史遗留在 dataset 内的 _train_out（老版本放这、会被当训练图）
+        shutil.rmtree(training_folder, ignore_errors=True)
+        shutil.rmtree(os.path.join(dataset_dir, "_train_out"), ignore_errors=True)
         os.makedirs(training_folder, exist_ok=True)
         if not os.path.isfile(run_py):
             store.update_lora_training(

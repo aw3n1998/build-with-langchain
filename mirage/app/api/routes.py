@@ -1678,7 +1678,7 @@ class LoraActionRequest(BaseModel):
     workspace: str | None = None
     project_id: str
     training_id: str | None = None
-    action: str = "list"          # list / train / delete / update / bootstrap / log
+    action: str = "list"          # list / train / delete / update / bootstrap / log / clear_images
     name: str | None = None       # update 用：改名
     trigger_word: str | None = None  # update 用：改触发词
     # bootstrap 用：免上传自训。mode=text(零图)/pulid(单脸)；count=造几张；appearance=外貌(空则取绑定角色)；
@@ -1701,6 +1701,16 @@ async def pipeline_lora_trainings(req: LoraActionRequest):
         import shutil
         from mirage.app.pipeline.runtime import agent_dir
         shutil.rmtree(os.path.join(agent_dir(), "lora_train", req.training_id), ignore_errors=True)
+    elif act == "clear_images" and req.training_id:
+        # 清空这个 LoRA 的所有参考图 + caption + 旧训练产物（保留记录与触发词），给「干净重训」用。
+        # 治头号坑:重训不清目录 → 上一轮旧图/旧 caption 残留进新训练集 → 训出来不像本次上传的人。
+        import shutil
+        d = _lora_dir(req.training_id)
+        shutil.rmtree(d, ignore_errors=True)
+        shutil.rmtree(d.rstrip("/\\") + "_out", ignore_errors=True)   # 训练产物目录(已挪到 dataset 外)
+        os.makedirs(d, exist_ok=True)
+        store.update_lora_training(req.training_id, image_count=0, status="DRAFT",
+                                   message="已清空参考图，请重新上传后再训练（干净重训，避免旧图污染）。")
     elif act == "update" and req.training_id:
         store.update_lora_training(req.training_id, name=req.name, trigger_word=req.trigger_word)
     elif act == "train" and req.training_id:
