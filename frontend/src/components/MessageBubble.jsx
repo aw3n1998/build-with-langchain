@@ -1617,12 +1617,8 @@ export function ProductionPanel({ message, workspace, sessionId }) {
           }}>
           {busy === 'finish' ? '出片合成中…' : `🎬 批量出片并合成（t2v · ${c.total} 镜）`}
         </button>
-        {models.length > 0 && (
-          <select value={model} disabled={!!busy} onChange={e => setModel(e.target.value)}
-            title="文生视频后端（纯 t2v 走 lightx2v；具体由 T2V_PROVIDER 路由）" style={{ ...inputStyle, width: 'auto', height: 32 }}>
-            {models.map(m => <option key={m.name} value={m.name}>{m.display_name}</option>)}
-          </select>
-        )}
+        {/* 纯 t2v：出片后端由 T2V_PROVIDER(lightx2v) 路由、不看这个选择 → 移除误导的 i2v 模型下拉(Wan2.2-I2V/LTX)。
+            出片参数(帧数/帧率/步数/seed)在下方「更多参数」调,字段名与 lightx2v 一致、对 t2v 生效。 */}
         <select value={vidSize} disabled={!!busy} onChange={e => setVidSize(e.target.value)}
           title="出片分辨率 —— 480p 快(草稿/走量)，720p 精修(成片)。一键切，不用改 .env。" style={{ ...inputStyle, width: 'auto', height: 32 }}>
           <option value="">默认(跟随 .env)</option>
@@ -1675,7 +1671,7 @@ export function ProductionPanel({ message, workspace, sessionId }) {
           <div style={{ marginTop: 8, padding: '10px 12px', borderRadius: 8,
                         border: '1px solid var(--border)', background: 'rgba(255,255,255,0.02)' }}>
             <div style={{ fontSize: 10.5, fontWeight: 700, color: 'rgba(94,234,212,0.8)', marginBottom: 6 }}>
-              出片（{models.find(m => m.name === model)?.display_name || model}）· 按模型动态
+              出片参数 · 帧数 / 帧率 / 采样步数 / seed（纯 t2v 走 lightx2v；帧数须 4n+1，如 81≈5s、121≈7.5s、161≈10s）
             </div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
               {curFields.map(f => (
