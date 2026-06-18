@@ -1656,12 +1656,12 @@ export function ProductionPanel({ message, workspace, sessionId }) {
           <option value={161}>时长 ≈ 10 秒</option>
           <option value={241}>时长 ≈ 15 秒</option>
         </select>
-        <select value={vidParams.steps || 4} disabled={!!busy}
+        <select value={vidParams.steps || 8} disabled={!!busy}
           onChange={e => setVidParams(p => ({ ...p, steps: Number(e.target.value) }))}
-          title="画质档=采样步数(越多越精细越慢)。蒸馏 LoRA 下 4 步打样、8 步成片最佳。注:lightx2v 可能按起 server 的 config 读步数——切档后若日志 step_index 分母没变,说明要重起才生效(在笔记本 §5d 改 infer_steps 重起)。"
+          title="画质档=采样步数(越多越精细越慢)。默认 8 步成片;4 步只用于快速打样。★真正生效的是笔记本 §5d 的 infer_steps(server config),前端这个下拉只是 per-request、可能被 server 忽略——质量不对就去 §5d 改 LIGHTX2V_STEPS 重起。"
           style={{ ...inputStyle, width: 'auto', height: 32 }}>
+          <option value={8}>画质·成片 8 步（默认）</option>
           <option value={4}>画质·极速 4 步(打样)</option>
-          <option value={8}>画质·成片 8 步</option>
           <option value={16}>画质·精修 16 步</option>
         </select>
         {estSec != null && (
