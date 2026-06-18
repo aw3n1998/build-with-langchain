@@ -381,9 +381,10 @@ export async function loraAction(projectId, action, trainingId = null, workspace
   })
   if (!r.ok) throw new Error(`status ${r.status}`); return r.json()
 }
-export async function loraUploadImage(trainingId, file, workspace = null) {
+export async function loraUploadImage(trainingId, file, workspace = null, characterId = '') {
   const fd = new FormData()
   fd.append('training_id', trainingId); fd.append('workspace', workspace || ''); fd.append('file', file)
+  if (characterId) fd.append('character_id', characterId)   // 给了角色 → 后端按该角色「触发词,外貌」写同名 .txt caption
   const r = await fetch(`${getBase()}/pipeline/lora_upload_image`, { method: 'POST', body: fd })
   if (!r.ok) throw new Error(`status ${r.status}`); return r.json()
 }

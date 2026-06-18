@@ -999,12 +999,14 @@ export function ProductionPanel({ message, workspace, sessionId }) {
     }, 4000)
     return () => clearInterval(id)
   }, [tab, proj?.lora_trainings, loraLogOpen])  // eslint-disable-line
-  const loraUpload = async (tid, files) => {
+  const loraUpload = async (tid, files, characterId = '') => {
     setLoraBusy(true)
-    try { for (const f of files) await loraUploadImage(tid, f, workspace); await load() }
+    try { for (const f of files) await loraUploadImage(tid, f, workspace, characterId); await load() }
     catch (e) { setProgress('传图失败：' + String(e.message || e)) }
     finally { setLoraBusy(false) }
   }
+  // 每张 LoRA 卡选中的角色 id（选了 → 传图按该角色外貌自动打 caption；多角色就逐个选着传，全进这一个 LoRA）
+  const [loraCharOf, setLoraCharOf] = useState({})   // {tid: char_id}
   // 免上传自训：每张卡的模式/张数本地态 + 上传参考脸 + 造图(+造完即训)
   const [loraBoot, setLoraBoot] = useState({})   // {tid:{mode,count}}
   const bootOf = (tid) => loraBoot[tid] || { mode: 'text', count: 16 }
@@ -1431,6 +1433,10 @@ export function ProductionPanel({ message, workspace, sessionId }) {
                 placeholder="外貌（写明确年龄+发型+特征，如：45岁中年男，短寸花白发，左眉旧疤）"
                 onBlur={e => e.target.value !== c.appearance && charOp('update', { char_id: c.id, appearance: e.target.value })}
                 style={{ ...inputStyle, width: '100%', resize: 'vertical', marginBottom: 4 }} />
+              <input defaultValue={c.trigger_word || ''}
+                placeholder="触发词 trigger_word（t2v 出片靠它召唤这个角色，建议下划线如 cael_an；留空=用角色名）"
+                onBlur={e => e.target.value !== (c.trigger_word || '') && charOp('update', { char_id: c.id, trigger_word: e.target.value })}
+                style={{ ...inputStyle, height: 28, width: '100%', boxSizing: 'border-box', marginBottom: 4 }} />
               <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                 <span style={{ fontSize: 11, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>音色</span>
                 <select defaultValue={c.voice || ''} onChange={e => charOp('update', { char_id: c.id, voice: e.target.value })}
@@ -1466,14 +1472,23 @@ export function ProductionPanel({ message, workspace, sessionId }) {
                 onBlur={e => { if (e.target.value !== (t.trigger_word || '')) loraOp('update', t.id, { trigger_word: e.target.value }) }}
                 style={{ ...inputStyle, height: 26, width: '100%', boxSizing: 'border-box', marginBottom: 4 }} />
               {t.message && <div style={{ fontSize: 10.5, color: '#ffb454', marginBottom: 4 }}>{t.message}</div>}
-              <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
                 <label style={{ ...miniBtn2, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 5 }}>
                   <Icon.Plus size={13} />传参考图
                   <input type="file" accept="image/*" multiple style={{ display: 'none' }}
-                    onChange={e => { loraUpload(t.id, Array.from(e.target.files || [])); e.target.value = '' }} />
+                    onChange={e => { loraUpload(t.id, Array.from(e.target.files || []), loraCharOf[t.id] || ''); e.target.value = '' }} />
                 </label>
+                <select value={loraCharOf[t.id] || ''} onChange={e => setLoraCharOf(p => ({ ...p, [t.id]: e.target.value }))}
+                  title="选角色后传的图会自动按该角色外貌打提示词；多角色就逐个角色选着传，全进这一个 LoRA"
+                  style={{ ...inputStyle, height: 26, width: 'auto' }}>
+                  <option value="">不打标</option>
+                  {(proj?.characters || []).map(c => <option key={c.id} value={c.id}>{c.name || '(未命名)'}</option>)}
+                </select>
                 <button onClick={() => loraOp('train', t.id)} disabled={loraBusy} style={panelBtn(loraBusy)}>开始训练</button>
                 <button onClick={() => toggleLoraLog(t.id)} style={miniBtn2}>{loraLogOpen[t.id] ? '收起日志' : '日志/进度'}</button>
+              </div>
+              <div style={{ fontSize: 10.5, color: 'var(--text-dim)', marginTop: 4 }}>
+                选角色后传的图会自动按该角色外貌打提示词；多角色就逐个角色选着传，全进这一个 LoRA。
               </div>
               {loraLogOpen[t.id] && (
                 <pre style={{ marginTop: 6, maxHeight: 220, overflow: 'auto', background: '#0d0d0d',

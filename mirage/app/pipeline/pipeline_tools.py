@@ -667,7 +667,20 @@ def _compose_t2v_prompt(scene, motion_prompt, pstyle) -> str:
             raw = translate_to_english(raw) or raw
         except Exception:  # noqa: BLE001
             pass
-    trigger = (pstyle.get("trigger_word") or "").strip() or model_config().get("trigger_word")
+    # 多角色一致性：该镜出场角色(scene.character)匹配项目角色 → 注入其触发词(trigger_word 或 名字 slug)；
+    # 没匹配到/为空时回退项目级 pstyle.trigger_word(单角色/通用)。
+    char_trigger = ""
+    scene_char = (scene.get("character") or "").strip()
+    if scene_char and scene.get("project_id"):
+        try:
+            from mirage.app.pipeline.lora_train import _slug
+            for c in (get_store().list_characters(scene["project_id"]) or []):
+                if (c.get("name") or "").strip() == scene_char:
+                    char_trigger = (c.get("trigger_word") or "").strip() or _slug(c.get("name") or "")
+                    break
+        except Exception:  # noqa: BLE001 取角色失败就退回项目级触发词
+            char_trigger = ""
+    trigger = char_trigger or (pstyle.get("trigger_word") or "").strip() or model_config().get("trigger_word")
     raw = _apply_trigger(raw, trigger)
     motion = (motion_prompt or scene.get("motion_prompt") or "").strip()
     base = ", ".join(p for p in (raw, motion) if p) or "cinematic film still"

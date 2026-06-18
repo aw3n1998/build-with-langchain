@@ -92,6 +92,7 @@ CREATE TABLE IF NOT EXISTS characters (
     name        TEXT NOT NULL DEFAULT '',
     appearance  TEXT NOT NULL DEFAULT '',
     voice       TEXT NOT NULL DEFAULT '',
+    trigger_word    TEXT NOT NULL DEFAULT '',   -- 多角色 LoRA 触发词(空=回退角色名 slug)
     ref_image_path  TEXT NOT NULL DEFAULT '',   -- 参考脸图(PuLID 单脸自举/展示)
     trained_lora_id TEXT NOT NULL DEFAULT '',   -- 已训 LoRA → lora_trainings.id(反向链)
     created_at  TEXT NOT NULL
@@ -199,9 +200,9 @@ class PipelineStore:
             if col not in pcols:
                 conn.execute(f"ALTER TABLE projects ADD COLUMN {col} TEXT NOT NULL DEFAULT ''")
                 logger.info("[PipelineStore] 迁移：projects 补列 %s", col)
-        # 角色参考脸 + 已训 LoRA 反向链：旧库给 characters 补列
+        # 角色参考脸 + 已训 LoRA 反向链 + 多角色 LoRA 触发词：旧库给 characters 补列
         ccols = {r[1] for r in conn.execute("PRAGMA table_info(characters)").fetchall()}
-        for col in ("ref_image_path", "trained_lora_id"):
+        for col in ("ref_image_path", "trained_lora_id", "trigger_word"):
             if col not in ccols:
                 conn.execute(f"ALTER TABLE characters ADD COLUMN {col} TEXT NOT NULL DEFAULT ''")
                 logger.info("[PipelineStore] 迁移：characters 补列 %s", col)
@@ -299,10 +300,12 @@ class PipelineStore:
 
     def update_character(self, char_id: str, *, name: str | None = None,
                          appearance: str | None = None, voice: str | None = None,
-                         ref_image_path: str | None = None, trained_lora_id: str | None = None) -> dict:
+                         ref_image_path: str | None = None, trained_lora_id: str | None = None,
+                         trigger_word: str | None = None) -> dict:
         sets, params = [], []
         for col, val in (("name", name), ("appearance", appearance), ("voice", voice),
-                         ("ref_image_path", ref_image_path), ("trained_lora_id", trained_lora_id)):
+                         ("ref_image_path", ref_image_path), ("trained_lora_id", trained_lora_id),
+                         ("trigger_word", trigger_word)):
             if val is not None:
                 sets.append(f"{col}=?"); params.append(val)
         if sets:

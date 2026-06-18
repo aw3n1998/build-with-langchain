@@ -1555,6 +1555,7 @@ class CharacterRequest(BaseModel):
     voice: str | None = None      # edge-tts 音色名，如 zh-CN-YunxiNeural
     ref_image_path: str | None = None   # 参考脸图路径(PuLID 单脸自举/展示)
     trained_lora_id: str | None = None  # 关联已训 LoRA(lora_trainings.id)
+    trigger_word: str | None = None     # 多角色 LoRA 触发词(t2v 出片/打 caption 用;空回退角色名 slug)
 
 
 @router.post("/pipeline/characters")
@@ -1568,7 +1569,8 @@ async def pipeline_characters(req: CharacterRequest):
         store.add_character(req.project_id, req.name or "", req.appearance or "", req.voice or "")
     elif act == "update" and req.char_id:
         store.update_character(req.char_id, name=req.name, appearance=req.appearance, voice=req.voice,
-                               ref_image_path=req.ref_image_path, trained_lora_id=req.trained_lora_id)
+                               ref_image_path=req.ref_image_path, trained_lora_id=req.trained_lora_id,
+                               trigger_word=req.trigger_word)
     elif act == "delete" and req.char_id:
         store.delete_character(req.char_id)
     return {"project_id": req.project_id, "characters": store.list_characters(req.project_id)}
@@ -1604,24 +1606,49 @@ async def pipeline_lora_create(req: LoraCreateRequest):
 
 @router.post("/pipeline/lora_upload_image")
 async def pipeline_lora_upload_image(training_id: str = Form(...), workspace: str = Form(default=""),
+                                     character_id: str = Form(default=""),
                                      file: UploadFile = File(...)):
-    """往某 LoRA 训练任务里传一张参考图（同一人物多角度，建议 10-20 张）。"""
+    """往某 LoRA 训练任务里传一张参考图（同一人物多角度，建议 10-20 张）。
+
+    多角色混合数据集：传 character_id 时，给这张图写同名 .txt caption（ai-toolkit
+    caption_ext=txt 读），内容 = "{触发词}, {外貌}"（触发词=该角色 trigger_word 或 名字 slug）。
+    不给 character_id 但该 LoRA 记录绑了 trigger_word → 写 "{记录触发词}"（单角色也绑触发词）。
+    都没有 → 不写 .txt（向后兼容旧行为）。
+    """
     import pathlib
     from uuid import uuid4
     suffix = pathlib.Path(file.filename or "").suffix.lower()
     if suffix not in {".png", ".jpg", ".jpeg", ".webp"}:
         raise HTTPException(status_code=400, detail=f"不支持的图片类型 {suffix}（png/jpg/webp）")
     store = _ws_store(workspace or None)
-    if not store.get_lora_training(training_id):
+    rec = store.get_lora_training(training_id)
+    if not rec:
         raise HTTPException(status_code=404, detail="训练任务不存在")
     d = _lora_dir(training_id)
-    name = f"{uuid4().hex[:8]}{suffix}"
+    stem = uuid4().hex[:8]
+    name = f"{stem}{suffix}"
     with open(os.path.join(d, name), "wb") as f:
         f.write(await file.read())
+    # 写同名 .txt caption（ai-toolkit caption_ext=txt 读）：按契约决定内容
+    from mirage.app.pipeline.lora_train import _slug
+    caption = ""
+    if character_id:
+        # 给了角色：触发词(trigger_word 或 名字 slug) + 外貌
+        char = store.get_character(character_id)
+        if char and (char.get("project_id") == rec.get("project_id")):
+            trigger = (char.get("trigger_word") or "").strip() or _slug(char.get("name") or "")
+            appearance = (char.get("appearance") or "").strip()
+            caption = f"{trigger}, {appearance}".strip().rstrip(",").strip()
+    elif (rec.get("trigger_word") or "").strip():
+        # 没给角色但记录绑了触发词：单角色也绑触发词
+        caption = (rec.get("trigger_word") or "").strip()
+    if caption:
+        with open(os.path.join(d, f"{stem}.txt"), "w", encoding="utf-8") as cf:
+            cf.write(caption)
     cnt = len([x for x in os.listdir(d) if x.lower().endswith((".png", ".jpg", ".jpeg", ".webp"))])
     store.update_lora_training(training_id, image_count=cnt)
     from urllib.parse import quote as _quote
-    return {"training_id": training_id, "image_count": cnt,
+    return {"training_id": training_id, "image_count": cnt, "caption": caption,
             "url": f"/api/file?path={_quote(os.path.join(d, name))}"}
 
 
