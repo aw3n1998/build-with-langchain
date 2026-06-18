@@ -201,7 +201,10 @@ def _do_train_local(store, tid: str, dataset_dir: str, trigger: str, name: str,
         os.makedirs(settings.COMFYUI_LORA_DIR, exist_ok=True)
         reg: dict[str, str] = {}
         for tag in ("high", "low"):
-            src = next((o for o in outs if tag in os.path.basename(o).lower()), None)
+            tagged = [o for o in outs if tag in os.path.basename(o).lower()]
+            # 优先「最终」产物(文件名无步数,如 char_lora_high_noise.safetensors);否则取步数最大的检查点
+            src = next((o for o in tagged if not any(c.isdigit() for c in os.path.basename(o))), None) \
+                or (tagged[-1] if tagged else None)
             if src:
                 dst = os.path.join(settings.COMFYUI_LORA_DIR, f"{slug}_wan_t2v_{tag}.safetensors")
                 shutil.copy(src, dst)
@@ -219,7 +222,7 @@ def _do_train_local(store, tid: str, dataset_dir: str, trigger: str, name: str,
             _link_after_train(store, tid, trigger, reg["high"], reg["low"])
         except Exception:  # noqa: BLE001
             logger.warning("训练完成后回写角色/项目失败 tid=%s", tid)
-        logger.info("LoRA 训练完成 tid=%s → %s", tid, final)
+        logger.info("LoRA 训练完成 tid=%s → %s / %s", tid, reg["high"], reg["low"])
     except Exception as e:  # noqa: BLE001
         logger.exception("LoRA 训练异常 tid=%s", tid)
         try:
