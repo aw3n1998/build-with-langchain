@@ -143,13 +143,24 @@ async def breakdown_storyboard(novel_text: str, n: int, *, style: str = "",
     char_block = ""
     if characters:
         lines = []
+        any_lora = False
         for c in characters:
             nm = str(c.get("name") or "").strip()
             ap = str(c.get("appearance") or "").strip()
+            # 已训角色 LoRA(有 trained_lora_id 或绑了触发词)→身份由 LoRA 锁定,外貌该从简,别和 LoRA 学到的脸打架。
+            has_lora = bool((c.get("trained_lora_id") or "").strip()) or bool((c.get("trigger_word") or "").strip())
             if nm:
-                lines.append(f"- {nm}：{ap or '(外貌自拟，但每镜保持一致)'}")
+                if has_lora:
+                    any_lora = True
+                    lines.append(f"- {nm}［已训LoRA·身份靠触发词，外貌从简］：{ap or '(外貌可自拟)'}")
+                else:
+                    lines.append(f"- {nm}：{ap or '(外貌自拟，但每镜保持一致)'}")
         if lines:
             char_block = "本剧角色（image_prompt 写到该角色时，把其外貌**翻成英文**写进去；character 字段填其原名）：\n" + "\n".join(lines) + "\n"
+            if any_lora:
+                char_block += ("注：标了［已训LoRA］的角色，身份由 LoRA 自动锁定——其 image_prompt 只写**精简中性外貌**"
+                               "（性别 + 大致年龄 + 本镜服装/动作/景别即可），**不要堆 hair/face/distinctive features 长串**，"
+                               "以免外貌词与 LoRA 学到的脸打架（这类角色靠触发词+LoRA 保证是同一个人，不靠文字描述）。\n")
 
     human = (
         f"{char_block}"

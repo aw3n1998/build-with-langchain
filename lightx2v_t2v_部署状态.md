@@ -36,6 +36,8 @@
 4. **权重加载提速**：直接 `snapshot_download` 到本地 `/content/wan_local`（HF CDN ~170MB/s，比 Drive FUSE 冷读 ~50MB/s 快 3 倍多；本地 SSD 加载秒级）。取舍=每会话重下 ~67G(~10 分钟)。
 5. **5090(32G) 兼容**：§1 按显存自动切——小卡 `cpu_offload=true` + `offload_granularity=model` + `offload_ratio=1.0`（lightx2v 官方称 24G 即够）；大卡(>70G)双专家全 GPU bf16。
 6. **已跑通（RTX PRO 6000 96G 实测，2026-06-18）**：server 起来、双专家权重加载成功（diffusers 格式直读）、**出片裸片成功**（关键修复=`rope_type=torch`，见下 ✅ 段）。`cpu_offload=False` 双专家全 GPU bf16；SageAttention sm120 编不过→`torch_sdpa`，不影响。
+7. **§3 rope_type 写入顺序 bug 修复（2026-06-18）**：原 `c['rope_type']='torch'`/`c['rms_norm_type']='torch'` 写在 `json.dump` **之后**→根本没进 config 文件（老会话能跑是因为手动热修了 active config）。已挪到 dump **之前**，新机 Run-all 不会再撞 NoneType。
+8. **出片时长 9s→实际 5s（2026-06-18）**：根因=Wan 帧数须 `4n+1`，144 非法→server 静默回退默认 81≈5s；且无「秒→帧」入口。已修：① provider `_align_4np1` 把 num_frames 对齐到最近 4n+1 + 日志打印请求帧数；② 前端主行加「时长档(≈5/8/10/15s)」直观选；③ §3/§5d 把帧长写进 config（`LIGHTX2V_NUM_FRAMES`，只覆盖已有键），覆盖「server 只认 config」那种情况；④ provider 多带 `target_video_length/video_length` 别名兼容不同版本。**诚实未决**：per-request num_frames 是否真被 server 认，源码不在本仓→须真机核对（出两条不同时长片，比 api.log `num_frames=` 与实际秒数；不变=server 按 config 锁，用 §3/§5d 的 `LIGHTX2V_NUM_FRAMES` 重起）。同理 `infer_steps`（画质档）也可能 config-only，§5d 已暴露 `LIGHTX2V_STEPS`。
 
 ## 四、还未实现 ❌（待办，按优先级）
 

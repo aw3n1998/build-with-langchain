@@ -1000,6 +1000,19 @@ export function ProductionPanel({ message, workspace, sessionId }) {
     return () => clearInterval(id)
   }, [tab, proj?.lora_trainings, loraLogOpen])  // eslint-disable-line
   const loraUpload = async (tid, files, characterId = '') => {
+    // 没选角色就上传 = 不会写触发词 caption → 训出绑不上人物的废 LoRA(出片像别人)。
+    // 但「LoRA 记录自带触发词」是合法的不打标路径(后端 routes 仍会按记录触发词写) → 此时不拦。
+    if (!characterId) {
+      const rec = (proj?.lora_trainings || []).find(x => x.id === tid)
+      const hasTrigger = !!(rec?.trigger_word || '').trim()
+      if (!hasTrigger) {
+        const ok = await dialog.confirm('没选角色，这批图不会打触发词标', {
+          message: '不打标训出的 LoRA 绑不上人物，出片会像别人。建议先在上方下拉选好角色（自动按角色触发词打标），或给这个 LoRA 填个触发词。\n\n仍要直接上传吗？',
+          confirmText: '仍然上传', danger: true,
+        })
+        if (!ok) return
+      }
+    }
     setLoraBusy(true)
     try { for (const f of files) await loraUploadImage(tid, f, workspace, characterId); await load() }
     catch (e) { setProgress('传图失败：' + String(e.message || e)) }
@@ -1630,14 +1643,22 @@ export function ProductionPanel({ message, workspace, sessionId }) {
           <option value="832*480">832×480 横屏·快</option>
           <option value="1280*704">1280×704 横屏</option>
         </select>
+        {/* 时长：用户按秒选，内部换成 Wan 要求的 4n+1 帧数(@16fps)。比直接填帧数直观,且避免填了非 4n+1 被 server 回退成 81≈5s。 */}
+        <select value={vidParams.frames || 81} disabled={!!busy}
+          onChange={e => setVidParams(p => ({ ...p, frames: Number(e.target.value) }))}
+          title="出片时长。Wan 帧数须为 4n+1，这里已按 16fps 换算好；想要更长就选更大的。注:若改了时长出片仍是 5 秒，说明你的 lightx2v server 按启动 config 锁了帧长——按笔记本 §5d 把帧长写进 config 重起即可。"
+          style={{ ...inputStyle, width: 'auto', height: 32 }}>
+          <option value={81}>时长 ≈ 5 秒</option>
+          <option value={129}>时长 ≈ 8 秒</option>
+          <option value={161}>时长 ≈ 10 秒</option>
+          <option value={241}>时长 ≈ 15 秒</option>
+        </select>
         <select value={vidParams.steps || 4} disabled={!!busy}
           onChange={e => setVidParams(p => ({ ...p, steps: Number(e.target.value) }))}
-          title="画质档=采样步数(越多越精细越慢)。蒸馏 LoRA 下 4-8 步最佳。注:lightx2v 可能按起 server 的 config 读步数——切档后若日志 step_index 分母没变,说明要重起才生效(告诉我改成重起式)。"
+          title="画质档=采样步数(越多越精细越慢)。蒸馏 LoRA 下 4 步打样、8 步成片最佳。注:lightx2v 可能按起 server 的 config 读步数——切档后若日志 step_index 分母没变,说明要重起才生效(在笔记本 §5d 改 infer_steps 重起)。"
           style={{ ...inputStyle, width: 'auto', height: 32 }}>
           <option value={4}>画质·极速 4 步(打样)</option>
-          <option value={6}>画质·较快 6 步</option>
-          <option value={8}>画质·折中 8 步</option>
-          <option value={12}>画质·较精 12 步</option>
+          <option value={8}>画质·成片 8 步</option>
           <option value={16}>画质·精修 16 步</option>
         </select>
         {estSec != null && (

@@ -31,6 +31,13 @@ _TERMINAL_OK = {"succeed", "success", "succeeded", "completed", "done", "finishe
 _TERMINAL_BAD = {"failed", "error", "cancelled", "canceled"}
 
 
+def _align_4np1(n: int) -> int:
+    """把帧数对齐到 Wan 要求的 4n+1（否则 server 多半静默回退默认 81≈5s——这是「调了帧数还是出 5 秒」的真凶之一）。
+    取最接近的 4n+1（≥5）：如 144→145、120→121、200→201。"""
+    n = max(5, int(n))
+    return ((n - 1 + 2) // 4) * 4 + 1  # round 到最近的 4k+1
+
+
 def _base() -> str:
     b = (settings.LIGHTX2V_BASE_URL or "").rstrip("/")
     if not b:
@@ -137,16 +144,27 @@ class Lightx2vT2VProvider(VideoProvider):
         seed = int(params.get("seed", -1))
         if seed < 0:
             seed = int(time.time_ns() % 2_000_000_000)
+        req_frames = int(params.get("frames") or settings.COMFYUI_FRAMES)
+        num_frames = _align_4np1(req_frames)   # ★Wan 要 4n+1;不对齐 server 静默回退 81≈5s(就是「调了帧数还出5秒」)
+        fps = int(params.get("fps") or settings.COMFYUI_FPS)
         payload = {
             "prompt": prompt or "",
             "negative_prompt": str(params.get("negative") or settings.WAN_VIDEO_NEGATIVE),
             "image_path": "",                                    # t2v 无首帧
             "target_shape": [int(height), int(width)],           # ★[H,W] 待核对(lightx2v 文档示例如此)
-            "num_frames": int(params.get("frames") or settings.COMFYUI_FRAMES),
-            "fps": int(params.get("fps") or settings.COMFYUI_FPS),
+            "num_frames": num_frames,
+            # 不同 lightx2v 版本帧长键名不一,多带两个别名(server 取它认的、忽略多余的,无害)做前向兼容
+            "target_video_length": num_frames,
+            "video_length": num_frames,
+            "fps": fps,
             "infer_steps": int(params.get("steps") or settings.WAN_LIGHTNING_STEPS),
             "seed": seed,
         }
+        if num_frames != req_frames:
+            log_bus.emit(f"[lightx2v] 帧数 {req_frames} 非 4n+1，已对齐到 {num_frames}（≈{num_frames / max(1, fps):.1f}s@{fps}fps）")
+        logger.info("[lightx2v] t2v 请求 num_frames=%d(≈%.1fs@%dfps) steps=%d size=%dx%d —— 若实际出片帧数≠此值,"
+                    "说明该 server 版本忽略 per-request 帧数(需在 §5d config 写帧长重起)",
+                    num_frames, num_frames / max(1, fps), fps, payload["infer_steps"], width, height)
         if settings.LIGHTX2V_MODEL_T2V:
             payload["model_path"] = settings.LIGHTX2V_MODEL_T2V
         # ★LoRA 的权威挂载点是「起 server 的 config」(见 server_lora_configs() + 笔记本 §5);

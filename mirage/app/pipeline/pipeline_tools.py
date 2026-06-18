@@ -1212,11 +1212,11 @@ def open_production_panel(project_id: str) -> str:
 
 
 @tool
-def assemble_episode(project_id: str, voice: str = "", with_subtitles: bool = True) -> str:
+def assemble_episode(project_id: str, voice: str = "", with_subtitles: bool = True, bgm: str = "") -> str:
     """【成片合成】把项目下所有已出片的分镜按顺序拼成一条完整短剧 mp4（本地完成，不占 GPU）。
 
     自动：分镜旁白(narration)经 TTS 配音、音画对齐（旁白长则末帧冻结）、统一分辨率、
-    旁白字幕（烧录优先）。产物 episode_<project>.mp4 落工作目录 video_out 并内嵌播放。
+    旁白字幕（烧录优先）、可选背景音乐（低音量垫底、不盖人声）。产物 episode_<project>.mp4 落工作目录 video_out 并内嵌播放。
 
     用户说"合成/拼起来/出完整视频/成片"时调用。需至少一个分镜已完成出片。
 
@@ -1224,6 +1224,7 @@ def assemble_episode(project_id: str, voice: str = "", with_subtitles: bool = Tr
         project_id: 项目 ID。
         voice: TTS 音色；空=默认男声 zh-CN-YunxiNeural（女声可用 zh-CN-XiaoxiaoNeural）。
         with_subtitles: 是否加旁白字幕（默认加）。
+        bgm: 背景音乐文件路径；空=回退 settings.BGM_PATH（没配则无 BGM）。音量由 BGM_VOLUME（默认 0.18，压低不盖人声）控制。
     """
     from mirage.app.pipeline.assembler import assemble_clips, DEFAULT_VOICE
 
@@ -1280,12 +1281,13 @@ def assemble_episode(project_id: str, voice: str = "", with_subtitles: bool = Tr
     out = os.path.join(local, f"episode_{project_id}.mp4")
     try:
         info = assemble_clips(clips, out, voice=(voice or DEFAULT_VOICE),
-                              with_subtitles=with_subtitles)
+                              with_subtitles=with_subtitles, bgm=(bgm or None))
     except Exception as e:  # noqa: BLE001
         return f"成片合成失败: {type(e).__name__}: {e}"
 
     msg = (f"成片完成：{info['scenes']} 段分镜 → {info['duration']:.1f} 秒"
-           f"（旁白TTS={'有' if info['tts'] else '无'}，字幕={info['subtitles']}）。\n"
+           f"（旁白TTS={'有' if info['tts'] else '无'}，字幕={info['subtitles']}，"
+           f"BGM={'有' if info.get('bgm') else '无'}）。\n"
            f"输出: {out}")
     if missing:
         msg += "\n未纳入（尚未出片）: " + "、".join(missing)
