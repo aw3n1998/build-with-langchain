@@ -133,7 +133,9 @@ def build_aitk_config(name: str, dataset_dir: str, trigger: str, base: str,
                     "folder_path": dataset_dir,
                     "caption_ext": "txt",
                     "num_frames": 1,                            # 图片训身份(单帧)
-                    "resolution": [res, int(res * 1.5)],
+                    # 多分辨率桶含 1024：脸/眼镜这类高频细节靠大桶才学得到（512 单桶时全身照里脸只剩 ~80-120px、糊掉）。
+                    # 对齐官方 ai-toolkit wan22_14b 例子的 [512,768,1024]。显存吃紧可去掉 1024。
+                    "resolution": sorted({res, int(res * 1.5), 1024}),
                     "cache_latents_to_disk": True,
                 }],
                 "train": {
@@ -147,7 +149,7 @@ def build_aitk_config(name: str, dataset_dir: str, trigger: str, base: str,
                     "lr": 1e-4,
                     "dtype": "bf16",
                     "timestep_type": "sigmoid",
-                    "switch_boundary_every": 1,
+                    "switch_boundary_every": 10,    # 对齐官方/社区(原 1 每步切专家、更抖更慢);仍约 50/50 覆盖高低噪
                 },
                 # ★arch=wan22_14b → ai-toolkit 走 MoE 双专家、一次出 high+low 两个 LoRA(别用 is_flux)
                 "model": {"name_or_path": base, "arch": "wan22_14b", "quantize": True,

@@ -1489,7 +1489,9 @@ export function ProductionPanel({ message, workspace, sessionId }) {
         <div style={subBox}>
           <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 8 }}>
             人物 LoRA 训练（Wan-T2V）—— 一次训出 high+low 两个 Wan LoRA、t2v 出片锁定这个角色（t2v 没首帧，人物一致全靠它）。
-            手动传 16-20 张同脸图开训。<b style={{ color: '#5fe8de' }}>免上传自训·造图</b> 需出图后端 ComfyUI；纯 lightx2v t2v 无 ComfyUI → 请手动上传。
+            手动传 20-30 张同脸图开训。<b style={{ color: '#ffb454' }}>务必含 8-10 张脸部特写（脸占大半画面、戴眼镜要拍清）</b>——
+            只传全身照的话脸太小、训出来只像体型不像脸（头号坑）。混搭：脸特写 8-10 张 + 半身 5-6 + 全身 4-5。
+            <b style={{ color: '#5fe8de' }}>免上传自训·造图</b> 需出图后端 ComfyUI；纯 lightx2v t2v 无 ComfyUI → 请手动上传。
           </div>
           {(proj?.lora_trainings || []).map(t => (
             <div key={t.id} style={{ border: '1px solid var(--border)', borderRadius: 6, padding: 8, marginBottom: 6 }}>

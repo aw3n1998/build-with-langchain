@@ -75,7 +75,7 @@ class Settings(BaseSettings):
     # 人物 LoRA 训练：训练执行器。LORA_TRAIN_ENDPOINT 空=Colab 单机本地跑 ai-toolkit 子进程(默认)；
     # 填了远程训练服务地址才改走 POST 远程(SSH/独立 GPU 场景)。可插拔，不改代码切换。
     LORA_TRAIN_ENDPOINT: str = ""        # 远程训练服务接入点；空=本地 ai-toolkit 子进程
-    LORA_TRAIN_STEPS: int = 2000         # 默认训练步数(Wan 双专家比 FLUX 多)
+    LORA_TRAIN_STEPS: int = 3000         # 默认训练步数(Wan 双专家;脸保真社区建议 3000+，2000 易欠拟合「神似不形似」)
     # 人物 LoRA 训练底模 = Wan2.2-T2V-A14B diffusers(ai-toolkit 读；arch=wan22_14b 走 MoE 双专家)。
     # ★训练底模(diffusers)与 t2v 出片底模(lightx2v / ComfyUI fp8)是两套，各管训练/推理。
     # Colab 上 LW1 下到本地持久化目录后，把本项设成那个本地路径更省(免训练时重下 ~56G)。仅原创虚构成年角色，遵守合规前置。
