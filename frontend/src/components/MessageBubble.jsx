@@ -20,7 +20,7 @@ import { fileUrl, getVideoProviders, getImageProviders, getProject, batchGenerat
          pipelineSelect, streamJobEvents, pipelineUpscale, pipelineFaceswap, uploadCandidate, uploadContinueVideo, updateScenePrompts,
          deleteCandidate, deleteSceneVideo, sceneUndoAppend, deleteEpisode, suggestSegmentPrompts,
          autoStoryboard, autoFill, characters as charactersApi, templatesApi,
-         loraCreate, loraAction, loraUploadImage, loraUploadRef,
+         loraCreate, loraAction, loraUploadImage, loraUploadRef, loraPreview,
          suggestContinuation, sceneGenerate, sceneRender, sceneAppend,
          cancelJob, listActiveJobs,
          projectStyle, sceneAdd, sceneDelete, listLoras,
@@ -1005,6 +1005,21 @@ export function ProductionPanel({ message, workspace, sessionId }) {
     catch (e) { setProgress('传图失败：' + String(e.message || e)) }
     finally { setLoraBusy(false) }
   }
+  // 测试出片：用「当前 server 已挂载的 LoRA」出一条短测试片(480p/4步/33帧)，内嵌在该卡播放。验证 LoRA 学的人对不对。
+  const [loraPrevBusy, setLoraPrevBusy] = useState({})   // {tid: 出片中}
+  const [loraPrevUrl, setLoraPrevUrl] = useState({})     // {tid: 测试片 url}
+  const loraDoPreview = async (tid) => {
+    setLoraPrevBusy(p => ({ ...p, [tid]: true }))
+    setProgress('测试出片中…（480p/4步/33帧，约 1 分钟；用当前 server 已挂载的 LoRA）')
+    try {
+      const jobId = await loraPreview(tid, workspace, sessionId)
+      for await (const ev of streamJobEvents(jobId)) {
+        if (ev.type === 'video' && ev.url) setLoraPrevUrl(p => ({ ...p, [tid]: fileUrl(ev.url) + '&v=' + Date.now() }))
+        else if (ev.type === 'error') setProgress(ev.content || '测试出片失败')
+      }
+    } catch (e) { setProgress('测试出片失败：' + String(e.message || e)) }
+    finally { setLoraPrevBusy(p => ({ ...p, [tid]: false })) }
+  }
   // 每张 LoRA 卡选中的角色 id（选了 → 传图按该角色外貌自动打 caption；多角色就逐个选着传，全进这一个 LoRA）
   const [loraCharOf, setLoraCharOf] = useState({})   // {tid: char_id}
   // 免上传自训：每张卡的模式/张数本地态 + 上传参考脸 + 造图(+造完即训)
@@ -1486,7 +1501,18 @@ export function ProductionPanel({ message, workspace, sessionId }) {
                 </select>
                 <button onClick={() => loraOp('train', t.id)} disabled={loraBusy} style={panelBtn(loraBusy)}>开始训练</button>
                 <button onClick={() => toggleLoraLog(t.id)} style={miniBtn2}>{loraLogOpen[t.id] ? '收起日志' : '日志/进度'}</button>
+                <button onClick={() => loraDoPreview(t.id)} disabled={loraPrevBusy[t.id]} style={miniBtn2}
+                  title="用当前 server 已挂载的 LoRA 出一条 480p/4步/33帧 短测试片(约 1 分钟)，验证 LoRA 学的人对不对">
+                  {loraPrevBusy[t.id] ? '出片中…' : '测试出片'}
+                </button>
               </div>
+              <div style={{ fontSize: 10.5, color: 'var(--text-dim)', marginTop: 4 }}>
+                测试出片：预览当前 server 已挂载的 LoRA；先用笔记本 §5d 把这张卡训出的 LoRA 挂上再测。
+              </div>
+              {loraPrevUrl[t.id] && (
+                <video key={loraPrevUrl[t.id]} src={loraPrevUrl[t.id]} controls
+                  style={{ width: '100%', maxHeight: 320, borderRadius: 8, display: 'block', marginTop: 6, border: '1px solid rgba(134,239,172,0.4)' }} />
+              )}
               <div style={{ fontSize: 10.5, color: 'var(--text-dim)', marginTop: 4 }}>
                 选角色后传的图会自动按该角色外貌打提示词；多角色就逐个角色选着传，全进这一个 LoRA。
               </div>

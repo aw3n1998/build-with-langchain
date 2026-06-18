@@ -381,6 +381,11 @@ export async function loraAction(projectId, action, trainingId = null, workspace
   })
   if (!r.ok) throw new Error(`status ${r.status}`); return r.json()
 }
+// 测试出片：用「当前 lightx2v server 已挂载的 LoRA」出一条 480p/4步/33帧 短测试片，验证 LoRA 学的人对不对。
+// ⚠️ lightx2v LoRA 只能起 server 时挂、per-request 无效 → 预览的是当前 server 挂的那个 LoRA(不是任意指定这张卡的)。返回 job_id，用 streamJobEvents 跟随(video 事件)。
+export async function loraPreview(trainingId, workspace = null, sessionId = null) {
+  return submitJob('/pipeline/lora_preview', { training_id: trainingId, workspace, session_id: sessionId })
+}
 export async function loraUploadImage(trainingId, file, workspace = null, characterId = '') {
   const fd = new FormData()
   fd.append('training_id', trainingId); fd.append('workspace', workspace || ''); fd.append('file', file)

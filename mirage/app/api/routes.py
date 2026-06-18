@@ -2078,6 +2078,18 @@ class SceneAppendRequest(BaseModel):
     motion_prompts: list[str] = []   # 可选：逐段不同提示词
 
 
+class LoraPreviewRequest(BaseModel):
+    """LoRA 训练卡「测试出片」：用当前 lightx2v server 已挂载的 LoRA 出一条短测试片快速验脸。
+
+    注意 lightx2v 限制：LoRA 只能在起 server 时挂、per-request 无效，所以预览的始终是
+    「当前 server 挂的那个 LoRA」（非这张卡指定的）。前端须提示：先用 §5d 把这张卡训出的
+    LoRA 挂上再测，否则看到的是上一个挂载的 LoRA。
+    """
+    training_id: str
+    workspace: str | None = None
+    session_id: str | None = None
+
+
 def _scene_project_id(scene_id: str, workspace: str | None) -> str | None:
     """查某分镜归属的项目 ID（给任务带上，供刷新后按项目重连）。"""
     from mirage.app.pipeline.runtime import set_workspace
@@ -2108,6 +2120,93 @@ async def pipeline_scene_render(req: SceneRenderRequest):
             "project_id": _scene_project_id(req.scene_id, req.workspace)}
     return {"job_id": job_manager.submit(
         "render", lambda: _scene_render_events(req), meta=meta)}
+
+
+def _do_lora_preview(req: "LoraPreviewRequest") -> str:
+    """阻塞出一条 LoRA 测试片（在线程里跑，log 经 log_bus 心跳流式）。
+
+    prompt = (该 LoRA 记录 trigger_word 或 名字 slug) + 绑定角色外貌（没有用通用人像）；
+    走 settings.T2V_PROVIDER(默认 lightx2v-t2v) 的 provider.generate 出 480p/4步/33帧≈2s 短片。
+    ★lightx2v LoRA 只能起 server 时挂、per-request 无效——出的是「当前 server 挂的那个 LoRA」。
+    """
+    from mirage.app.pipeline.runtime import set_workspace, video_dir
+    from mirage.app.pipeline.store import get_store
+    from mirage.app.pipeline.providers import video_provider_registry
+    from mirage.app.pipeline.gpu_client import GpuConfigError
+    from mirage.app.pipeline.lora_train import _slug
+    set_workspace(req.workspace)
+    store = get_store()
+    rec = store.get_lora_training(req.training_id)
+    if not rec:
+        raise GpuConfigError("训练任务不存在，无法预览。")
+    trigger = (rec.get("trigger_word") or "").strip() or _slug(rec.get("name") or "")
+    appearance = ""
+    cid = (rec.get("char_id") or "").strip()
+    if cid:
+        char = store.get_character(cid)
+        if char:
+            appearance = (char.get("appearance") or "").strip()
+    prompt = (f"{trigger}, {appearance or 'portrait, upper body, standing, plain background'}, "
+              "cinematic, high detail")
+    prov_name = settings.T2V_PROVIDER or "lightx2v-t2v"
+    if not video_provider_registry.has(prov_name):
+        raise GpuConfigError(
+            f"t2v 后端 '{prov_name}' 未就绪：测试出片需先配好 lightx2v"
+            "（LIGHTX2V_ENABLED + LIGHTX2V_BASE_URL 并起 server）"
+            "并按 §5d 把这张卡训出的 LoRA 挂上。")
+    prov = video_provider_registry.get(prov_name)
+    out = os.path.join(video_dir(), f"lora_preview_{req.training_id}.mp4")
+    prov.generate(None, image_path="", prompt=prompt, out_remote=out,
+                  params={"size": "480*832", "frames": 33, "steps": 4})
+    return f"测试片完成。VIDFILE::preview_{req.training_id}::{out}"
+
+
+async def _lora_preview_events(req: "LoraPreviewRequest"):
+    """LoRA「测试出片」：用当前 server 已挂载的 LoRA 出短测试片，SSE 流 log + video。
+
+    严格照 _scene_render_events：set_workspace → _run_with_logs 包阻塞渲染流 log →
+    ai_service._extract_tool_markers 把 VIDFILE:: 标记转 video 事件 yield。
+    """
+    yield {"type": "batch_progress", "phase": "render", "scene_id": f"preview_{req.training_id}",
+           "label": "LoRA 测试出片中…"}
+    out = None
+    try:
+        async for it in _run_with_logs(lambda: _do_lora_preview(req)):
+            if "_log" in it:
+                yield {"type": "log", "line": it["_log"]}
+            else:
+                out = it["_result"]
+    except Exception as e:  # noqa: BLE001
+        yield {"type": "tool_result", "name": "lora_preview",
+               "content": f"测试出片失败: {type(e).__name__}: {e}"}
+        return
+    _clean, events = ai_service._extract_tool_markers(out or "")
+    for ev in events:
+        yield ev
+    yield {"type": "scene_ready", "scene_id": f"preview_{req.training_id}"}
+
+
+def _lora_project_id(training_id: str, workspace: str | None) -> str | None:
+    """查某 LoRA 训练任务归属的项目 ID（给任务带上 meta，供刷新后重连）。"""
+    from mirage.app.pipeline.runtime import set_workspace
+    from mirage.app.pipeline.store import get_store
+    try:
+        set_workspace(workspace)
+        rec = get_store().get_lora_training(training_id)
+        return (rec or {}).get("project_id")
+    except Exception:  # noqa: BLE001
+        return None
+
+
+@router.post("/pipeline/lora_preview")
+async def pipeline_lora_preview(req: LoraPreviewRequest):
+    """LoRA 测试出片：后台任务，返回 job_id（job 走 SSE，log + video 事件）。"""
+    from mirage.app.services.job_manager import job_manager
+    meta = {"session_id": req.session_id,
+            "scene_id": f"preview_{req.training_id}",
+            "project_id": _lora_project_id(req.training_id, req.workspace)}
+    return {"job_id": job_manager.submit(
+        "render", lambda: _lora_preview_events(req), meta=meta)}
 
 
 async def _scene_append_events(req: "SceneAppendRequest"):
