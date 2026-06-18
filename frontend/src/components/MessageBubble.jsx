@@ -1030,7 +1030,7 @@ export function ProductionPanel({ message, workspace, sessionId }) {
 
   // 自助新增 / 删除分镜（不绕 agent）
   const addScene = async () => {
-    if (!newScene.image_prompt && !newScene.title) { setProgress('至少填个标题或出图提示词'); return }
+    if (!newScene.image_prompt && !newScene.title) { setProgress('至少填个标题或画面提示词'); return }
     setAddBusy(true)
     try {
       await sceneAdd(pid, newScene, workspace)
@@ -1358,7 +1358,7 @@ export function ProductionPanel({ message, workspace, sessionId }) {
       {tab === 'script' && (
         <div style={subBox}>
           <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 8 }}>
-            粘一段小说/剧情，AI 当导演自动拆成整套分镜（标题/出图词/运镜/旁白台词/对口型），自动套本集风格 + 角色外貌。
+            粘一段小说/剧情，AI 当导演自动拆成整套分镜（标题/画面词/运镜/旁白台词），自动套本集风格 + 角色外貌。
           </div>
           <textarea value={novel} onChange={e => setNovel(e.target.value)} rows={5}
             placeholder="把这一集的小说/剧情粘进来…" style={{ ...inputStyle, width: '100%', resize: 'vertical', minHeight: 90 }} />
@@ -1382,7 +1382,7 @@ export function ProductionPanel({ message, workspace, sessionId }) {
             <label style={{ fontSize: 12, display: 'inline-flex', gap: 4, alignItems: 'center', color: 'var(--text-muted)' }}>
               <input type="checkbox" checked={afReplace} onChange={e => setAfReplace(e.target.checked)} />替换现有
             </label>
-            <span style={{ fontSize: 11, color: 'var(--text-dim)' }}>角色 + 风格 + LoRA + 分镜，全自动</span>
+            <span style={{ fontSize: 11, color: 'var(--text-dim)' }}>角色 + 风格 + LoRA + 分镜入库（<b>只生成分镜表、不出片</b>；想先审阅/改提示词再出片用它）</span>
           </div>
           {/* 终极一键：小说 → 按秒数自算镜数 → 逐镜文生视频(t2v) → 合成整集，全自动到底 */}
           <div style={{ border: '1px solid rgba(0,189,176,0.35)', background: 'rgba(0,189,176,0.07)',
@@ -1404,7 +1404,8 @@ export function ProductionPanel({ message, workspace, sessionId }) {
               </label>
             </div>
             <div style={{ fontSize: 10.5, color: 'var(--text-dim)', marginTop: 6 }}>
-              t2v 文生视频：跳过出图/选图，AI 按秒数拆镜 → 逐镜文生 → 合成。身份靠训好的 Wan-T2V 角色 LoRA（在「角色 &amp; LoRA」训）。
+              <b>含上面的 AI 分析</b>（角色/风格/分镜）→ 按秒数拆镜 → 逐镜文生 → 合成整集，一路到底（<b>不必先点「AI 分析填充」</b>）。
+              身份靠训好的 Wan-T2V 角色 LoRA（在「角色 &amp; LoRA」训）。
             </div>
           </div>
           {/* 次要：角色/风格已设好、只想补分镜 */}
@@ -1419,7 +1420,7 @@ export function ProductionPanel({ message, workspace, sessionId }) {
       {tab === 'cast' && (<>
         <div style={subBox}>
           <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 8 }}>
-            角色/声音圣经 —— 每个角色固定外貌+音色。拆分镜/出图自动用其外貌（跨镜同一个人），配音用其音色。
+            角色/声音圣经 —— 每个角色固定外貌+音色。拆分镜/出片自动用其外貌（跨镜同一个人），配音用其音色。
           </div>
           {(proj?.characters || []).map(c => (
             <div key={c.id} style={{ border: '1px solid var(--border)', borderRadius: 6, padding: 8, marginBottom: 6 }}>
@@ -1515,9 +1516,9 @@ export function ProductionPanel({ message, workspace, sessionId }) {
       {tab === 'script' && (
         <div style={subBox}>
           <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 8 }}>
-            本集统一风格 —— 出图自动套用到每个分镜，全集一个调性（这就是「一集一种风格」）。
+            本集统一风格 —— 出片自动套用到每个分镜，全集一个调性（这就是「一集一种风格」）。
           </div>
-          {styleField('通用风格词', 'style_prompt', '如：写实，电影感，冷蓝调，浅景深（自动拼到每镜出图词后）')}
+          {styleField('通用风格词', 'style_prompt', '如：写实，电影感，冷蓝调，浅景深（自动拼到每镜画面词后）')}
           {styleField('角色触发词', 'trigger_word', '人物 LoRA 触发词；没有就留空')}
           {styleLoraField()}
           {(loras.model && (loras.model.trigger_word || loras.model.flux_lora)) ? (
@@ -1525,8 +1526,9 @@ export function ProductionPanel({ message, workspace, sessionId }) {
               对话/全局设置（本集留空时回退用）：触发词={loras.model.trigger_word || '（无）'} · LoRA={loras.model.flux_lora || '（无）'}
             </div>
           ) : null}
-          {styleField('负向词', 'negative_prompt', '不想要的元素（ComfyUI 出图用）')}
-          {styleField('默认出图尺寸', 'default_size', '如 768x1024（留空用面板尺寸）')}
+          <div style={{ fontSize: 10.5, color: 'var(--text-dim)', marginBottom: 6 }}>
+            （t2v 的负向词 / 分辨率在「分镜制作」里按需调：分辨率用顶部下拉，负向词在「更多参数」；本集风格只管画面调性 + 角色 LoRA。）
+          </div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
             <button onClick={saveStyle} disabled={styleBusy} style={panelBtn(styleBusy)}>
               {styleBusy ? '保存中…' : '保存本集风格'}
@@ -1546,7 +1548,7 @@ export function ProductionPanel({ message, workspace, sessionId }) {
         <div style={subBox}>
           <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 8 }}>新增一个分镜（接在本集末尾，之后可出图/出片）。</div>
           {addField('标题', 'title')}
-          {addField('出图提示词（写中文就行）', 'image_prompt')}
+          {addField('画面提示词（写中文就行；t2v 文生视频的画面描述）', 'image_prompt')}
           {addField('运镜提示词', 'motion_prompt')}
           {addField('旁白 / 台词', 'narration')}
           {addField('字幕（可空，留空=用旁白）', 'subtitle')}
@@ -1965,7 +1967,7 @@ function ScenePrompts({ scene, characters, workspace, onSaved }) {
                 style={{ ...inputStyle, height: 28, fontSize: 11.5 }} />
             </label>
           </div>
-          {ta('出图提示词（image_prompt，角色触发词自动注入）', img, setImg, 3)}
+          {ta('画面提示词（image_prompt，t2v 出片的画面描述；角色触发词自动注入）', img, setImg, 3)}
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', margin: '0 0 6px' }}>
             <TemplateBar kind="prompt" label="提示词" workspace={workspace} getContent={() => img} onApply={c => setImg(c)} />
           </div>
