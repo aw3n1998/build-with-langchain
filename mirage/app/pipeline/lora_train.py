@@ -254,6 +254,13 @@ def _do_train_local(store, tid: str, dataset_dir: str, trigger: str, name: str,
                 dst = os.path.join(settings.COMFYUI_LORA_DIR, f"{slug}_wan_t2v_{tag}.safetensors")
                 shutil.copy(src, dst)
                 reg[tag] = os.path.basename(dst)
+                # ★把"存到哪"写进日志+心跳:训完用户能看到 LoRA 落到 char_loras 的确切路径(§5d 就从这找)
+                logger.info("LoRA %s 已拷到: %s", tag, dst)
+                try:
+                    from mirage.app.pipeline import log_bus
+                    log_bus.emit(f"[lora] {tag} 已存: {dst}")
+                except Exception:  # noqa: BLE001
+                    pass
         if not (reg.get("high") and reg.get("low")):
             store.update_lora_training(
                 tid, status="FAILED",
@@ -262,7 +269,8 @@ def _do_train_local(store, tid: str, dataset_dir: str, trigger: str, name: str,
             return
         store.update_lora_training(
             tid, status="DONE", output_path=reg["high"], trigger_word=trigger,
-            message=f"训练完成 ✓ Wan-T2V LoRA(high+low) → {reg['high']} / {reg['low']}（t2v 出片自动挂，触发词「{trigger}」）")
+            message=(f"训练完成 ✓ LoRA 已存到 {settings.COMFYUI_LORA_DIR}/（{reg['high']} / {reg['low']}）。"
+                     f"跑笔记本 §5d 重起即自动挂上；§5d 没自动找到就重开一下 notebook（git pull 后浏览器里的旧格子不会自动刷新）。"))
         try:
             _link_after_train(store, tid, trigger, reg["high"], reg["low"])
         except Exception:  # noqa: BLE001
