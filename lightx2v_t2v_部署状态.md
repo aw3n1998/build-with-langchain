@@ -39,20 +39,13 @@
 
 ## 四、还未实现 ❌（待办，按优先级）
 
-### 🔴 当前阻塞：出片报 `'NoneType' object is not callable`（最高优先）
-- **现象**：server `status` 正常(idle)，但每次出片请求都失败：`RuntimeError("'NoneType' object is not callable")`，落在 `lightx2v/server/services/generation/base.py:196` 的 `raise exc`。`total_tasks=4, failed_tasks=4`。
-- **关键难点**：base.py:196 是**重抛**（`raise exc`），真正出错那一帧被藏掉了 → 看不到到底哪个东西是 None（VAE 解码？某 attn？save？）。worker 在独立 rank(`start_distributed_inference`) 跑，traceback 可能跨进程丢了。
-- **改 attn=torch_sdpa 后是否仍崩 = 未最终确认**（换机后第一件事：确认 attn 真改了 + 重启 server + 重新出片，看是不是新失败）。
-- **下一步调试法（换机后跑）**：把真 traceback 挖出来——
-  ```python
-  # 1) 确认配置 attn 是 torch_sdpa(不是 flash_attn3)
-  import json; print({k:v for k,v in json.load(open('/content/wan_moe_use.json')).items() if 'attn' in k.lower()})
-  # 2) patch 出真帧:在 worker 捕获异常处(worker.py:~108 "inference failed")加完整 traceback 日志
-  #    或 base.py "raise exc" 前加:
-  #    import traceback as _t; print("REAL_TB\n"+"".join(_t.format_exception(type(exc),exc,exc.__traceback__)),flush=True)
-  # 3) 重启 server + 前端再出片 + grep REAL_TB /content/lightx2v.log → 看真正哪行 None
-  ```
-- 拿到真帧基本就能定位（大概率是某个没装的算子/VAE/解码函数返回 None 被调用）。
+### ✅ 已定位并修复（原 🔴 出片 `'NoneType' object is not callable`）—— 2026-06-18
+- **真凶**：`rope_type` 没设 → 代码默认 `flashinfer`，而 flashinfer 全程 `--no-deps` 装、**根本没装** → `apply_rope_with_cos_sin_cache_inplace` 是 `None`，第一个 transformer block 调它就崩。
+  与现象完全吻合：attn 已是 `torch_sdpa`、无量化，却仍 NoneType。（之前 §3 补丁只强制了 3 个 attn 键，漏了 `rope_type`。）
+- **修复（已固化进 §3）**：attn 三键之后加 `c['rope_type']='torch'` + `c['rms_norm_type']='torch'`（防御性）。
+  - 老会话热修(不重拉)：`import json;p='/content/wan_moe_t2v_use.json';c=json.load(open(p));c['rope_type']='torch';c['rms_norm_type']='torch';json.dump(c,open(p,'w'),indent=2)` → 回 §5 重起 server。
+- **诊断法（留档）**：worker 真帧在 `worker.py:108 logger.exception` 打到日志，**在 REAL_TB 之前**：`grep -n 'inference failed' -A 120 /content/lightx2v.log`（base.py:196 的 REAL_TB 是重抛、真帧跨进程丢，要看 worker 那条）。
+- **若仍崩**：grep 上面那条看最深帧的 `File ... line ...`，多半是又一个没装的算子；按同样思路把对应 `*_type` 键强制 torch。后台研究备选项：`feature_caching=NoCaching`、`dit_quantized=false`、并行标志全 false。
 
 ### 🟡 LoRA 挂载（两个缺口）
 1. **笔记本没有「挂 LoRA」专用格**。手动挂法：server 的 config json 里加 `lora_configs`：
