@@ -1178,7 +1178,9 @@ async def _batch_finish_events(req: BatchRequest):
         params["video_mode"] = "t2v"
     if req.scene_ids:                              # 精修重渲"选中的":只渲这些镜(含已 COMPLETED；do_render 内部 force 重渲)
         _ids = set(req.scene_ids)
-        todo = [s for s in scenes if s["id"] in _ids and s.get("selected_asset_id")]
+        # ★t2v 不出图/不选图、从不写 selected_asset_id → 这里别要求它,否则 t2v 重渲指定镜恒空跑(点了没反应)。
+        _t2v = (req.video_mode or "i2v") == "t2v"
+        todo = [s for s in scenes if s["id"] in _ids and (_t2v or s.get("selected_asset_id"))]
     for i, s in enumerate(todo, 1):
         yield {"type": "batch_progress", "phase": "render",
                "scene_id": s["id"], "index": i, "total": len(todo),

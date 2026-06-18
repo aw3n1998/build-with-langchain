@@ -651,39 +651,63 @@ def _do_render_lipsync_s2v(scene_id, scene, asset, prompt, params) -> str:
             f"已下载到本机: {final_local}\nVIDFILE::{scene_id}::{final_local}")
 
 
-def _compose_t2v_prompt(scene, motion_prompt, pstyle) -> str:
+# 串脸防护用：本镜≥2 人的信号词 + 多人镜自动加的负向(压低"他人也被画成主角脸"的概率)
+_ANTI_BLEED_NEG = ("same face on everyone, identical faces, face cloning, "
+                   "all characters look the same, 所有人长一张脸")
+
+
+def _scene_multi_person(scene, motion: str = "") -> bool:
+    """本镜是否≥2 人:有对话(dialogue)即多人;或画面/运镜词命中多人信号(美女/路人/遇到…)。
+    多人镜不该强注入主角触发词——全局角色 LoRA 已把人脸往主角拉,再加触发词会把他人也拽成主角(串脸)。"""
+    if (scene.get("dialogue") or "").strip():
+        return True
+    import re
+    txt = (scene.get("image_prompt") or "") + " " + (motion or scene.get("motion_prompt") or "")
+    return bool(re.search(
+        r"(美女|美人|帅哥|两人|二人|三人|多人|路人|对手|众人|另一个|另一位|和他|和她|与他|与她|遇到|遇见|二位|两位|两个人|一群| and | with )",
+        txt))
+
+
+def _compose_t2v_prompt(scene, motion_prompt, pstyle, *, lock_character: bool = True) -> str:
     """t2v 提示词 = 画面描述(image_prompt + 风格词 + 触发词，英文化) + 运镜 + 画质尾。
 
-    ★关键:t2v 没有首帧图,画面/主体/外貌/环境只能来自文本——不能像 i2v 那样只给运镜
-    (_compose_wan_prompt 刻意只取 motion;对 i2v 对,对 t2v 会丢掉整段 image_prompt → 出空泛镜头)。
+    ★t2v 没有首帧图,画面/主体/外貌/环境只能来自文本(不能像 i2v 那样只给运镜)。
+    ★串脸防护:本镜≥2 人 或 lock_character=False 时【不注入角色触发词】——全局角色 LoRA 已把人脸往主角拉,
+      再注入触发词会把他人(美女/路人)也拽成主角;此时回纯提示词出脸,降低串脸(无法归零,详见天花板)。
     """
     raw = (scene.get("image_prompt") or "").strip()
     style_words = (pstyle.get("style_prompt") or "").strip()
     if style_words and style_words.lower() not in raw.lower():
         raw = f"{raw}，{style_words}".strip("，").strip()
-    if raw and settings.IMAGE_PROMPT_AUTOTRANSLATE:   # Wan/umt5 偏英文，同出图走翻译；失败退原文
+    motion = (motion_prompt or scene.get("motion_prompt") or "").strip()
+    if settings.IMAGE_PROMPT_AUTOTRANSLATE:   # Wan/umt5 偏英文:画面词+运镜词【都】翻(运镜词原来漏翻=中英混杂、画质退化)
         try:
             from mirage.app.pipeline.prompt_gen import translate_to_english
-            raw = translate_to_english(raw) or raw
+            if raw:
+                raw = translate_to_english(raw) or raw
+            if motion:
+                motion = translate_to_english(motion) or motion
         except Exception:  # noqa: BLE001
             pass
-    # 多角色一致性：该镜出场角色(scene.character)匹配项目角色 → 注入其触发词；
-    # 没匹配到/为空时回退项目级 pstyle.trigger_word(单角色/通用)。
-    # ★用 effective_trigger：和打 caption 走同一规整(常见词/留空→罕见 token)，出片注入与训练标注必须一致。
+    multi = _scene_multi_person(scene, motion)
     char_trigger = ""
-    scene_char = (scene.get("character") or "").strip()
-    if scene_char and scene.get("project_id"):
-        try:
-            from mirage.app.pipeline.lora_train import effective_trigger
-            for c in (get_store().list_characters(scene["project_id"]) or []):
-                if (c.get("name") or "").strip() == scene_char:
-                    char_trigger = effective_trigger(c.get("trigger_word"), c.get("name"))
-                    break
-        except Exception:  # noqa: BLE001 取角色失败就退回项目级触发词
-            char_trigger = ""
-    trigger = char_trigger or (pstyle.get("trigger_word") or "").strip() or model_config().get("trigger_word")
+    if lock_character and not multi:
+        scene_char = (scene.get("character") or "").strip()
+        if scene_char and scene.get("project_id"):
+            try:
+                from mirage.app.pipeline.lora_train import effective_trigger
+                for c in (get_store().list_characters(scene["project_id"]) or []):
+                    if (c.get("name") or "").strip() == scene_char:
+                        char_trigger = effective_trigger(c.get("trigger_word"), c.get("name"))
+                        break
+            except Exception:  # noqa: BLE001 取角色失败就退回项目级触发词
+                char_trigger = ""
+    # 多人镜 / 不锁角色:连项目级触发词回退也跳过(否则空 character 镜照样被全局触发词污染→串脸)
+    if multi or not lock_character:
+        trigger = char_trigger          # 多半为空 → 不注入触发词
+    else:
+        trigger = char_trigger or (pstyle.get("trigger_word") or "").strip() or model_config().get("trigger_word")
     raw = _apply_trigger(raw, trigger)
-    motion = (motion_prompt or scene.get("motion_prompt") or "").strip()
     base = ", ".join(p for p in (raw, motion) if p) or "cinematic film still"
     return f"{base}, cinematic lighting, high detail"
 
@@ -697,6 +721,9 @@ def _do_render_t2v(scene_id, scene, motion_prompt, params) -> str:
     store.set_scene_video_mode(scene_id, "t2v")   # 标记本镜=t2v：合成时据此走 TTS 配音(t2v 无自带音轨)
     _prov = settings.T2V_PROVIDER or "comfyui-t2v"   # comfyui-t2v / lightx2v-t2v(纯 t2v 可不用 ComfyUI)
     if not video_provider_registry.has(_prov):
+        # bug:配的 provider 没注册(如默认 comfyui-t2v 但纯 t2v 只注册了 lightx2v-t2v)→ 自动回退到已注册的 t2v provider
+        _prov = next((a for a in ("lightx2v-t2v", "comfyui-t2v") if video_provider_registry.has(a)), _prov)
+    if not video_provider_registry.has(_prov):
         return (f"文生视频(t2v)后端 '{_prov}' 未就绪：lightx2v 需 LIGHTX2V_ENABLED + LIGHTX2V_BASE_URL 且已起 server；"
                 "ComfyUI 需 COMFYUI_BASE_URL。暂未就绪时把「出片模式」切回 i2v。")
     t2v = video_provider_registry.get(_prov)
@@ -707,10 +734,19 @@ def _do_render_t2v(scene_id, scene, motion_prompt, params) -> str:
         pstyle = store.get_project_style(scene["project_id"]) if scene.get("project_id") else {}
     except Exception:  # noqa: BLE001
         pstyle = {}
-    prompt = _compose_t2v_prompt(scene, motion_prompt, pstyle)   # ★带 image_prompt，否则出空泛镜头
+    lock_char = bool((params or {}).get("lock_character", True))   # 前端可关:多人镜不锁主角,避免串脸
+    prompt = _compose_t2v_prompt(scene, motion_prompt, pstyle, lock_character=lock_char)   # ★带 image_prompt，否则出空泛镜头
     merged = {**t2v.default_params(),
               **{k: v for k, v in (params or {}).items() if v is not None and v != ""}}
-    for _k in ("lipsync", "motion_prompts", "segments", "video_mode"):
+    # bug:批量面板「极速/精修」开关原来只塞 lightning 键、provider 不读 → 映射成 steps(没显式设 steps 时)
+    if "lightning" in merged and not merged.get("steps"):
+        _fast = str(merged.get("lightning")).lower() in ("1", "true", "yes", "on")
+        merged["steps"] = int(settings.WAN_LIGHTNING_STEPS or 4) if _fast else 8
+    # 串脸防护:多人镜自动追加负向(压低"他人也被画成主角脸"的概率)
+    if _scene_multi_person(scene, motion_prompt):
+        _neg = str(merged.get("negative") or settings.WAN_VIDEO_NEGATIVE or "").strip()
+        merged["negative"] = (_neg + (", " if _neg else "") + _ANTI_BLEED_NEG)
+    for _k in ("lipsync", "motion_prompts", "segments", "video_mode", "lightning", "lock_character"):
         merged.pop(_k, None)
     # 项目级 Wan-T2V 角色 LoRA(训好后写进项目 style)；params 已显式带则不覆盖
     if not merged.get("wan_t2v_lora_high") and (pstyle.get("wan_t2v_lora_high") or "").strip():
