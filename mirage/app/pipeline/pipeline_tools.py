@@ -667,16 +667,17 @@ def _compose_t2v_prompt(scene, motion_prompt, pstyle) -> str:
             raw = translate_to_english(raw) or raw
         except Exception:  # noqa: BLE001
             pass
-    # 多角色一致性：该镜出场角色(scene.character)匹配项目角色 → 注入其触发词(trigger_word 或 名字 slug)；
+    # 多角色一致性：该镜出场角色(scene.character)匹配项目角色 → 注入其触发词；
     # 没匹配到/为空时回退项目级 pstyle.trigger_word(单角色/通用)。
+    # ★用 effective_trigger：和打 caption 走同一规整(常见词/留空→罕见 token)，出片注入与训练标注必须一致。
     char_trigger = ""
     scene_char = (scene.get("character") or "").strip()
     if scene_char and scene.get("project_id"):
         try:
-            from mirage.app.pipeline.lora_train import _slug
+            from mirage.app.pipeline.lora_train import effective_trigger
             for c in (get_store().list_characters(scene["project_id"]) or []):
                 if (c.get("name") or "").strip() == scene_char:
-                    char_trigger = (c.get("trigger_word") or "").strip() or _slug(c.get("name") or "")
+                    char_trigger = effective_trigger(c.get("trigger_word"), c.get("name"))
                     break
         except Exception:  # noqa: BLE001 取角色失败就退回项目级触发词
             char_trigger = ""

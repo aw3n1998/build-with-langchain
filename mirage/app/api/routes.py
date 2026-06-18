@@ -1611,8 +1611,9 @@ async def pipeline_lora_upload_image(training_id: str = Form(...), workspace: st
     """往某 LoRA 训练任务里传一张参考图（同一人物多角度，建议 10-20 张）。
 
     多角色混合数据集：传 character_id 时，给这张图写同名 .txt caption（ai-toolkit
-    caption_ext=txt 读），内容 = "{触发词}, {外貌}"（触发词=该角色 trigger_word 或 名字 slug）。
-    不给 character_id 但该 LoRA 记录绑了 trigger_word → 写 "{记录触发词}"（单角色也绑触发词）。
+    caption_ext=txt 读），内容 = 【触发词本身】(effective_trigger：留空/常见词自动换罕见 token)。
+    ★只写触发词、不写外貌——外貌(脸)写进 caption 会和「触发词→身份」绑定打架，训出来跟人对不上。
+    不给 character_id 但该 LoRA 记录绑了 trigger_word → 同样只写规整后的触发词。
     都没有 → 不写 .txt（向后兼容旧行为）。
     """
     import pathlib
@@ -1629,19 +1630,15 @@ async def pipeline_lora_upload_image(training_id: str = Form(...), workspace: st
     name = f"{stem}{suffix}"
     with open(os.path.join(d, name), "wb") as f:
         f.write(await file.read())
-    # 写同名 .txt caption（ai-toolkit caption_ext=txt 读）：按契约决定内容
-    from mirage.app.pipeline.lora_train import _slug
+    # 写同名 .txt caption（ai-toolkit caption_ext=txt 读）：★只写触发词、绝不写外貌(脸)。
+    from mirage.app.pipeline.lora_train import effective_trigger
     caption = ""
     if character_id:
-        # 给了角色：触发词(trigger_word 或 名字 slug) + 外貌
         char = store.get_character(character_id)
         if char and (char.get("project_id") == rec.get("project_id")):
-            trigger = (char.get("trigger_word") or "").strip() or _slug(char.get("name") or "")
-            appearance = (char.get("appearance") or "").strip()
-            caption = f"{trigger}, {appearance}".strip().rstrip(",").strip()
+            caption = effective_trigger(char.get("trigger_word"), char.get("name"))
     elif (rec.get("trigger_word") or "").strip():
-        # 没给角色但记录绑了触发词：单角色也绑触发词
-        caption = (rec.get("trigger_word") or "").strip()
+        caption = effective_trigger(rec.get("trigger_word"), rec.get("name"))
     if caption:
         with open(os.path.join(d, f"{stem}.txt"), "w", encoding="utf-8") as cf:
             cf.write(caption)
@@ -2133,19 +2130,20 @@ def _do_lora_preview(req: "LoraPreviewRequest") -> str:
     from mirage.app.pipeline.store import get_store
     from mirage.app.pipeline.providers import video_provider_registry
     from mirage.app.pipeline.gpu_client import GpuConfigError
-    from mirage.app.pipeline.lora_train import _slug
+    from mirage.app.pipeline.lora_train import effective_trigger
     set_workspace(req.workspace)
     store = get_store()
     rec = store.get_lora_training(req.training_id)
     if not rec:
         raise GpuConfigError("训练任务不存在，无法预览。")
-    trigger = (rec.get("trigger_word") or "").strip() or _slug(rec.get("name") or "")
+    trigger = effective_trigger(rec.get("trigger_word"), rec.get("name"))
     appearance = ""
     cid = (rec.get("char_id") or "").strip()
     if cid:
         char = store.get_character(cid)
         if char:
             appearance = (char.get("appearance") or "").strip()
+            trigger = effective_trigger(char.get("trigger_word"), char.get("name"))  # 绑了角色→和打 caption 同一触发词
     prompt = (f"{trigger}, {appearance or 'portrait, upper body, standing, plain background'}, "
               "cinematic, high detail")
     prov_name = settings.T2V_PROVIDER or "lightx2v-t2v"

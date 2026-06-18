@@ -45,6 +45,43 @@ def _slug(s: Optional[str]) -> str:
     return s or "char"
 
 
+# 角色 LoRA「完全对不上人物」的头号坑：拿常见词当触发词。
+# 触发词必须是【无预训练语义的罕见 token】，身份才会绑到它身上；用 char/person/角色名 这类
+# 常见词，身份会糊进该词原有语义→出片渲染的是预训练里的「某个人」而非你训的人（症状：完全是别人）。
+# 官方 ai-toolkit 示例特意用 p3r5on（而非 person）就是这个道理。
+_COMMON_TRIGGERS = {
+    "char", "chars", "character", "characters", "person", "people", "human", "humans",
+    "man", "men", "woman", "women", "boy", "girl", "guy", "lady", "male", "female",
+    "face", "portrait", "subject", "model", "figure", "actor", "actress", "hero",
+    "img", "image", "photo", "pic", "ohwx",  # ohwx 太常被教程用、已被污染
+}
+
+
+def _rare_trigger(name: Optional[str] = None, seed: str = "") -> str:
+    """生成一个【罕见、无预训练语义】的触发 token——角色身份能否绑定的命门。
+
+    取 name(+seed) 的稳定哈希拼成 zq<6hex>（如 zq3f9a1c）：稀有、确定、跨机一致、可复现。
+    不用随机数（构建环境禁随机、且同名要稳定出同一 token，caption 与出片注入才会一致）。
+    """
+    import hashlib
+    base = f"{(name or '').strip().lower()}|{seed}".encode("utf-8")
+    return "zq" + hashlib.md5(base).hexdigest()[:6]
+
+
+def effective_trigger(stored: Optional[str], name: Optional[str] = None) -> str:
+    """把「用户填的触发词」规整成真正能用的 token——caption 打标、出片注入、测试预览统一走这里，保证一致。
+
+    规则：用户填了好词（罕见、非常见词）→ 清洗后直接用；留空 / 填了常见词（char/person/角色名…）
+    → 自动换成 _rare_trigger 生成的罕见 token（这是身份绑得上的前提，用户无需自己琢磨触发词）。
+    """
+    raw = (stored or "").strip()
+    s = _slug(raw)                      # 注意 _slug 空输入会回退成 "char"
+    nm = _slug(name)                    # 角色名 slug 也算「常见词」（名字有预训练语义）
+    if (not raw) or s in _COMMON_TRIGGERS or s == nm:
+        return _rare_trigger(name or raw)
+    return s
+
+
 def is_local_runner() -> bool:
     """空 LORA_TRAIN_ENDPOINT = 本地 ai-toolkit 子进程(Colab 单机默认)。"""
     return not (settings.LORA_TRAIN_ENDPOINT or "").strip()

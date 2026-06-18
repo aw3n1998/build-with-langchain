@@ -1449,7 +1449,8 @@ export function ProductionPanel({ message, workspace, sessionId }) {
                 onBlur={e => e.target.value !== c.appearance && charOp('update', { char_id: c.id, appearance: e.target.value })}
                 style={{ ...inputStyle, width: '100%', resize: 'vertical', marginBottom: 4 }} />
               <input defaultValue={c.trigger_word || ''}
-                placeholder="触发词 trigger_word（t2v 出片靠它召唤这个角色，建议下划线如 cael_an；留空=用角色名）"
+                placeholder="触发词（建议留空！系统自动生成不撞车的罕见词。别填 char/人名等常见词，否则训出来像别人）"
+                title="角色 LoRA 能不能对得上人的命门：触发词必须是无含义的罕见词。留空或填了常见词(char/person/人名)时，系统自动换成 zq 开头的罕见 token，打 caption 与出片注入都用它、保持一致。"
                 onBlur={e => e.target.value !== (c.trigger_word || '') && charOp('update', { char_id: c.id, trigger_word: e.target.value })}
                 style={{ ...inputStyle, height: 28, width: '100%', boxSizing: 'border-box', marginBottom: 4 }} />
               <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
@@ -1483,7 +1484,8 @@ export function ProductionPanel({ message, workspace, sessionId }) {
                 <button onClick={async () => { if (await dialog.confirm('删除这个 LoRA 训练？', { message: '参考图也会一并删除，不可恢复。', danger: true, confirmText: '删除' })) loraOp('delete', t.id) }} disabled={loraBusy}
                   style={{ ...miniBtn2, color: '#fca5a5', borderColor: 'rgba(239,68,68,0.4)', flexShrink: 0 }}>删除</button>
               </div>
-              <input defaultValue={t.trigger_word || ''} placeholder="触发词 trigger_word（t2v 出片自动注入；带下划线身份更粘，如 cael_an）"
+              <input defaultValue={t.trigger_word || ''} placeholder="触发词（建议留空，系统自动用罕见词；别填 char/人名等常见词，否则训出来像别人）"
+                title="留空或填常见词时系统自动换成 zq 开头的罕见 token；caption 打标与出片注入统一用它。"
                 onBlur={e => { if (e.target.value !== (t.trigger_word || '')) loraOp('update', t.id, { trigger_word: e.target.value }) }}
                 style={{ ...inputStyle, height: 26, width: '100%', boxSizing: 'border-box', marginBottom: 4 }} />
               {t.message && <div style={{ fontSize: 10.5, color: '#ffb454', marginBottom: 4 }}>{t.message}</div>}
@@ -1830,63 +1832,11 @@ export function ProductionPanel({ message, workspace, sessionId }) {
                          style={{ width: '100%', maxHeight: 300, borderRadius: 8, display: 'block' }} />
                   {upscaleRow(s.scene_id, 'scene', s.scene_id, '')}
                   {faceswapRow(s.scene_id, 'scene', s.scene_id, '')}
-                  {/* 看效果再加长：取现有成片末帧续生成、拼到末尾，可反复点。段数不写死。 */}
+                  {/* 纯 t2v：尾帧接续(再续一段/上传视频续接/撤销)是 i2v 功能、lightx2v 不支持 → 已移除。
+                      想要更长镜头:把上方「画质档/更多参数」的帧数调大(t2v 单镜一次性生成,81→121→161)。 */}
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 6, alignItems: 'center' }}>
-                    <input value={appendPrompt[s.scene_id] || ''} disabled={busy || !!sceneBusy[s.scene_id]}
-                      onChange={e => setAppendPrompt(p => ({ ...p, [s.scene_id]: e.target.value }))}
-                      placeholder="续段运镜提示词（可空；点「AI 推荐」据尾帧给一句，可改）"
-                      style={{ ...inputStyle, flex: '1 1 160px', height: 26, fontSize: 11.5 }} />
-                    <select value={appendLang[s.scene_id] || 'zh'} disabled={busy || !!sceneBusy[s.scene_id]}
-                      onChange={e => setAppendLang(p => ({ ...p, [s.scene_id]: e.target.value }))}
-                      title="推荐提示词的语言（Wan2.2 原生支持中文；纯英文模型选 EN）"
-                      style={{ ...inputStyle, width: 'auto', height: 26, fontSize: 11 }}>
-                      <option value="zh">中</option>
-                      <option value="en">EN</option>
-                    </select>
-                    <button onClick={() => suggestAppendPrompt(s.scene_id)}
-                      disabled={busy || !!sceneBusy[s.scene_id] || !!appendSugBusy[s.scene_id]}
-                      title="据现有视频的最后一帧，AI 推荐一句续段运镜提示词（配了视觉模型则真看画面）。不用自己憋提示词、少抽卡。"
-                      style={{ ...miniAct(false), display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                      {appendSugBusy[s.scene_id] ? '推荐中…' : <><Icon.Wand size={12} />AI 推荐</>}
-                    </button>
-                    <label style={{ fontSize: 11, color: 'var(--text-muted)', display: 'inline-flex',
-                                    alignItems: 'center', gap: 3 }}
-                      title="本次追加几段（想加多长加多长，没有上限）">
-                      续
-                      <input type="number" min={1} value={appendCount[s.scene_id] ?? 1}
-                        disabled={busy || !!sceneBusy[s.scene_id]}
-                        onChange={e => setAppendCount(p => ({ ...p, [s.scene_id]: Math.max(1, Number(e.target.value) || 1) }))}
-                        style={{ ...inputStyle, width: 44, height: 26 }} />
-                      段
-                    </label>
-                    <button onClick={() => runScene('append', s.scene_id)} disabled={busy || !!sceneBusy[s.scene_id]}
-                      title="取现有视频最后一帧继续生成、拼到末尾，让这镜变长（可反复点，看效果再决定加多少）"
-                      style={{ ...miniAct(false, true), display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                      <Icon.Plus size={12} />再续一段{sceneBusy[s.scene_id] === 'append' ? `…${fmtElapsed(s.scene_id)}` : ''}
-                    </button>
-                    <label
-                      title="上传你的一段视频接到成片末尾，再从它的尾帧 AI 续写（用上面的运镜提示词和「续 N 段」）"
-                      style={{ ...miniAct(false), display: 'inline-flex', alignItems: 'center', gap: 4,
-                               cursor: (busy || !!sceneBusy[s.scene_id]) ? 'default' : 'pointer',
-                               opacity: (busy || !!sceneBusy[s.scene_id]) ? 0.5 : 1 }}>
-                      <Icon.Plus size={12} />上传视频续接
-                      <input type="file" accept="video/*,.mp4,.mov,.webm,.mkv,.m4v" style={{ display: 'none' }}
-                        disabled={busy || !!sceneBusy[s.scene_id]}
-                        onChange={async e => {
-                          const f = e.target.files?.[0]; e.target.value = ''
-                          if (f) await runUploadContinue(s.scene_id, f)
-                        }} />
-                    </label>
-                    <button onClick={() => undoAppend(s.scene_id)} disabled={busy || !!sceneBusy[s.scene_id]}
-                      title="撤销最近一次「再续一段」，成片回退到续接之前（可多次回退），然后可重新续"
-                      style={{
-                        display: 'inline-flex', alignItems: 'center', gap: 4,
-                        height: 26, padding: '0 12px', borderRadius: 6,
-                        border: '1px solid rgba(124,108,255,0.4)', background: 'rgba(124,108,255,0.12)',
-                        color: 'rgba(203,166,255,1)', fontSize: 11.5, cursor: 'pointer',
-                      }}><Icon.Undo size={12} />撤销上一段{sceneBusy[s.scene_id] === 'undo' ? '…' : ''}</button>
                     <button onClick={() => delSceneVideo(s.scene_id)} disabled={busy || !!sceneBusy[s.scene_id]}
-                      title="删除这个分镜的成片（图还在，可重新出片）" style={{
+                      title="删除这个分镜的成片，可重新出片" style={{
                         height: 26, padding: '0 12px', borderRadius: 6,
                         border: '1px solid rgba(239,68,68,0.35)', background: 'rgba(239,68,68,0.12)',
                         color: 'rgba(252,165,165,1)', fontSize: 11.5, cursor: 'pointer',
