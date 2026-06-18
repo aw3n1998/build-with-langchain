@@ -165,6 +165,7 @@ class Settings(BaseSettings):
     LIGHTX2V_MODEL_T2V: str = ""            # lightx2v 端 Wan2.2-T2V 权重目录/标识(按 lightx2v 文档)
     LIGHTX2V_DISTILL_LORA_HIGH: str = ""    # 蒸馏 LoRA(高噪);走 lora_configs 时必须显式列,否则丢 4 步加速
     LIGHTX2V_DISTILL_LORA_LOW: str = ""     # 蒸馏 LoRA(低噪)
+    LIGHTX2V_OUTPUT_DIR: str = ""           # lightx2v server 存片目录(同机取片用);空=默认 <install>/lightx2v/server_cache/outputs
     # ── 视频模型解耦：默认 Provider + LTX-Video 配置 ──────────────
     # 默认用哪个视频模型（对应 providers 注册名：wan2.2 / ltx）
     VIDEO_PROVIDER_DEFAULT: str = "wan2.2"

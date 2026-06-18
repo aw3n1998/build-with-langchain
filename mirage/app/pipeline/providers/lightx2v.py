@@ -69,25 +69,42 @@ def server_lora_configs() -> list[dict]:
 
 
 def _extract_output(client: httpx.Client, base: str, task_id: str, status: dict, out_remote: str) -> None:
-    """从任务状态/结果里把成片取回到本地 out_remote。★产物返回字段待真机核对。"""
-    # 常见几种:status 里直接给路径,或单独 result 端点
+    """把成片取回本地 out_remote。
+
+    ★真机确认(2026-06-18 RTX PRO 6000):lightx2v server 把片存到同机本地
+      <install>/lightx2v/server_cache/outputs/{task_id}.mp4(文件名=task_id)。
+    优先用 status 里给的路径/URL(部分版本会给);没有就按这个约定 + LIGHTX2V_OUTPUT_DIR + glob 兜底拷回。
+    """
+    import shutil
+    import glob as _glob
+    # 1) status 直接给路径/URL(部分版本)
     cand = (status.get("output_path") or status.get("save_path") or status.get("video_path")
-            or status.get("result") or status.get("output"))
+            or status.get("save_video_path") or status.get("result") or status.get("output"))
     if isinstance(cand, dict):
-        cand = cand.get("video_path") or cand.get("output_path") or cand.get("url")
+        cand = (cand.get("video_path") or cand.get("output_path")
+                or cand.get("save_video_path") or cand.get("url"))
     if isinstance(cand, str) and cand:
-        if cand.startswith("http"):                       # 是 URL → 下载
+        if cand.startswith("http"):                       # URL → 下载
             r = client.get(cand, timeout=300); r.raise_for_status()
             with open(out_remote, "wb") as f:
                 f.write(r.content)
             return
         if os.path.exists(cand):                          # 同机本地路径 → 拷回工作目录
-            import shutil
             shutil.copy(cand, out_remote)
             return
+    # 2) 同机本地约定:server_cache/outputs/{task_id}.mp4(真机确认)→ 直接拷
+    locals_: list[str] = []
+    if (settings.LIGHTX2V_OUTPUT_DIR or "").strip():
+        locals_.append(os.path.join(settings.LIGHTX2V_OUTPUT_DIR.strip(), f"{task_id}.mp4"))
+    locals_.append(f"/content/LightX2V/lightx2v/server_cache/outputs/{task_id}.mp4")
+    locals_ += _glob.glob(f"/content/LightX2V/**/server_cache/outputs/{task_id}.mp4", recursive=True)
+    for p in locals_:
+        if p and os.path.exists(p):
+            shutil.copy(p, out_remote)
+            return
     raise GpuRunError(
-        f"lightx2v 任务完成但没取到成片路径(task={task_id})。请按你的 lightx2v 版本核对状态返回里的产物字段,"
-        f"在 providers/lightx2v.py:_extract_output 里对上。status keys={list(status.keys())}")
+        f"lightx2v 任务完成但没取到成片(task={task_id})。片应在 <install>/lightx2v/server_cache/outputs/{task_id}.mp4;"
+        f"install 路径不同时在 .env 设 LIGHTX2V_OUTPUT_DIR 指向 outputs 目录。status keys={list(status.keys())}")
 
 
 class Lightx2vT2VProvider(VideoProvider):
