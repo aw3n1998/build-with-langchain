@@ -35,7 +35,7 @@
 3. **注意力算子**：必须 `torch_sdpa`。配置里默认的 `flash_attn3` 没装、调到会 `'NoneType' object is not callable`。§3 已自动改成 torch_sdpa（SageAttention 编上了则用 sage_attn2）。
 4. **权重加载提速**：直接 `snapshot_download` 到本地 `/content/wan_local`（HF CDN ~170MB/s，比 Drive FUSE 冷读 ~50MB/s 快 3 倍多；本地 SSD 加载秒级）。取舍=每会话重下 ~67G(~10 分钟)。
 5. **5090(32G) 兼容**：§1 按显存自动切——小卡 `cpu_offload=true` + `offload_granularity=model` + `offload_ratio=1.0`（lightx2v 官方称 24G 即够）；大卡(>70G)双专家全 GPU bf16。
-6. **已验证到**：server 起来、双专家权重加载成功（无 KeyError patch_embedding，diffusers 格式直读）、DiT 推理在跑。
+6. **已跑通（RTX PRO 6000 96G 实测，2026-06-18）**：server 起来、双专家权重加载成功（diffusers 格式直读）、**出片裸片成功**（关键修复=`rope_type=torch`，见下 ✅ 段）。`cpu_offload=False` 双专家全 GPU bf16；SageAttention sm120 编不过→`torch_sdpa`，不影响。
 
 ## 四、还未实现 ❌（待办，按优先级）
 
@@ -87,4 +87,4 @@
 | 起 server | `python -m lightx2v.server --model_cls wan2.2_moe --task t2v --model_path /content/wan_local --config_json <上面config> --host 0.0.0.0 --port 8189` |
 | server 状态 | `GET http://127.0.0.1:8189/v1/service/status` |
 | 你训的人物 LoRA | `char_lora_high_noise.safetensors` / `char_lora_low_noise.safetensors` |
-| 当前阻塞 | 出片 `'NoneType' object is not callable`（真帧待挖） |
+| 出片状态 | ✅ 裸片跑通（RTX PRO 6000）；关键修复 `rope_type=torch`（默认 flashinfer 没装）+ attn 三键 torch_sdpa |
