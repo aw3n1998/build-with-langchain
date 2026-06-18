@@ -1632,6 +1632,16 @@ export function ProductionPanel({ message, workspace, sessionId }) {
           <option value="832*480">832×480 横屏·快</option>
           <option value="1280*704">1280×704 横屏</option>
         </select>
+        <select value={vidParams.steps || 4} disabled={!!busy}
+          onChange={e => setVidParams(p => ({ ...p, steps: Number(e.target.value) }))}
+          title="画质档=采样步数(越多越精细越慢)。蒸馏 LoRA 下 4-8 步最佳。注:lightx2v 可能按起 server 的 config 读步数——切档后若日志 step_index 分母没变,说明要重起才生效(告诉我改成重起式)。"
+          style={{ ...inputStyle, width: 'auto', height: 32 }}>
+          <option value={4}>画质·极速 4 步(打样)</option>
+          <option value={6}>画质·较快 6 步</option>
+          <option value={8}>画质·折中 8 步</option>
+          <option value={12}>画质·较精 12 步</option>
+          <option value={16}>画质·精修 16 步</option>
+        </select>
         {estSec != null && (
           <span style={{ fontSize: 11, color: 'rgba(94,234,212,0.95)', alignSelf: 'center',
                          padding: '0 8px', borderRadius: 6, background: 'rgba(0,189,176,0.1)',
