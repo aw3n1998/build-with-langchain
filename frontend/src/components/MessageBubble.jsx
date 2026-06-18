@@ -1024,12 +1024,16 @@ export function ProductionPanel({ message, workspace, sessionId }) {
   const loraDoPreview = async (tid) => {
     setLoraPrevBusy(p => ({ ...p, [tid]: true }))
     setProgress('测试出片中…（480p/4步/33帧，约 1 分钟；用当前 server 已挂载的 LoRA）')
+    let gotVideo = false
     try {
       const jobId = await loraPreview(tid, workspace, sessionId)
       for await (const ev of streamJobEvents(jobId)) {
-        if (ev.type === 'video' && ev.url) setLoraPrevUrl(p => ({ ...p, [tid]: fileUrl(ev.url) + '&v=' + Date.now() }))
-        else if (ev.type === 'error') setProgress(ev.content || '测试出片失败')
+        if (ev.type === 'video' && ev.url) { setLoraPrevUrl(p => ({ ...p, [tid]: fileUrl(ev.url) + '&v=' + Date.now() })); gotVideo = true }
+        // ★出片报错走 tool_result 事件（不是 error）——之前没接、被静默吞掉，导致"点了没反应"。这里一并显示。
+        else if ((ev.type === 'error' || ev.type === 'tool_result') && ev.content) setProgress('测试出片：' + ev.content)
+        else if (ev.type === 'log' && ev.line) setProgress('测试出片中…' + String(ev.line).slice(-90))
       }
+      if (!gotVideo) setProgress('测试出片结束但没拿到视频——多半出片那步报错了。看 Colab 的 lightx2v 日志（§日志速查 或 tail /content/lightx2v.log）定位。')
     } catch (e) { setProgress('测试出片失败：' + String(e.message || e)) }
     finally { setLoraPrevBusy(p => ({ ...p, [tid]: false })) }
   }
