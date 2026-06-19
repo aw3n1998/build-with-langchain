@@ -2147,6 +2147,7 @@ async def _continuation_events(req: "ContinuationRequest"):
 @router.post("/pipeline/continuation")
 async def pipeline_continuation(req: ContinuationRequest):
     """续接出片：整集按尾帧链(i2v)出连续片。前置：i2v server 已起(§i2v续接) + 镜1 已有 t2v 成片当链头。"""
+    from mirage.app.services.job_manager import job_manager
     meta = {"session_id": req.session_id, "project_id": req.project_id}
     return {"job_id": job_manager.submit("continuation", lambda: _continuation_events(req), meta=meta)}
 
