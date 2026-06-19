@@ -192,9 +192,13 @@ def _link_after_train(store, tid: str, trigger: str, lora_high: str, lora_low: s
     (单主角短剧直接生效；不覆盖已有手设；热生效、无需重启)。"""
     t = store.get_lora_training(tid) or {}
     cid = t.get("char_id")
+    # ★项目级/角色级触发词都写成 effective_trigger 结果(和 caption、出片注入同一个 zk token)——
+    #   否则项目级回退分支会注入 _slug 版(常成 'char')、与 LoRA 实际学的 token 对不上。
+    _ch = store.get_character(cid) if cid else None
+    eff = effective_trigger(_ch.get("trigger_word"), _ch.get("name")) if _ch else (trigger or "")
     if cid:
         try:
-            store.update_character(cid, trained_lora_id=tid)
+            store.update_character(cid, trained_lora_id=tid, trigger_word=eff)
         except Exception:  # noqa: BLE001
             pass
     pid = t.get("project_id")
@@ -203,7 +207,7 @@ def _link_after_train(store, tid: str, trigger: str, lora_high: str, lora_low: s
             st = store.get_project_style(pid)
             if not (st.get("wan_t2v_lora_high") or "").strip():
                 store.update_project_style(pid, wan_t2v_lora_high=lora_high,
-                                           wan_t2v_lora_low=lora_low, trigger_word=trigger)
+                                           wan_t2v_lora_low=lora_low, trigger_word=eff)
         except Exception:  # noqa: BLE001
             pass
 
@@ -310,7 +314,12 @@ def start_training(store, tid: str, dataset_dir: str, *, trigger: Optional[str] 
     t = store.get_lora_training(tid)
     if not t:
         raise ValueError(f"训练任务不存在: {tid}")
-    trigger = (trigger or t.get("trigger_word") or _slug(t.get("name"))) or f"char_{tid[:6]}"
+    # ★触发词统一走 effective_trigger:和打 caption、出片注入同一规整 → LoRA 学的 token = 文件名 slug = 项目级 = 出片注入,全链路一致。
+    _ch = store.get_character(t.get("char_id")) if t.get("char_id") else None
+    if _ch:
+        trigger = effective_trigger(_ch.get("trigger_word"), _ch.get("name"))
+    else:
+        trigger = effective_trigger(trigger or t.get("trigger_word"), t.get("name")) or f"char_{tid[:6]}"
     name = name or t.get("name") or trigger
     base = base or settings.LORA_TRAIN_BASE
     steps = int(steps or t.get("steps") or settings.LORA_TRAIN_STEPS)

@@ -173,7 +173,8 @@ class Lightx2vT2VProvider(VideoProvider):
         if loras:
             payload["lora_configs"] = loras
         t0 = time.time()
-        with httpx.Client() as client:
+        try:
+          with httpx.Client() as client:
             r = client.post(f"{base}/v1/tasks/", json=payload, timeout=120)
             if r.status_code >= 400:
                 raise GpuRunError(f"lightx2v 拒绝任务(HTTP {r.status_code}): {r.text[:600]}")
@@ -199,3 +200,5 @@ class Lightx2vT2VProvider(VideoProvider):
                     log_bus.emit(f"[lightx2v] {st or '运行中'}… 已等 {int(now - t0)}s")
                 time.sleep(2)
             raise GpuRunError(f"lightx2v 超时(>{settings.COMFYUI_TIMEOUT}s),task={task_id}")
+        except httpx.HTTPError as e:   # 超时/连接错等 httpx 异常 → 转 GpuRunError(走 _gpu_retry 重试 + FAILED 写回,别静默卡 PENDING)
+            raise GpuRunError(f"lightx2v HTTP 异常: {type(e).__name__}: {e}") from e

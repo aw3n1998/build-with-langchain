@@ -735,13 +735,15 @@ def _do_render_t2v(scene_id, scene, motion_prompt, params) -> str:
     except Exception:  # noqa: BLE001
         pstyle = {}
     lock_char = bool((params or {}).get("lock_character", True))   # 前端可关:多人镜不锁主角,避免串脸
+    _explicit_steps = (params or {}).get("steps")                  # ★用户在画质档显式设的步数(优先);不能看 merged(default_params 必填 steps→判据失效)
     prompt = _compose_t2v_prompt(scene, motion_prompt, pstyle, lock_character=lock_char)   # ★带 image_prompt，否则出空泛镜头
     merged = {**t2v.default_params(),
               **{k: v for k, v in (params or {}).items() if v is not None and v != ""}}
-    # bug:批量面板「极速/精修」开关原来只塞 lightning 键、provider 不读 → 映射成 steps(没显式设 steps 时)
-    if "lightning" in merged and not merged.get("steps"):
+    # bug:批量面板「极速/精修」开关只塞 lightning 键、provider 不读 → 在此映射成 steps。
+    #   ★判据=「用户有没有显式传 steps」(_explicit_steps),不能用 merged.get('steps')——default_params 必然填了 steps,原判据恒 False、映射永远跳过=两档都跑默认步数(画质切档无效的真因)。
+    if "lightning" in merged and not _explicit_steps:
         _fast = str(merged.get("lightning")).lower() in ("1", "true", "yes", "on")
-        merged["steps"] = int(settings.WAN_LIGHTNING_STEPS or 4) if _fast else 8
+        merged["steps"] = 4 if _fast else 8        # 极速 4 步打样 / 精修 8 步
     # 串脸防护:多人镜自动追加负向(压低"他人也被画成主角脸"的概率)
     if _scene_multi_person(scene, motion_prompt):
         _neg = str(merged.get("negative") or settings.WAN_VIDEO_NEGATIVE or "").strip()
@@ -1351,7 +1353,7 @@ def upscale_video(scene_id: str = "", project_id: str = "", kind: str = "scene",
         scene = st.get_scene(scene_id)
         if not scene:
             return f"分镜不存在: {scene_id}"
-        src = (scene.get("video")
+        src = (scene.get("video_path")   # ★列名是 video_path(原 'video' 恒 None、靠约定路径碰巧不坏)
                or os.path.join(video_dir(), f"{scene.get('scene_number', 0):02d}_{scene_id}.mp4"))
         tag = scene_id
     if not os.path.exists(src):
@@ -1385,7 +1387,7 @@ def faceswap_scene_video(scene_id: str = "", face_path: str = "", project_id: st
         scene = st.get_scene(scene_id)
         if not scene:
             return f"分镜不存在: {scene_id}"
-        src = (scene.get("video")
+        src = (scene.get("video_path")   # ★列名是 video_path(原 'video' 恒 None、靠约定路径碰巧不坏)
                or os.path.join(video_dir(), f"{scene.get('scene_number', 0):02d}_{scene_id}.mp4"))
         tag = scene_id
     if not os.path.exists(src):
