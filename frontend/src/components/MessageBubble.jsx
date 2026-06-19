@@ -1714,19 +1714,8 @@ export function ProductionPanel({ message, workspace, sessionId }) {
           <option value={161}>时长 ≈ 10 秒</option>
           <option value={241}>时长 ≈ 15 秒</option>
         </select>
-        <select value={vidParams.steps || 8} disabled={!!busy}
-          onChange={e => setVidParams(p => ({ ...p, steps: Number(e.target.value) }))}
-          title="画质档=采样步数(越多越精细越慢)。默认 8 步成片;4 步只用于快速打样。★真正生效的是笔记本 §5d 的 infer_steps(server config),前端这个下拉只是 per-request、可能被 server 忽略——质量不对就去 §5d 改 LIGHTX2V_STEPS 重起。"
-          style={{ ...inputStyle, width: 'auto', height: 32 }}>
-          <option value={8}>画质·成片 8 步（默认）</option>
-          <option value={4}>画质·极速 4 步(打样)</option>
-          <option value={16}>画质·精修 16 步</option>
-        </select>
-        <label title="强锁脸(Stand-In)：给角色传过参考脸的镜头，用「一张脸硬锁身份」出片(跨镜更稳、免训练)。需先在 Colab 跑「§Stand-In」起 server。无参考脸或没起 server 的镜自动回退 lightx2v(快)。Stand-In 无蒸馏~20步、较慢。"
-          style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12, color: lockFace ? '#5fe8de' : 'var(--text-muted)', cursor: 'pointer', whiteSpace: 'nowrap' }}>
-          <input type="checkbox" checked={lockFace} disabled={!!busy} onChange={e => setLockFace(e.target.checked)} />
-          强锁脸(Stand-In)
-        </label>
+        {/* 画质档(步数)从主行移除:与「更多参数·采样步数」重复,且本机 server 多忽略 per-request 步数(画质实际在 §5d 配)——别再误导。
+            强锁脸(Stand-In)移到「更多参数」(进阶,需另起 server)。主行只留:出片 + 分辨率 + 时长 + 预估。 */}
         {estSec != null && (
           <span style={{ fontSize: 11, color: 'rgba(94,234,212,0.95)', alignSelf: 'center',
                          padding: '0 8px', borderRadius: 6, background: 'rgba(0,189,176,0.1)',
@@ -1785,6 +1774,12 @@ export function ProductionPanel({ message, workspace, sessionId }) {
                 </label>
               ))}
             </div>
+            <label style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 12, marginTop: 10,
+                            color: lockFace ? '#5fe8de' : 'var(--text-muted)', cursor: 'pointer' }}
+              title="强锁脸(Stand-In)：给角色传过参考脸的镜头用「一张脸硬锁身份」出片(跨镜更稳、免训练)。需先在 Colab 跑「§Stand-In」起 server;没起就自动回退普通出片。进阶功能,默认关。">
+              <input type="checkbox" checked={lockFace} disabled={!!busy} onChange={e => setLockFace(e.target.checked)} />
+              强锁脸 Stand-In（进阶 · 需先起 server）
+            </label>
           </div>
         )}
       </div>

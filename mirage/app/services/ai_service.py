@@ -24,8 +24,9 @@ class AIService:
         self._llm = self._make_llm_from_config(None)   # 默认 LLM（来自 .env）
         self._storyboard_llm = None                    # 分镜专属 LLM（懒构造；空配置=复用默认 _llm）
 
-        embedder = FastEmbedEmbeddings(model_name="BAAI/bge-small-zh-v1.5")
-        self._registry = SkillRegistry(embedder)
+        # 懒构造:首次用到 agent 聊天时才加载本地 embedder(bge-small-zh)。否则没缓存该 ONNX 模型时
+        # (如非 Colab 的本地起服务)整个后端会在 import 期崩——而出片/出图/前端 UI 根本用不到它。见 _ensure_registry。
+        self._registry = None
 
         self._agent = None          # Supervisor 图（懒初始化，使用默认 LLM）
         self._agents: dict = {}     # 子 Agent 图缓存（默认 LLM）
@@ -145,8 +146,10 @@ class AIService:
     # ── 工具注册表初始化 ──────────────────────────────────────────
 
     def _ensure_registry(self):
-        if not self._registry._names:
-            logger.info("[AIService] 初始化 SkillRegistry，注册工具...")
+        if self._registry is None:
+            logger.info("[AIService] 初始化 SkillRegistry，加载 embedder 并注册工具...")
+            embedder = FastEmbedEmbeddings(model_name="BAAI/bge-small-zh-v1.5")
+            self._registry = SkillRegistry(embedder)
             all_tools = code_tools + file_tools + shell_tools + general_tools + pipeline_tools
             self._registry.register(all_tools)
 
