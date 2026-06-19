@@ -40,6 +40,14 @@
 9. **角色 LoRA 训出来不像参考图（2026-06-18，多 agent 调查+对抗验证）**：确凿根因=**训练目录从不清理**——重训只追加，上一轮旧图+旧 `.txt` caption 全残留进新训练集（只有 delete 才 rmtree），且 `_train_out`（生成的样图/检查点）放在 dataset 目录内、被 ai-toolkit 图片 globber 当训练图。叠加旧 `char` 触发词+外貌 caption → 训出「身材像、脸不像」。已修：① `_train_out` 挪到 dataset **之外** + 每次训练前清干净（含清掉历史遗留的 dataset 内 `_train_out`）；② 新增前端「清空重传」按钮 + 后端 `clear_images` action（保留触发词、清图重训）；③ rank 默认 32→64（人脸高频细节，从神似到形似）；④ caption docstring 纠正为「只写触发词」。**另一未决疑点（key 空间）**：训练底模 `ai-toolkit/Wan2.2-T2V-A14B-Diffusers-bf16`(diffusers key) vs 出片底模 `Wan-AI/Wan2.2-T2V-A14B`(native key)，**全程零 LoRA 格式转换**；lightx2v 是否自带 diff→native 重映射须真机核对：挂 LoRA 出片后 `grep -iE "lora.*(not loaded|missing|mismatch|skip)" /content/lightx2v.log`——若 0 key matched=key 不匹配（需加转换步骤），有 matched=key 没问题（那就是数据脏/触发词，本次已修）。「身材像」说明 LoRA 在生效→key 大概率没问题。
 8. **出片时长 9s→实际 5s（2026-06-18）**：根因=Wan 帧数须 `4n+1`，144 非法→server 静默回退默认 81≈5s；且无「秒→帧」入口。已修：① provider `_align_4np1` 把 num_frames 对齐到最近 4n+1 + 日志打印请求帧数；② 前端主行加「时长档(≈5/8/10/15s)」直观选；③ §3/§5d 把帧长写进 config（`LIGHTX2V_NUM_FRAMES`，只覆盖已有键），覆盖「server 只认 config」那种情况；④ provider 多带 `target_video_length/video_length` 别名兼容不同版本。**诚实未决**：per-request num_frames 是否真被 server 认，源码不在本仓→须真机核对（出两条不同时长片，比 api.log `num_frames=` 与实际秒数；不变=server 按 config 锁，用 §3/§5d 的 `LIGHTX2V_NUM_FRAMES` 重起）。同理 `infer_steps`（画质档）也可能 config-only，§5d 已暴露 `LIGHTX2V_STEPS`。
 
+10. **✅ API 契约真机核对完成（2026-06-19，对照 ModelTC/LightX2V 锁定版源码 `lightx2v/server/schema.py` + `api/tasks/`）—— 这是「出片基础不稳」的真凶**：旧 provider 照「猜的」字段发请求，一半字段 server 根本不认、被 Pydantic 静默丢弃。**权威 `TaskRequest` 字段**：`prompt`/`negative_prompt`/`image_path`/`seed`/`save_result_path`/`infer_steps`(默认5)/`num_fragments`/`target_video_length`(默认81)/`target_fps`(默认16)/`aspect_ratio`(默认"16:9")。逐项纠正(已落 `providers/lightx2v.py` + `tests/test_lightx2v_provider.py` 防回归)：
+    - ❌`target_shape:[H,W]` **不存在** → **分辨率(清晰度)per-request 控不了**，只能 `aspect_ratio` 控宽高比 + 像素尺寸看「起 server 的 config」。**前端 size 下拉过去是假的**(以为切 720p,server 一直按 config 默认尺寸出)。
+    - ❌`num_frames`/`video_length` **不存在** → 真名只有 `target_video_length`(此前别名里这条恰好蒙对,所以时长能控)。**结论:per-request 帧长生效**(原「config-only」担忧排除)。
+    - ❌`fps` **错名** → 真名 `target_fps`，旧的 `fps` 被忽略 → **一直 16fps**。
+    - ✅`infer_steps` **真字段、per-request 生效**(默认5) → **画质档是有效的**(原「可能 config-only」担忧排除)。
+    - ✅取片改用官方 `GET /v1/tasks/{task_id}/result`(流式返回成片)，弃掉满文件系统 glob;提交走 `/v1/tasks/video/`(`/v1/tasks/` 已 deprecated)。
+    - 终态值(`TaskStatus`)：`pending/processing/completed/failed/cancelled`(provider 终态集已含)。
+
 ## 四、还未实现 ❌（待办，按优先级）
 
 ### ✅ 已定位并修复（原 🔴 出片 `'NoneType' object is not callable`）—— 2026-06-18

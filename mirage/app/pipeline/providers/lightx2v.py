@@ -78,15 +78,25 @@ def server_lora_configs() -> list[dict]:
 def _extract_output(client: httpx.Client, base: str, task_id: str, status: dict, out_remote: str) -> None:
     """把成片取回本地 out_remote。
 
-    ★真机确认(2026-06-18 RTX PRO 6000):lightx2v server 把片存到同机本地
-      <install>/lightx2v/server_cache/outputs/{task_id}.mp4(文件名=task_id)。
-    优先用 status 里给的路径/URL(部分版本会给);没有就按这个约定 + LIGHTX2V_OUTPUT_DIR + glob 兜底拷回。
+    ★权威取片端点(对照 ModelTC/LightX2V 锁定版源码 lightx2v/server/api/tasks/common.py):
+      `GET /v1/tasks/{task_id}/result` 直接流式返回成片文件——不依赖文件系统约定/install 路径,最稳。
+    取不到再回退:status 里的 save_result_path → 同机本地约定 + glob。
     """
     import shutil
     import glob as _glob
-    # 1) status 直接给路径/URL(部分版本)
-    cand = (status.get("output_path") or status.get("save_path") or status.get("video_path")
-            or status.get("save_video_path") or status.get("result") or status.get("output"))
+    # 0) 官方流式取片端点(首选,确定性):GET /v1/tasks/{id}/result
+    try:
+        r = client.get(f"{base}/v1/tasks/{task_id}/result", timeout=300)
+        if r.status_code < 400 and r.content:
+            with open(out_remote, "wb") as f:
+                f.write(r.content)
+            return
+        logger.warning("[lightx2v] /result 返回空或 HTTP %s,回退本地路径", r.status_code)
+    except Exception as e:  # noqa: BLE001 —— 取片端点不可用就走文件系统兜底
+        logger.warning("[lightx2v] /result 取片失败(%s),回退本地路径", e)
+    # 1) status 直接给路径(真实响应字段=save_result_path,见 schema.py TaskResponse)
+    cand = (status.get("save_result_path") or status.get("output_path") or status.get("save_path")
+            or status.get("video_path") or status.get("save_video_path") or status.get("result") or status.get("output"))
     if isinstance(cand, dict):
         cand = (cand.get("video_path") or cand.get("output_path")
                 or cand.get("save_video_path") or cand.get("url"))
@@ -123,11 +133,12 @@ class Lightx2vT2VProvider(VideoProvider):
 
     def param_schema(self) -> list[dict]:
         return [
-            {"key": "size", "label": "分辨率(宽*高)", "type": "select", "default": settings.COMFYUI_SIZE,
+            # ★只控宽高比/朝向(server 端只认 aspect_ratio);清晰度=像素尺寸由「起 server 的 config」定,不在此处。
+            {"key": "size", "label": "画幅(宽高比;清晰度看 server config)", "type": "select", "default": settings.COMFYUI_SIZE,
              "options": [
-                 {"value": "480*832", "label": "480×832 竖屏"},
-                 {"value": "720*1280", "label": "720×1280 竖屏高清"},
-                 {"value": "832*480", "label": "832×480 横屏"},
+                 {"value": "480*832", "label": "竖屏 9:16"},
+                 {"value": "720*1280", "label": "竖屏 9:16(高)"},
+                 {"value": "832*480", "label": "横屏 16:9"},
              ]},
             {"key": "negative", "label": "负向词(留空=Wan 官方负向)", "type": "text", "default": "", "advanced": True},
             {"key": "frames", "label": "帧数(4n+1)", "type": "number", "default": settings.COMFYUI_FRAMES, "advanced": True},
@@ -147,26 +158,25 @@ class Lightx2vT2VProvider(VideoProvider):
         req_frames = int(params.get("frames") or settings.COMFYUI_FRAMES)
         num_frames = _align_4np1(req_frames)   # ★Wan 要 4n+1;不对齐 server 静默回退 81≈5s(就是「调了帧数还出5秒」)
         fps = int(params.get("fps") or settings.COMFYUI_FPS)
+        # 分辨率:per-request 只能给 aspect_ratio(真实字段);具体像素尺寸由「起 server 的 config」定死。
+        #   ★所以 size 下拉只控「宽高比/朝向」,不控清晰度——要 720p 须在 §5/§5d 的 server config 设基准分辨率重起。
+        aspect_ratio = "9:16" if height > width else ("16:9" if width > height else "1:1")
         payload = {
             "prompt": prompt or "",
             "negative_prompt": str(params.get("negative") or settings.WAN_VIDEO_NEGATIVE),
             "image_path": "",                                    # t2v 无首帧
-            "target_shape": [int(height), int(width)],           # ★[H,W] 待核对(lightx2v 文档示例如此)
-            "num_frames": num_frames,
-            # 不同 lightx2v 版本帧长键名不一,多带两个别名(server 取它认的、忽略多余的,无害)做前向兼容
-            "target_video_length": num_frames,
-            "video_length": num_frames,
-            "fps": fps,
-            "infer_steps": int(params.get("steps") or settings.WAN_LIGHTNING_STEPS),
+            # ★字段名对照锁定版 schema.py TaskRequest——以下都是 server 真认的键(旧版 target_shape/num_frames/video_length/fps 全不存在,被静默丢弃):
+            "target_video_length": num_frames,                   # 帧长(默认81);per-request 生效
+            "target_fps": fps,                                   # ★真名 target_fps(旧 "fps" server 不认→一直按默认16)
+            "aspect_ratio": aspect_ratio,                        # 宽高比(默认"16:9");像素尺寸看 server config
+            "infer_steps": int(params.get("steps") or settings.WAN_LIGHTNING_STEPS),  # per-request 生效(默认5),画质档有效
             "seed": seed,
         }
         if num_frames != req_frames:
             log_bus.emit(f"[lightx2v] 帧数 {req_frames} 非 4n+1，已对齐到 {num_frames}（≈{num_frames / max(1, fps):.1f}s@{fps}fps）")
-        logger.info("[lightx2v] t2v 请求 num_frames=%d(≈%.1fs@%dfps) steps=%d size=%dx%d —— 若实际出片帧数≠此值,"
-                    "说明该 server 版本忽略 per-request 帧数(需在 §5d config 写帧长重起)",
-                    num_frames, num_frames / max(1, fps), fps, payload["infer_steps"], width, height)
-        if settings.LIGHTX2V_MODEL_T2V:
-            payload["model_path"] = settings.LIGHTX2V_MODEL_T2V
+        logger.info("[lightx2v] t2v 请求 target_video_length=%d(≈%.1fs@%dfps) infer_steps=%d aspect=%s —— "
+                    "分辨率(清晰度)由 server config 定,size 下拉只控宽高比",
+                    num_frames, num_frames / max(1, fps), fps, payload["infer_steps"], aspect_ratio)
         # ★LoRA 的权威挂载点是「起 server 的 config」(见 server_lora_configs() + 笔记本 §5);
         #   per-request 这条多数 server 版本会忽略,这里仍带上(well-formed,带 name)做前向兼容,无害。
         loras = _lora_configs(params)
@@ -174,7 +184,7 @@ class Lightx2vT2VProvider(VideoProvider):
             payload["lora_configs"] = loras
         t0 = time.time()
         with httpx.Client() as client:
-            r = client.post(f"{base}/v1/tasks/", json=payload, timeout=120)
+            r = client.post(f"{base}/v1/tasks/video/", json=payload, timeout=120)  # ★video 子路由(/v1/tasks/ 已 deprecated)
             if r.status_code >= 400:
                 raise GpuRunError(f"lightx2v 拒绝任务(HTTP {r.status_code}): {r.text[:600]}")
             task_id = (r.json() or {}).get("task_id") or (r.json() or {}).get("id")
