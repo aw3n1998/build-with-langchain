@@ -347,6 +347,13 @@ export async function uploadCharacterFace(charId, projectId, file, workspace = n
   if (!r.ok) throw new Error(`status ${r.status}`)
   return r.json()
 }
+
+// 列出 lightx2v server 当前【实际加载】的 LoRA（读运行中 server 的 --config_json）——前端核对角色/蒸馏 LoRA 挂没挂
+export async function getLoadedLoras() {
+  const r = await fetch(`${getBase()}/pipeline/loaded_loras`)
+  if (!r.ok) throw new Error(`status ${r.status}`)
+  return r.json()
+}
 // 可复用模板库（per-workspace）：action=list/add/delete；kind=style/motion/prompt
 export async function templatesApi(action, fields = {}, workspace = null) {
   const r = await fetch(`${getBase()}/pipeline/templates`, {

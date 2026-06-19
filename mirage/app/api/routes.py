@@ -899,6 +899,67 @@ async def pipeline_character_face(
     return {"success": True, "char_id": char_id, "ref_image_path": face_path}
 
 
+@router.get("/pipeline/loaded_loras")
+async def pipeline_loaded_loras():
+    """列出 lightx2v server 当前【实际加载】的 LoRA —— 让前端直接看到「角色/蒸馏 LoRA 到底挂没挂」，不用再猜。
+
+    权威来源：lightx2v 只认「起 server 的 config」(per-request 传会被忽略)。本端点优先读【正在运行的
+    lightx2v 进程的 --config_json】(最准,正是它启动时真正加载的那份),拿不到再退已知 Colab 路径。
+    """
+    import json as _json
+    import os as _os
+    import subprocess as _sp
+    prov = settings.T2V_PROVIDER or ""
+    cfg_path = ""
+    try:   # 从运行中的 server 进程命令行取 --config_json(权威=它实际加载的配置)
+        out = _sp.run(["pgrep", "-af", "lightx2v.server"], capture_output=True, text=True, timeout=5).stdout
+        for line in out.splitlines():
+            toks = line.split()
+            if "--config_json" in toks:
+                cfg_path = toks[toks.index("--config_json") + 1]
+                break
+    except Exception:  # noqa: BLE001  (Windows/无 pgrep 时跳过,走兜底路径)
+        pass
+    if not (cfg_path and _os.path.exists(cfg_path)):
+        for p in ("/content/wan_moe_t2v_lora.json", "/content/wan_moe_t2v_use.json"):
+            if _os.path.exists(p):
+                cfg_path = p
+                break
+    cfg: dict = {}
+    if cfg_path and _os.path.exists(cfg_path):
+        try:
+            cfg = _json.load(open(cfg_path))
+        except Exception:  # noqa: BLE001
+            cfg = {}
+    distill_set = {(settings.LIGHTX2V_DISTILL_LORA_HIGH or "").strip(), (settings.LIGHTX2V_DISTILL_LORA_LOW or "").strip()} - {""}
+    loras = []
+    for it in (cfg.get("lora_configs") or []):
+        path = str(it.get("path") or "")
+        base = _os.path.basename(path)
+        low = (path + "|" + base).lower()
+        is_distill = (path in distill_set) or any(k in low for k in ("lightning", "distill", "lightx2v_t2v_lora", "4step", "seko", "lightx2v"))
+        loras.append({
+            "kind": "蒸馏加速" if is_distill else "角色",
+            "name": it.get("name", ""),               # high_noise_model / low_noise_model
+            "file": base,
+            "strength": it.get("strength", 1.0),
+            "exists": (_os.path.exists(path) if path else False),
+        })
+    has_char = any(x["kind"] == "角色" for x in loras)
+    return {
+        "provider": prov,
+        "running": bool(cfg_path and _os.path.exists(cfg_path)),
+        "source": cfg_path or "(未找到 server 配置——server 没起、或后端不在同机)",
+        "infer_steps": cfg.get("infer_steps"),
+        "enable_cfg": cfg.get("enable_cfg"),
+        "has_char": has_char,
+        "loras": loras,
+        "note": ("强锁脸(Stand-In)通道不读这里——它身份来自参考脸+自带适配器,不走 lightx2v 的 lora_configs。"
+                 if prov == "standin-t2v" else
+                 "这是 lightx2v server 起服务时真正加载的 LoRA(权威挂载点);改 LoRA/换角色要重跑笔记本 §5d。"),
+    }
+
+
 @router.get("/pipeline/jobs/{job_id}/events")
 async def pipeline_job_events(job_id: str, since: int = 0) -> StreamingResponse:
     """SSE：回放并实时跟随某个 GPU 任务的事件，直到完成。

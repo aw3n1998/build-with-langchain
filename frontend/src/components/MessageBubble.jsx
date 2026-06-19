@@ -24,7 +24,7 @@ import { fileUrl, getVideoProviders, getImageProviders, getProject, batchGenerat
          suggestContinuation, sceneGenerate, sceneRender, sceneAppend,
          cancelJob, listActiveJobs,
          projectStyle, sceneAdd, sceneDelete, listLoras,
-         oneClick, autoSelect, uploadCharacterFace } from '../api'
+         oneClick, autoSelect, uploadCharacterFace, getLoadedLoras } from '../api'
 
 /**
  * MessageBubble — 消息渲染
@@ -687,6 +687,8 @@ export function ProductionPanel({ message, workspace, sessionId }) {
   const [imgAdv, setImgAdv] = usePersistedState('imgAdv', { steps: '', guidance: '', seed: '', offload: '' })
   const [vidParams, setVidParams] = usePersistedState('vidParams', {})
   const [lockFace, setLockFace] = usePersistedState('lockFace', false)   // 强锁脸(Stand-In):有参考脸的角色镜走「一张脸硬锁」通道(需先跑 Colab §Stand-In)
+  const [loadedLoras, setLoadedLoras] = useState(null)   // lightx2v server 当前实际加载的 LoRA(查看用)
+  const [loraStatusBusy, setLoraStatusBusy] = useState(false)
   const [sceneBusy, setSceneBusy] = useState({})   // {sceneId: 'generate'|'render'|'append'}
   const [appendPrompt, setAppendPrompt] = useState({})  // {sceneId: 追加段的运镜提示词(可空)}
   const [appendCount, setAppendCount] = useState({})    // {sceneId: 本次追加几段}
@@ -1057,6 +1059,13 @@ export function ProductionPanel({ message, workspace, sessionId }) {
     setProgress('上传参考脸中…')
     try { await uploadCharacterFace(charId, proj?.id || '', file, workspace); await load(); setProgress('参考脸已上传（出片勾「强锁脸(Stand-In)」即用它锁这张脸）') }
     catch (e) { setProgress('参考脸上传失败：' + String(e.message || e)) }
+  }
+  // 查 lightx2v server 当前【实际加载】的 LoRA(权威:读运行中 server 的 config)——核对角色/蒸馏挂没挂
+  const checkLoadedLoras = async () => {
+    setLoraStatusBusy(true)
+    try { setLoadedLoras(await getLoadedLoras()) }
+    catch (e) { setProgress('查询已挂 LoRA 失败：' + String(e.message || e)) }
+    finally { setLoraStatusBusy(false) }
   }
   const loraBootstrap = async (tid) => {
     const { mode, count } = bootOf(tid)
@@ -1506,6 +1515,35 @@ export function ProductionPanel({ message, workspace, sessionId }) {
             手动传 20-30 张同脸图开训。<b style={{ color: '#ffb454' }}>务必含 8-10 张脸部特写（脸占大半画面、戴眼镜要拍清）</b>——
             只传全身照的话脸太小、训出来只像体型不像脸（头号坑）。混搭：脸特写 8-10 张 + 半身 5-6 + 全身 4-5。
             <b style={{ color: '#5fe8de' }}>免上传自训·造图</b> 需出图后端 ComfyUI；纯 lightx2v t2v 无 ComfyUI → 请手动上传。
+          </div>
+          {/* 当前 server 实际加载的 LoRA(权威:读运行中 lightx2v 的 --config_json)——一眼看出角色/蒸馏挂没挂 */}
+          <div style={{ border: '1px dashed var(--border)', borderRadius: 6, padding: 8, marginBottom: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <button onClick={checkLoadedLoras} disabled={loraStatusBusy} style={{ ...miniBtn2, cursor: 'pointer' }}>
+                {loraStatusBusy ? '查询中…' : '🔄 查看 server 当前已挂 LoRA'}
+              </button>
+              <span style={{ fontSize: 11, color: 'var(--text-dim)' }}>核对角色/蒸馏 LoRA 到底挂没挂（权威=lightx2v 起服务的 config）</span>
+            </div>
+            {loadedLoras && (
+              <div style={{ marginTop: 6, fontSize: 12 }}>
+                {(loadedLoras.loras || []).length === 0 ? (
+                  <div style={{ color: '#fca5a5' }}>⚠ 没读到已挂 LoRA。{loadedLoras.note}<br /><span style={{ color: 'var(--text-dim)', fontSize: 10 }}>来源: {loadedLoras.source}</span></div>
+                ) : (
+                  <>
+                    <div style={{ color: loadedLoras.has_char ? '#34d399' : '#ffb454', marginBottom: 4 }}>
+                      {loadedLoras.has_char ? '✅ 已挂角色 LoRA（出片会像你训的人）' : '⚠ 只挂了蒸馏、没挂角色 LoRA → 出片不会像你训的人（去 §5d 挂上）'}
+                      {loadedLoras.infer_steps != null && <span style={{ color: 'var(--text-dim)' }}>　·　步数 {loadedLoras.infer_steps}{loadedLoras.enable_cfg ? '（CFG开·高画质档）' : '（蒸馏档）'}</span>}
+                    </div>
+                    {loadedLoras.loras.map((l, i) => (
+                      <div key={i} style={{ color: l.exists ? 'var(--text-muted)' : '#fca5a5', fontFamily: 'monospace', fontSize: 11 }}>
+                        {l.kind === '角色' ? '🧑 ' : '⚡ '}{l.kind} · {l.name} · str {l.strength} · {l.file}{l.exists ? '' : ' ❌文件不存在'}
+                      </div>
+                    ))}
+                    <div style={{ color: 'var(--text-dim)', fontSize: 10, marginTop: 4 }}>来源: {loadedLoras.source}</div>
+                  </>
+                )}
+              </div>
+            )}
           </div>
           {(proj?.lora_trainings || []).map(t => (
             <div key={t.id} style={{ border: '1px solid var(--border)', borderRadius: 6, padding: 8, marginBottom: 6 }}>
