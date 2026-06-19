@@ -29,7 +29,8 @@ _SYSTEM = (
     "   - title: 6字内的镜头小标题\n"
     "   - image_prompt: 出图画面描述，**必须用英文**（出图模型 FLUX 只懂英文；中文会被画成毫不相关的乱图——头号坑）。\n"
     "     **人物务必写明确年龄数字**（如 '17-year-old'、'40-year-old man'，别只写 teenager/old man，否则画错年龄）；\n"
-    "     同一角色每镜复用同一段英文外貌描述（hair / face / clothing / distinctive features），保证跨镜是同一个人；结尾统一带英文风格词。\n"
+    "     同一角色每镜复用同一段英文外貌描述（hair / face / clothing / distinctive features），保证跨镜是同一个人；"
+    "**尤其服装/发型要逐镜逐字一致**（镜间无记忆，不重复写就会换装/裤子变样）；结尾统一带英文风格词。\n"
     "   - motion_prompt: 图生视频运镜(喂 Wan2.2，**优先英文**——运镜术语英文更稳)。写**一段**(非一句)，按公式：\n"
     "     [主体的一个具体动作，先轻后重、单一方向；若是复杂动作只取它的【一个子步骤】并写出中间过程(slowly / gradually / continuous / smooth motion)，别只给最终结果] + [单一运镜术语] + [光影/氛围]。运镜术语**只选一个**英文：\n"
     "     push-in / pull-out / pan left / pan right / tilt up / tilt down / orbit / following shot / static shot，别堆两个矛盾运镜。\n"
@@ -161,9 +162,11 @@ async def breakdown_storyboard(novel_text: str, n: int, *, style: str = "",
         if lines:
             char_block = "本剧角色（image_prompt 写到该角色时，把其外貌**翻成英文**写进去；character 字段填其原名）：\n" + "\n".join(lines) + "\n"
             if any_lora:
-                char_block += ("注：标了［已训LoRA］的角色，身份由 LoRA 自动锁定——其 image_prompt 只写**精简中性外貌**"
-                               "（性别 + 大致年龄 + 本镜服装/动作/景别即可），**不要堆 hair/face/distinctive features 长串**，"
-                               "以免外貌词与 LoRA 学到的脸打架（这类角色靠触发词+LoRA 保证是同一个人，不靠文字描述）。\n")
+                char_block += ("注：标了［已训LoRA］的角色，**脸由 LoRA 自动锁定**——image_prompt 脸部从简（性别+大致年龄即可，"
+                               "别堆 hair/face/distinctive features，免得和 LoRA 学到的脸打架）。\n"
+                               "**但服装/发型 LoRA 不锁、镜与镜之间也没有记忆**：必须给该角色**定一套固定服装**（用它外貌栏里的衣着，"
+                               "没有就你自拟一套），并在它出现的**每一个镜头 image_prompt 里逐字重复同一套服装**（如每镜都写 "
+                               "'wearing a beige jacket and black jeans'）——否则跨镜会换装、裤子变样。\n")
 
     human = (
         f"{char_block}"

@@ -1287,6 +1287,7 @@ class ScenePromptsRequest(BaseModel):
     scene_number: int | None = None    # 镜号；None=不改
     voice: str | None = None           # 这一镜 TTS 音色(角色圣经)；None=不改
     dialogue: str | None = None        # 多角色对话「说话人：台词」逐行；合成时按角色音色逐句配音。None=不改
+    character: str | None = None       # 本镜主角名(t2v 出片注入该角色触发词锁脸 + 音色路由按它查角色);None=不改
 
 
 @router.post("/pipeline/scene_prompts")
@@ -1301,7 +1302,8 @@ async def pipeline_scene_prompts(req: ScenePromptsRequest):
     s = store.update_scene_prompts(
         req.scene_id, image_prompt=req.image_prompt,
         motion_prompt=req.motion_prompt, narration=req.narration, subtitle=req.subtitle,
-        title=req.title, scene_number=req.scene_number, dialogue=req.dialogue)
+        title=req.title, scene_number=req.scene_number, dialogue=req.dialogue,
+        character=req.character)
     if req.lipsync is not None:
         s = store.set_scene_lipsync(req.scene_id, req.lipsync)
     if req.voice is not None:

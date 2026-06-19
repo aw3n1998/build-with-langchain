@@ -1996,18 +1996,19 @@ function ScenePrompts({ scene, characters, workspace, onSaved }) {
   const [mot, setMot] = useState(scene.motion_prompt || '')
   const [nar, setNar] = useState(scene.narration || '')
   const [sub, setSub] = useState(scene.subtitle || '')
+  const [cha, setCha] = useState(scene.character || '')   // 本镜主角(t2v 注入该角色触发词锁脸)
   const [dlgRows, setDlgRows] = useState(() => _parseDlg(scene.dialogue || ''))
   const [saving, setSaving] = useState(false)
   const dlgStr = dlgRows.map(r => (r.speaker ? r.speaker + '：' + r.text : r.text)).filter(x => x.trim()).join('\n')
   const numChanged = num !== '' && Number(num) !== scene.scene_number
   const dirty = img !== (scene.image_prompt || '') || mot !== (scene.motion_prompt || '')
     || nar !== (scene.narration || '') || sub !== (scene.subtitle || '') || dlgStr !== (scene.dialogue || '')
-    || tit !== (scene.title || '') || numChanged
+    || tit !== (scene.title || '') || cha !== (scene.character || '') || numChanged
 
   const save = async () => {
     setSaving(true)
     try {
-      const fields = { image_prompt: img, motion_prompt: mot, narration: nar, subtitle: sub, dialogue: dlgStr, title: tit }
+      const fields = { image_prompt: img, motion_prompt: mot, narration: nar, subtitle: sub, dialogue: dlgStr, title: tit, character: cha }
       if (numChanged) fields.scene_number = Number(num)
       await updateScenePrompts(scene.scene_id, fields, workspace)
       onSaved?.()
@@ -2051,6 +2052,14 @@ function ScenePrompts({ scene, characters, workspace, onSaved }) {
                 style={{ ...inputStyle, height: 28, fontSize: 11.5 }} />
             </label>
           </div>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+            <span style={{ fontSize: 10.5, color: 'var(--text-muted)' }}>本镜主角（t2v 自动注入该角色触发词锁脸；单人镜务必选好，多人镜留空防串脸）</span>
+            <select value={cha} onChange={e => setCha(e.target.value)} style={{ ...inputStyle, height: 28, fontSize: 11.5 }}>
+              <option value="">（空 / 多人镜）</option>
+              {(characters || []).map(c => <option key={c.id} value={c.name}>{c.name || '(未命名)'}</option>)}
+              {cha && !(characters || []).some(c => c.name === cha) && <option value={cha}>{cha}（无此角色）</option>}
+            </select>
+          </label>
           {ta('画面提示词（image_prompt，t2v 出片的画面描述；角色触发词自动注入）', img, setImg, 3)}
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', margin: '0 0 6px' }}>
             <TemplateBar kind="prompt" label="提示词" workspace={workspace} getContent={() => img} onApply={c => setImg(c)} />

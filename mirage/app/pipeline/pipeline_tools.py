@@ -691,17 +691,21 @@ def _compose_t2v_prompt(scene, motion_prompt, pstyle, *, lock_character: bool = 
             pass
     multi = _scene_multi_person(scene, motion)
     char_trigger = ""
-    if lock_character and not multi:
-        scene_char = (scene.get("character") or "").strip()
-        if scene_char and scene.get("project_id"):
-            try:
-                from mirage.app.pipeline.lora_train import effective_trigger
-                for c in (get_store().list_characters(scene["project_id"]) or []):
-                    if (c.get("name") or "").strip() == scene_char:
-                        char_trigger = effective_trigger(c.get("trigger_word"), c.get("name"))
-                        break
-            except Exception:  # noqa: BLE001 取角色失败就退回项目级触发词
-                char_trigger = ""
+    if lock_character and not multi and scene.get("project_id"):
+        try:
+            from mirage.app.pipeline.lora_train import effective_trigger
+            chars = get_store().list_characters(scene["project_id"]) or []
+            scene_char = (scene.get("character") or "").strip()
+            pick = next((c for c in chars if (c.get("name") or "").strip() == scene_char), None) if scene_char else None
+            if pick is None:
+                # ★没填「本镜主角」(图省事/手动建镜)→ 单人镜自动锁「项目主角」:优先唯一训过 LoRA 的角色,否则唯一角色;
+                #   多个训练角色才需用户去「本镜主角」里选(免锁错人)。省去逐镜填角色,也避免"每镜各编一个人=样子全变"。
+                trained = [c for c in chars if (c.get("trained_lora_id") or c.get("trigger_word") or "").strip()]
+                pick = trained[0] if len(trained) == 1 else (chars[0] if len(chars) == 1 else None)
+            if pick is not None:
+                char_trigger = effective_trigger(pick.get("trigger_word"), pick.get("name"))
+        except Exception:  # noqa: BLE001 取角色失败就退回项目级触发词
+            char_trigger = ""
     # 多人镜 / 不锁角色:连项目级触发词回退也跳过(否则空 character 镜照样被全局触发词污染→串脸)
     if multi or not lock_character:
         trigger = char_trigger          # 多半为空 → 不注入触发词
