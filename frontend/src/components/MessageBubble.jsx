@@ -16,7 +16,7 @@ function usePersistedState(key, initial) {
   return [val, setVal]
 }
 import ReactMarkdown from 'react-markdown'
-import { fileUrl, getVideoProviders, getImageProviders, getProject, batchGenerate, batchFinish, continuation,
+import { fileUrl, getVideoProviders, getImageProviders, getProject, batchGenerate, batchFinish, continuation, continuationOne,
          pipelineSelect, streamJobEvents, pipelineUpscale, pipelineFaceswap, uploadCandidate, uploadContinueVideo, updateScenePrompts,
          deleteCandidate, deleteSceneVideo, sceneUndoAppend, deleteEpisode, suggestSegmentPrompts,
          autoStoryboard, autoFill, characters as charactersApi, templatesApi,
@@ -820,6 +820,23 @@ export function ProductionPanel({ message, workspace, sessionId }) {
       sceneJob.current[sceneId] = jobId
       await consume(jobId)
     } catch { /* ignore */ }
+    finally { delete sceneJob.current[sceneId]; setSceneBusy(p => { const n = { ...p }; delete n[sceneId]; return n }) }
+  }
+
+  // 「续这镜」：只重出这一镜——用【上一镜】的尾帧当首帧走 i2v 续接，其它镜不动。快速试参/修单镜。
+  const runContinueOne = async (sceneId) => {
+    if (busy || sceneBusy[sceneId]) return
+    startAt.current[sceneId] = Date.now()
+    setLogs([]); setShowLogs(true)
+    setSceneBusy(p => ({ ...p, [sceneId]: 'continue1' }))
+    try {
+      const jobId = await continuationOne({
+        project_id: pid, scene_id: sceneId, workspace, session_id: sessionId,
+        size: vidSize, video_params: { ...vidParams },
+      })
+      sceneJob.current[sceneId] = jobId
+      await consume(jobId)
+    } catch (e) { setProgress('单镜续接失败：' + String(e.message || e)) }
     finally { delete sceneJob.current[sceneId]; setSceneBusy(p => { const n = { ...p }; delete n[sceneId]; return n }) }
   }
 
@@ -1933,6 +1950,16 @@ export function ProductionPanel({ message, workspace, sessionId }) {
                         border: '1px solid rgba(239,68,68,0.35)', background: 'rgba(239,68,68,0.12)',
                         color: 'rgba(252,165,165,1)', fontSize: 11.5, cursor: 'pointer',
                       }}>删除成片 · 重出</button>
+                    {s.scene_number > 1 && (
+                      <button onClick={() => runContinueOne(s.scene_id)} disabled={busy || !!sceneBusy[s.scene_id]}
+                        title="只重出这一镜：用上一镜的尾帧走 i2v 续接，其它镜不动(快速试参/修单镜)。需先起 i2v server。"
+                        style={{
+                          height: 26, padding: '0 12px', borderRadius: 6,
+                          border: '1px solid rgba(129,140,248,0.45)', background: 'rgba(99,102,241,0.12)',
+                          color: '#a5b4fc', fontSize: 11.5,
+                          cursor: (busy || !!sceneBusy[s.scene_id]) ? 'default' : 'pointer',
+                        }}>{sceneBusy[s.scene_id] === 'continue1' ? '续接中…' : '🔗 续这镜(i2v)'}</button>
+                    )}
                   </div>
                 </div>
               ) : (

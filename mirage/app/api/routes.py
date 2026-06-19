@@ -2152,6 +2152,49 @@ async def pipeline_continuation(req: ContinuationRequest):
     return {"job_id": job_manager.submit("continuation", lambda: _continuation_events(req), meta=meta)}
 
 
+class ContinuationOneRequest(BaseModel):
+    project_id: str
+    scene_id: str
+    workspace: str | None = None
+    session_id: str | None = None
+    size: str = ""
+    video_params: dict = {}
+
+
+async def _continuation_one_events(req: "ContinuationOneRequest"):
+    """单镜续接：只重出这一镜（用上一镜尾帧走 i2v），其它镜不动。快速试参/修单镜用。"""
+    from mirage.app.pipeline.runtime import set_workspace
+    from mirage.app.pipeline.pipeline_tools import render_continuation_one
+    set_workspace(req.workspace)
+    params: dict = dict(req.video_params or {})
+    if req.size:
+        params["size"] = req.size
+    yield {"type": "batch_progress", "phase": "render", "label": "单镜续接中…（i2v）"}
+    out = None
+    try:
+        async for it in _run_with_logs(lambda: render_continuation_one(req.project_id, req.scene_id, params)):
+            if "_log" in it:
+                yield {"type": "log", "line": it["_log"]}
+            else:
+                out = it["_result"]
+    except Exception as e:  # noqa: BLE001
+        yield {"type": "tool_result", "name": "continuation_one", "content": f"单镜续接失败: {type(e).__name__}: {e}"}
+        return
+    _clean, events = ai_service._extract_tool_markers(out or "")
+    for ev in events:
+        yield ev
+    yield {"type": "scene_ready", "scene_id": req.scene_id}
+    yield {"type": "tool_result", "name": "continuation_one", "content": _clean or "完成"}
+
+
+@router.post("/pipeline/continuation_one")
+async def pipeline_continuation_one(req: ContinuationOneRequest):
+    """单镜续接：只重出指定一镜（接上一镜尾帧）。其它镜不动，适合快速试参/修单镜。"""
+    from mirage.app.services.job_manager import job_manager
+    meta = {"session_id": req.session_id, "project_id": req.project_id}
+    return {"job_id": job_manager.submit("continuation", lambda: _continuation_one_events(req), meta=meta)}
+
+
 class SceneGenRequest(BaseModel):
     scene_id: str
     workspace: str | None = None
