@@ -181,7 +181,8 @@ export default function App() {
   useEffect(() => {
     let alive = true
     setHasProject(false); setPanelProjectId(null)
-    if (!workspace) return
+    // 即使没显式选工作目录(workspace='')也加载【默认工作目录】的剧集——否则刷新后列表空,
+    // 但一点「新建剧集」(refreshProjects 无此守卫)旧剧集又全冒出来 = "刷新不自动加载"的真因。
     listProjects(workspace).then(d => {
       if (!alive) return
       const ps = d?.projects || []
