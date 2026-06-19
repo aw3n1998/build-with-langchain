@@ -51,5 +51,10 @@ if settings.LIGHTX2V_ENABLED and settings.LIGHTX2V_BASE_URL:
 if settings.STANDIN_ENABLED and settings.STANDIN_BASE_URL:
     from mirage.app.pipeline.providers.standin import StandInT2VProvider
     video_provider_registry.register(StandInT2VProvider())
+# lightx2v 图生视频(i2v)后端 —— 用于「尾帧续接」:镜N 用镜N-1 尾帧当首帧续生成(跨镜画面连续)。
+# 隐藏 Provider,由「续接出片」按需路由(见 pipeline_tools._continuation_*)。配了 LIGHTX2V_I2V_ENABLED + 端点才注册。
+if settings.LIGHTX2V_I2V_ENABLED and settings.LIGHTX2V_I2V_BASE_URL:
+    from mirage.app.pipeline.providers.lightx2v_i2v import Lightx2vI2VProvider
+    video_provider_registry.register(Lightx2vI2VProvider())
 
 __all__ = ["VideoProvider", "video_provider_registry"]

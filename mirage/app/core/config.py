@@ -171,6 +171,12 @@ class Settings(BaseSettings):
     STANDIN_ENABLED: bool = False           # 配了端点 + 跑了 Colab §Stand-In 起 server 才注册;默认关
     STANDIN_BASE_URL: str = ""              # 如 http://127.0.0.1:8190(与 lightx2v 8189 错开)
     STANDIN_STEPS: int = 20                 # 锁脸无蒸馏采样步数(20 起细;Stand-In 不挂蒸馏 LoRA,身份来自参考脸)
+    # lightx2v 图生视频(i2v)后端 —— 用于「尾帧续接」(镜N 用镜N-1 尾帧当首帧续生成,跨镜画面连续)。
+    # 轮流跑:与 t2v server 不同端口、但同一时刻只起一个(96G 装不下两套);i2v 底模放 Drive。默认 40 步(慢)。
+    LIGHTX2V_I2V_ENABLED: bool = False       # 跑了 Colab §i2v续接 起 i2v server 才注册
+    LIGHTX2V_I2V_BASE_URL: str = ""          # 如 http://127.0.0.1:8190(与 t2v 8189 错开)
+    LIGHTX2V_MODEL_I2V: str = ""             # i2v 端 Wan2.2-I2V-A14B 权重目录(Drive 路径)
+    LIGHTX2V_I2V_STEPS: int = 40             # i2v 采样步数(默认 40+CFG;4 步蒸馏只有 nvfp4 版,默认走 bf16)
     # ── 视频模型解耦：默认 Provider + LTX-Video 配置 ──────────────
     # 默认用哪个视频模型（对应 providers 注册名：wan2.2 / ltx）
     VIDEO_PROVIDER_DEFAULT: str = "wan2.2"

@@ -244,6 +244,8 @@ export async function getProject(projectId, workspace = null) {
 }
 export async function batchGenerate(params) { return submitJob('/pipeline/batch_generate', params) }
 export async function batchFinish(params) { return submitJob('/pipeline/batch_finish', params) }
+// 尾帧续接出片(i2v):镜1(t2v链头)→镜2.. 用上一镜尾帧续生成,跨镜画面连续。需先起 i2v server。
+export async function continuation(params) { return submitJob('/pipeline/continuation', params) }
 // 单个分镜独立出图 / 出片
 export async function sceneGenerate(params) { return submitJob('/pipeline/scene_generate', params) }
 export async function sceneRender(params) { return submitJob('/pipeline/scene_render', params) }

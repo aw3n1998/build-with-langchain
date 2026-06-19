@@ -16,7 +16,7 @@ function usePersistedState(key, initial) {
   return [val, setVal]
 }
 import ReactMarkdown from 'react-markdown'
-import { fileUrl, getVideoProviders, getImageProviders, getProject, batchGenerate, batchFinish,
+import { fileUrl, getVideoProviders, getImageProviders, getProject, batchGenerate, batchFinish, continuation,
          pipelineSelect, streamJobEvents, pipelineUpscale, pipelineFaceswap, uploadCandidate, uploadContinueVideo, updateScenePrompts,
          deleteCandidate, deleteSceneVideo, sceneUndoAppend, deleteEpisode, suggestSegmentPrompts,
          autoStoryboard, autoFill, characters as charactersApi, templatesApi,
@@ -1187,14 +1187,15 @@ export function ProductionPanel({ message, workspace, sessionId }) {
     setLogs([]); setShowLogs(true)
     setBusy(kind); setProgress('提交任务…')
     try {
-      const submit = kind === 'generate' ? batchGenerate : batchFinish
+      const submit = kind === 'generate' ? batchGenerate : kind === 'continuation' ? continuation : batchFinish
       const [iw, ih] = (imgSize || '0x0').split('x').map(Number)
       const jobId = await submit({
         project_id: pid, workspace, session_id: sessionId,
         model: kind === 'finish' ? model : '',
         segments: kind === 'finish' ? segments : 1,
-        size: kind === 'finish' ? vidSize : '',
-        video_params: kind === 'finish' ? { ...vidParams, ...(lockFace ? { lock_face: true } : {}) } : {},
+        size: (kind === 'finish' || kind === 'continuation') ? vidSize : '',
+        video_params: kind === 'finish' ? { ...vidParams, ...(lockFace ? { lock_face: true } : {}) }
+          : (kind === 'continuation' ? { ...vidParams } : {}),
         video_mode: 't2v',   // 纯 t2v：批量出片直接逐镜文生(跳过出图/选图)
         n: kind === 'generate' ? imgN : 0,
         width: kind === 'generate' ? (iw || 0) : 0,
@@ -1692,6 +1693,15 @@ export function ProductionPanel({ message, workspace, sessionId }) {
             color: '#04201e', fontSize: 13, fontWeight: 700, cursor: 'pointer',
           }}>
           {busy === 'finish' ? '出片合成中…' : `🎬 批量出片并合成（t2v · ${c.total} 镜）`}
+        </button>
+        <button onClick={() => runJob('continuation')} disabled={!!busy || !(c.total > 1)}
+          title="续接出片(i2v)：镜1 先用 t2v 出好当链头，镜2+ 用上一镜尾帧续生成 → 跨镜服装/场景/光线/动作连续(纯 t2v 做不到)。前置：在 Colab 跑「§i2v续接」起 i2v server。i2v 默认 40 步、较慢。"
+          style={!(c.total > 1) ? panelBtn(false, true) : {
+            height: 34, padding: '0 14px', borderRadius: 8, border: '1px solid rgba(129,140,248,0.55)',
+            background: busy === 'continuation' ? 'rgba(99,102,241,0.5)' : 'transparent',
+            color: '#a5b4fc', fontSize: 12.5, fontWeight: 600, cursor: busy ? 'default' : 'pointer',
+          }}>
+          {busy === 'continuation' ? '续接中…' : '🔗 续接出片(i2v·连贯)'}
         </button>
         {/* 纯 t2v：出片后端由 T2V_PROVIDER(lightx2v) 路由、不看这个选择 → 移除误导的 i2v 模型下拉(Wan2.2-I2V/LTX)。
             出片参数(帧数/帧率/步数/seed)在下方「更多参数」调,字段名与 lightx2v 一致、对 t2v 生效。 */}

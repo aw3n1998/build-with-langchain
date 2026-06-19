@@ -782,6 +782,67 @@ def _do_render_t2v(scene_id, scene, motion_prompt, params) -> str:
             f"已下载到本机: {final_local}\nVIDFILE::{scene_id}::{final_local}")
 
 
+def render_continuation(project_id: str, params: dict | None = None) -> str:
+    """尾帧续接(i2v):项目内分镜按序——镜1 必须已有成片(t2v 出的链头);镜2.. 用上一镜【尾帧】当首帧走 i2v 续生成,
+    服装/场景/光线/动作跨镜连续(纯 t2v 做不到的"续接")。需先在 Colab 跑「§i2v续接」起 i2v server(lightx2v-i2v 注册)。
+
+    轮流跑约束:i2v server 与 t2v server 不同时(96G 装不下),所以用法=先(t2v)出镜1当链头→切 i2v→本函数续 2..N。
+    """
+    params = params or {}
+    store = get_store()
+    if not video_provider_registry.has("lightx2v-i2v"):
+        return ("i2v 续接后端未就绪：请先在 Colab 跑「§i2v续接」格起 i2v server"
+                "(它会停 t2v 腾显存、从 Drive 加载 i2v 底模、起 lightx2v --task i2v、写 .env 重启后端)。")
+    prov = video_provider_registry.get("lightx2v-i2v")
+    scenes = sorted(store.list_scenes(project_id), key=lambda s: s.get("scene_number") or 0)
+    if not scenes:
+        return "没有分镜。"
+    from mirage.app.pipeline.assembler import extract_last_frame
+    try:
+        pstyle = store.get_project_style(project_id) or {}
+    except Exception:  # noqa: BLE001
+        pstyle = {}
+    merged = {**prov.default_params(), **{k: v for k, v in params.items() if v is not None and v != ""}}
+    for _k in ("video_mode", "lightning", "lock_character", "lock_face", "motion_prompts", "segments"):
+        merged.pop(_k, None)
+    local_dir = video_dir()
+    out_lines: list[str] = []
+    prev_video = None
+    for sc in scenes:
+        sid = sc.get("id") or sc.get("scene_id")
+        num = sc.get("scene_number") or 0
+        if prev_video is None:   # 链头:必须已有成片(t2v 出的)
+            v = (sc.get("video_path") or sc.get("video") or "").strip()
+            if not (v and os.path.exists(v)):
+                return (f"链头 镜{num} 还没成片。续接需要镜1先有片当起点：\n"
+                        "① 先用 t2v 出镜1(定调:胖哥+服装+场景) → ② 跑「§i2v续接」切到 i2v → ③ 再点「续接出片」。")
+            prev_video = v
+            out_lines.append(f"链头 镜{num} ✓（沿用现成片）")
+            continue
+        frame = os.path.join(local_dir, f"cont_{sid}_first.png")
+        try:
+            extract_last_frame(prev_video, frame)   # 上一镜尾帧 → 本镜首帧
+        except Exception as e:  # noqa: BLE001
+            return f"取上一镜尾帧失败(镜{num}): {e}\n(已完成: {', '.join(out_lines) or '无'})"
+        motion = sc.get("motion_prompt") or ""
+        prompt = _compose_t2v_prompt(sc, motion, pstyle, lock_character=not _scene_multi_person(sc, motion))
+        out = os.path.join(local_dir, f"{num:02d}_{sid}.mp4")
+        try:
+            store.set_scene_video_mode(sid, "t2v")
+            store.set_scene_state(sid, SceneState.PENDING_VIDEO_GEN, force=True)
+            _gpu_retry(lambda f=frame, p=prompt, o=out: prov.generate(None, image_path=f, prompt=p, out_remote=o, params=merged),
+                       what=f"i2v续接 {sid}")
+        except (GpuConfigError, GpuRunError, RuntimeError, OSError) as e:
+            store.set_scene_state(sid, SceneState.FAILED, force=True)
+            return f"镜{num} 续接失败: {e}\n(已完成: {', '.join(out_lines) or '无'})"
+        store.set_scene_video(sid, out)
+        store.set_scene_state(sid, SceneState.COMPLETED)
+        prev_video = out
+        out_lines.append(f"镜{num} 续接✓")
+        out_lines.append(f"VIDFILE::{sid}::{out}")
+    return "尾帧续接完成（镜2 起逐镜接上一镜尾帧）。\n" + "\n".join(out_lines)
+
+
 def do_render_scene_video(
     scene_id: str,
     motion_prompt: str = "",

@@ -2111,6 +2111,46 @@ async def _scene_render_events(req: "SceneRenderRequest"):
     yield {"type": "scene_ready", "scene_id": req.scene_id}
 
 
+class ContinuationRequest(BaseModel):
+    project_id: str
+    workspace: str | None = None
+    session_id: str | None = None
+    size: str = ""
+    video_params: dict = {}
+
+
+async def _continuation_events(req: "ContinuationRequest"):
+    """尾帧续接出片：镜1(t2v 链头) → 镜2.. 用上一镜尾帧走 i2v 续生成，跨镜画面连续。需先在 Colab 跑「§i2v续接」起 i2v server。"""
+    from mirage.app.pipeline.runtime import set_workspace
+    from mirage.app.pipeline.pipeline_tools import render_continuation
+    set_workspace(req.workspace)
+    params: dict = dict(req.video_params or {})
+    if req.size:
+        params["size"] = req.size
+    yield {"type": "batch_progress", "phase": "render", "label": "尾帧续接出片中…（i2v，较慢）"}
+    out = None
+    try:
+        async for it in _run_with_logs(lambda: render_continuation(req.project_id, params)):
+            if "_log" in it:
+                yield {"type": "log", "line": it["_log"]}
+            else:
+                out = it["_result"]
+    except Exception as e:  # noqa: BLE001
+        yield {"type": "tool_result", "name": "continuation", "content": f"续接失败: {type(e).__name__}: {e}"}
+        return
+    _clean, events = ai_service._extract_tool_markers(out or "")
+    for ev in events:        # VIDFILE:: 标记 → 逐镜更新成片
+        yield ev
+    yield {"type": "tool_result", "name": "continuation", "content": _clean or "续接完成"}
+
+
+@router.post("/pipeline/continuation")
+async def pipeline_continuation(req: ContinuationRequest):
+    """续接出片：整集按尾帧链(i2v)出连续片。前置：i2v server 已起(§i2v续接) + 镜1 已有 t2v 成片当链头。"""
+    meta = {"session_id": req.session_id, "project_id": req.project_id}
+    return {"job_id": job_manager.submit("continuation", lambda: _continuation_events(req), meta=meta)}
+
+
 class SceneGenRequest(BaseModel):
     scene_id: str
     workspace: str | None = None
