@@ -719,7 +719,12 @@ def _do_render_t2v(scene_id, scene, motion_prompt, params) -> str:
     """
     store = get_store()
     store.set_scene_video_mode(scene_id, "t2v")   # 标记本镜=t2v：合成时据此走 TTS 配音(t2v 无自带音轨)
-    _prov = settings.T2V_PROVIDER or "comfyui-t2v"   # comfyui-t2v / lightx2v-t2v(纯 t2v 可不用 ComfyUI)
+    # 强锁脸(Stand-In):前端开了 lock_face 且该镜角色有参考脸 + Stand-In server 已注册 → 走硬锁脸通道(给一张脸跨镜稳);
+    #   否则走 lightx2v(快)。参考脸经 base 签名的 image_path 传给 provider(t2v 一般忽略它,Stand-In 复用它当参考脸)。
+    ref_face = _scene_ref_face(store, scene)
+    want_standin = (bool((params or {}).get("lock_face")) and bool(ref_face)
+                    and video_provider_registry.has("standin-t2v"))
+    _prov = "standin-t2v" if want_standin else (settings.T2V_PROVIDER or "comfyui-t2v")   # comfyui-t2v / lightx2v-t2v
     if not video_provider_registry.has(_prov):
         # bug:配的 provider 没注册(如默认 comfyui-t2v 但纯 t2v 只注册了 lightx2v-t2v)→ 自动回退到已注册的 t2v provider
         _prov = next((a for a in ("lightx2v-t2v", "comfyui-t2v") if video_provider_registry.has(a)), _prov)
@@ -736,19 +741,21 @@ def _do_render_t2v(scene_id, scene, motion_prompt, params) -> str:
         pstyle = {}
     lock_char = bool((params or {}).get("lock_character", True))   # 前端可关:多人镜不锁主角,避免串脸
     _explicit_steps = (params or {}).get("steps")                  # ★用户在画质档显式设的步数(优先);不能看 merged(default_params 必填 steps→判据失效)
-    prompt = _compose_t2v_prompt(scene, motion_prompt, pstyle, lock_character=lock_char)   # ★带 image_prompt，否则出空泛镜头
+    # Stand-In 身份来自参考脸,不需(也不该)注入角色 LoRA 触发词 → 关触发词注入(仍保留 image_prompt/运镜)
+    prompt = _compose_t2v_prompt(scene, motion_prompt, pstyle,
+                                 lock_character=(False if want_standin else lock_char))   # ★带 image_prompt，否则出空泛镜头
     merged = {**t2v.default_params(),
               **{k: v for k, v in (params or {}).items() if v is not None and v != ""}}
     # bug:批量面板「极速/精修」开关只塞 lightning 键、provider 不读 → 在此映射成 steps。
     #   ★判据=「用户有没有显式传 steps」(_explicit_steps),不能用 merged.get('steps')——default_params 必然填了 steps,原判据恒 False、映射永远跳过=两档都跑默认步数(画质切档无效的真因)。
-    if "lightning" in merged and not _explicit_steps:
+    if not want_standin and "lightning" in merged and not _explicit_steps:
         _fast = str(merged.get("lightning")).lower() in ("1", "true", "yes", "on")
-        merged["steps"] = 4 if _fast else 8        # 极速 4 步打样 / 精修 8 步
+        merged["steps"] = 4 if _fast else 8        # 极速 4 步打样 / 精修 8 步(Stand-In 无蒸馏,步数用其默认 20)
     # 串脸防护:多人镜自动追加负向(压低"他人也被画成主角脸"的概率)
     if _scene_multi_person(scene, motion_prompt):
         _neg = str(merged.get("negative") or settings.WAN_VIDEO_NEGATIVE or "").strip()
         merged["negative"] = (_neg + (", " if _neg else "") + _ANTI_BLEED_NEG)
-    for _k in ("lipsync", "motion_prompts", "segments", "video_mode", "lightning", "lock_character"):
+    for _k in ("lipsync", "motion_prompts", "segments", "video_mode", "lightning", "lock_character", "lock_face"):
         merged.pop(_k, None)
     # 项目级 Wan-T2V 角色 LoRA(训好后写进项目 style)；params 已显式带则不覆盖
     if not merged.get("wan_t2v_lora_high") and (pstyle.get("wan_t2v_lora_high") or "").strip():
@@ -757,7 +764,7 @@ def _do_render_t2v(scene_id, scene, motion_prompt, params) -> str:
         merged["wan_t2v_lora_low"] = pstyle["wan_t2v_lora_low"].strip()
     try:
         store.set_scene_state(scene_id, SceneState.PENDING_VIDEO_GEN, force=True)
-        _gpu_retry(lambda: t2v.generate(None, image_path="", prompt=prompt,
+        _gpu_retry(lambda: t2v.generate(None, image_path=(ref_face if want_standin else ""), prompt=prompt,
                                         out_remote=final_local, params=merged),
                    what=f"文生视频 {scene_id}")
     except GpuConfigError as e:

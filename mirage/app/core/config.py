@@ -166,6 +166,11 @@ class Settings(BaseSettings):
     LIGHTX2V_DISTILL_LORA_HIGH: str = ""    # 蒸馏 LoRA(高噪);走 lora_configs 时必须显式列,否则丢 4 步加速
     LIGHTX2V_DISTILL_LORA_LOW: str = ""     # 蒸馏 LoRA(低噪)
     LIGHTX2V_OUTPUT_DIR: str = ""           # lightx2v server 存片目录(同机取片用);空=默认 <install>/lightx2v/server_cache/outputs
+    # Stand-In 强锁脸(WeChatCV/Stand-In)文生视频后端:给一张参考脸跨镜硬锁身份,免训练。另起包装 server(默认 8190),
+    # 不走 lightx2v(它自带 DiffSynth 引擎)。由「出片模式=t2v + 前端强锁脸开关 + 该角色有参考脸」路由(见 _do_render_t2v)。
+    STANDIN_ENABLED: bool = False           # 配了端点 + 跑了 Colab §Stand-In 起 server 才注册;默认关
+    STANDIN_BASE_URL: str = ""              # 如 http://127.0.0.1:8190(与 lightx2v 8189 错开)
+    STANDIN_STEPS: int = 20                 # 锁脸无蒸馏采样步数(20 起细;Stand-In 不挂蒸馏 LoRA,身份来自参考脸)
     # ── 视频模型解耦：默认 Provider + LTX-Video 配置 ──────────────
     # 默认用哪个视频模型（对应 providers 注册名：wan2.2 / ltx）
     VIDEO_PROVIDER_DEFAULT: str = "wan2.2"

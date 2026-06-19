@@ -686,6 +686,7 @@ export function ProductionPanel({ message, workspace, sessionId }) {
   const [showAdv, setShowAdv] = usePersistedState('showAdv', false)
   const [imgAdv, setImgAdv] = usePersistedState('imgAdv', { steps: '', guidance: '', seed: '', offload: '' })
   const [vidParams, setVidParams] = usePersistedState('vidParams', {})
+  const [lockFace, setLockFace] = usePersistedState('lockFace', false)   // 强锁脸(Stand-In):有参考脸的角色镜走「一张脸硬锁」通道(需先跑 Colab §Stand-In)
   const [sceneBusy, setSceneBusy] = useState({})   // {sceneId: 'generate'|'render'|'append'}
   const [appendPrompt, setAppendPrompt] = useState({})  // {sceneId: 追加段的运镜提示词(可空)}
   const [appendCount, setAppendCount] = useState({})    // {sceneId: 本次追加几段}
@@ -771,7 +772,7 @@ export function ProductionPanel({ message, workspace, sessionId }) {
     const mp = segs > 1 ? (sceneSegPrompts[sceneId] || []).slice(0, segs) : []
     const ls = sceneLipsync[sceneId] ?? !!(proj?.scenes?.find(x => x.scene_id === sceneId)?.lipsync)
     return { scene_id: sceneId, workspace, session_id: sessionId,
-      model, segments: segs, size: vidSize, video_params: vidParams, motion_prompts: mp, lipsync: ls,
+      model, segments: segs, size: vidSize, video_params: { ...vidParams, ...(lockFace ? { lock_face: true } : {}) }, motion_prompts: mp, lipsync: ls,
       video_mode: 't2v' }   // 纯 t2v：单镜「出片」直接文生(跳过出图/选图)
   }
 
@@ -1050,6 +1051,13 @@ export function ProductionPanel({ message, workspace, sessionId }) {
     catch (e) { setProgress('传参考脸失败：' + String(e.message || e)) }
     finally { setLoraBusy(false) }
   }
+  // 强锁脸(Stand-In)参考脸：给某角色传 1 张正脸 → 写 characters.ref_image_path；出片勾「强锁脸」即用它跨镜锁脸。
+  const charFaceUpload = async (charId, file) => {
+    if (!file) return
+    setProgress('上传参考脸中…')
+    try { await uploadCharacterFace(charId, proj?.id || '', file, workspace); await load(); setProgress('参考脸已上传（出片勾「强锁脸(Stand-In)」即用它锁这张脸）') }
+    catch (e) { setProgress('参考脸上传失败：' + String(e.message || e)) }
+  }
   const loraBootstrap = async (tid) => {
     const { mode, count } = bootOf(tid)
     setLoraBusy(true)
@@ -1177,7 +1185,7 @@ export function ProductionPanel({ message, workspace, sessionId }) {
         model: kind === 'finish' ? model : '',
         segments: kind === 'finish' ? segments : 1,
         size: kind === 'finish' ? vidSize : '',
-        video_params: kind === 'finish' ? vidParams : {},
+        video_params: kind === 'finish' ? { ...vidParams, ...(lockFace ? { lock_face: true } : {}) } : {},
         video_mode: 't2v',   // 纯 t2v：批量出片直接逐镜文生(跳过出图/选图)
         n: kind === 'generate' ? imgN : 0,
         width: kind === 'generate' ? (iw || 0) : 0,
@@ -1477,6 +1485,12 @@ export function ProductionPanel({ message, workspace, sessionId }) {
                   style={{ ...inputStyle, height: 28, flex: 1 }}>
                   {VOICES.map(v => <option key={v.v} value={v.v}>{v.label}</option>)}
                 </select>
+                <label title="传一张该角色清晰正脸 → 出片勾「强锁脸(Stand-In)」即用它跨镜锁定这张脸(免训练)。"
+                  style={{ ...miniBtn2, cursor: 'pointer', color: c.ref_image_path ? '#34d399' : undefined, whiteSpace: 'nowrap' }}>
+                  {c.ref_image_path ? '换参考脸 ✓' : '传参考脸'}
+                  <input type="file" accept="image/*" style={{ display: 'none' }}
+                    onChange={e => { charFaceUpload(c.id, (e.target.files || [])[0]); e.target.value = '' }} />
+                </label>
                 <button onClick={() => charOp('delete', { char_id: c.id })} disabled={charsBusy}
                   style={{ ...miniBtn2, color: '#fca5a5', borderColor: 'rgba(239,68,68,0.4)' }}>删除</button>
               </div>
@@ -1670,6 +1684,11 @@ export function ProductionPanel({ message, workspace, sessionId }) {
           <option value={4}>画质·极速 4 步(打样)</option>
           <option value={16}>画质·精修 16 步</option>
         </select>
+        <label title="强锁脸(Stand-In)：给角色传过参考脸的镜头，用「一张脸硬锁身份」出片(跨镜更稳、免训练)。需先在 Colab 跑「§Stand-In」起 server。无参考脸或没起 server 的镜自动回退 lightx2v(快)。Stand-In 无蒸馏~20步、较慢。"
+          style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12, color: lockFace ? '#5fe8de' : 'var(--text-muted)', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+          <input type="checkbox" checked={lockFace} disabled={!!busy} onChange={e => setLockFace(e.target.checked)} />
+          强锁脸(Stand-In)
+        </label>
         {estSec != null && (
           <span style={{ fontSize: 11, color: 'rgba(94,234,212,0.95)', alignSelf: 'center',
                          padding: '0 8px', borderRadius: 6, background: 'rgba(0,189,176,0.1)',

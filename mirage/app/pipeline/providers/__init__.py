@@ -46,5 +46,10 @@ if settings.COMFYUI_BASE_URL:
 if settings.LIGHTX2V_ENABLED and settings.LIGHTX2V_BASE_URL:
     from mirage.app.pipeline.providers.lightx2v import Lightx2vT2VProvider
     video_provider_registry.register(Lightx2vT2VProvider())
+# Stand-In 强锁脸文生视频后端(WeChatCV/Stand-In,另起包装 server,不走 lightx2v):配了 STANDIN_ENABLED + 端点才注册。
+# 隐藏 Provider,由「出片模式=t2v + 强锁脸开关 + 该角色有参考脸」路由(见 pipeline_tools._do_render_t2v)。
+if settings.STANDIN_ENABLED and settings.STANDIN_BASE_URL:
+    from mirage.app.pipeline.providers.standin import StandInT2VProvider
+    video_provider_registry.register(StandInT2VProvider())
 
 __all__ = ["VideoProvider", "video_provider_registry"]
