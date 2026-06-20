@@ -1908,6 +1908,14 @@ export function ProductionPanel({ message, workspace, sessionId }) {
                     </button>
                   )
                 })()}
+                {s.scene_number > 1 && (
+                  <button onClick={() => runContinueOne(s.scene_id)} disabled={!!busy || !!sceneBusy[s.scene_id]}
+                    title="续这镜(i2v)：用上一镜的尾帧续生成这一镜(其它镜不动)。需先在 Colab 起 i2v server。"
+                    style={{ ...miniAct(false), border: '1px solid rgba(129,140,248,0.5)',
+                             background: sceneBusy[s.scene_id] === 'continue1' ? 'rgba(99,102,241,0.4)' : 'rgba(99,102,241,0.14)', color: '#a5b4fc' }}>
+                    {sceneBusy[s.scene_id] === 'continue1' ? '续接中…' : '🔗 续这镜'}
+                  </button>
+                )}
                 {!s.video && (
                   <label title="已有这镜的视频？直接上传当成片，跳过出图/出片。之后可在下方继续 AI 续接 / 换脸 / 无缝化。"
                     style={{ fontSize: 11, color: 'rgba(94,234,212,0.95)',
@@ -1950,16 +1958,6 @@ export function ProductionPanel({ message, workspace, sessionId }) {
                         border: '1px solid rgba(239,68,68,0.35)', background: 'rgba(239,68,68,0.12)',
                         color: 'rgba(252,165,165,1)', fontSize: 11.5, cursor: 'pointer',
                       }}>删除成片 · 重出</button>
-                    {s.scene_number > 1 && (
-                      <button onClick={() => runContinueOne(s.scene_id)} disabled={busy || !!sceneBusy[s.scene_id]}
-                        title="只重出这一镜：用上一镜的尾帧走 i2v 续接，其它镜不动(快速试参/修单镜)。需先起 i2v server。"
-                        style={{
-                          height: 26, padding: '0 12px', borderRadius: 6,
-                          border: '1px solid rgba(129,140,248,0.45)', background: 'rgba(99,102,241,0.12)',
-                          color: '#a5b4fc', fontSize: 11.5,
-                          cursor: (busy || !!sceneBusy[s.scene_id]) ? 'default' : 'pointer',
-                        }}>{sceneBusy[s.scene_id] === 'continue1' ? '续接中…' : '🔗 续这镜(i2v)'}</button>
-                    )}
                   </div>
                 </div>
               ) : (
