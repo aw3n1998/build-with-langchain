@@ -248,6 +248,8 @@ export async function batchFinish(params) { return submitJob('/pipeline/batch_fi
 export async function continuation(params) { return submitJob('/pipeline/continuation', params) }
 // 单镜续接(i2v):只重出这一镜(接上一镜尾帧),其它镜不动。快速试参/修单镜。
 export async function continuationOne(params) { return submitJob('/pipeline/continuation_one', params) }
+// 合成整集:所有已出片分镜按序拼成一条短剧(去重帧+crossfade 抹缝),不重出片。
+export async function assembleEpisode(params) { return submitJob('/pipeline/assemble', params) }
 // 单个分镜独立出图 / 出片
 export async function sceneGenerate(params) { return submitJob('/pipeline/scene_generate', params) }
 export async function sceneRender(params) { return submitJob('/pipeline/scene_render', params) }

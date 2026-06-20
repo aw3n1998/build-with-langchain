@@ -2199,6 +2199,46 @@ async def pipeline_continuation_one(req: ContinuationOneRequest):
     return {"job_id": job_manager.submit("continuation", lambda: _continuation_one_events(req), meta=meta)}
 
 
+class AssembleRequest(BaseModel):
+    project_id: str
+    workspace: str | None = None
+    session_id: str | None = None
+    voice: str = ""
+    with_subtitles: bool = True
+    bgm: str = ""
+
+
+async def _assemble_events(req: "AssembleRequest"):
+    """合成整集：把项目所有已出片的分镜按序拼成一条短剧。crossfade(默认0.4s)天然抹平接缝重复帧/跳变 + 旁白/字幕/BGM。"""
+    from mirage.app.pipeline.runtime import set_workspace
+    from mirage.app.pipeline.pipeline_tools import assemble_episode
+    set_workspace(req.workspace)
+    yield {"type": "batch_progress", "phase": "assemble", "label": "合成整集（拼接抹缝 + 旁白 + 字幕）…"}
+    out = None
+    try:
+        async for it in _run_with_logs(lambda: assemble_episode(req.project_id, voice=req.voice, with_subtitles=req.with_subtitles, bgm=req.bgm)):
+            if "_log" in it:
+                yield {"type": "log", "line": it["_log"]}
+            else:
+                out = it["_result"]
+    except Exception as e:  # noqa: BLE001
+        yield {"type": "tool_result", "name": "assemble", "content": f"合成失败: {type(e).__name__}: {e}"}
+        return
+    _clean, events = ai_service._extract_tool_markers(out or "")
+    for ev in events:
+        yield ev
+    yield {"type": "tool_result", "name": "assemble", "content": _clean or "合成完成"}
+    yield {"type": "episode_ready"}
+
+
+@router.post("/pipeline/assemble")
+async def pipeline_assemble(req: AssembleRequest):
+    """合成整集：所有已出片分镜按序拼成一条短剧（去重帧 + crossfade 抹缝），不重出片、不占 GPU。"""
+    from mirage.app.services.job_manager import job_manager
+    meta = {"session_id": req.session_id, "project_id": req.project_id}
+    return {"job_id": job_manager.submit("batch_finish", lambda: _assemble_events(req), meta=meta)}
+
+
 class SceneGenRequest(BaseModel):
     scene_id: str
     workspace: str | None = None

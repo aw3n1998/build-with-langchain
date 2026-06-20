@@ -16,7 +16,7 @@ function usePersistedState(key, initial) {
   return [val, setVal]
 }
 import ReactMarkdown from 'react-markdown'
-import { fileUrl, getVideoProviders, getImageProviders, getProject, batchGenerate, batchFinish, continuation, continuationOne,
+import { fileUrl, getVideoProviders, getImageProviders, getProject, batchGenerate, batchFinish, continuation, continuationOne, assembleEpisode,
          pipelineSelect, streamJobEvents, pipelineUpscale, pipelineFaceswap, uploadCandidate, uploadContinueVideo, updateScenePrompts,
          deleteCandidate, deleteSceneVideo, sceneUndoAppend, deleteEpisode, suggestSegmentPrompts,
          autoStoryboard, autoFill, characters as charactersApi, templatesApi,
@@ -1204,7 +1204,7 @@ export function ProductionPanel({ message, workspace, sessionId }) {
     setLogs([]); setShowLogs(true)
     setBusy(kind); setProgress('提交任务…')
     try {
-      const submit = kind === 'generate' ? batchGenerate : kind === 'continuation' ? continuation : batchFinish
+      const submit = kind === 'generate' ? batchGenerate : kind === 'continuation' ? continuation : kind === 'assemble' ? assembleEpisode : batchFinish
       const [iw, ih] = (imgSize || '0x0').split('x').map(Number)
       const jobId = await submit({
         project_id: pid, workspace, session_id: sessionId,
@@ -1719,6 +1719,15 @@ export function ProductionPanel({ message, workspace, sessionId }) {
             color: '#a5b4fc', fontSize: 12.5, fontWeight: 600, cursor: busy ? 'default' : 'pointer',
           }}>
           {busy === 'continuation' ? '续接中…' : '🔗 续接出片(i2v·连贯)'}
+        </button>
+        <button onClick={() => runJob('assemble')} disabled={!!busy || !(c.total > 0)}
+          title="合成整集：把所有已出片的分镜按序拼成一条短剧（去重帧 + crossfade 0.4s 抹接缝跳变 + 旁白/字幕）。不重出片、不占 GPU。"
+          style={!(c.total > 0) ? panelBtn(false, true) : {
+            height: 34, padding: '0 14px', borderRadius: 8, border: '1px solid rgba(45,212,191,0.5)',
+            background: busy === 'assemble' ? 'rgba(20,184,166,0.5)' : 'transparent',
+            color: '#5eead4', fontSize: 12.5, fontWeight: 600, cursor: busy ? 'default' : 'pointer',
+          }}>
+          {busy === 'assemble' ? '合成中…' : '🎬 合成整集'}
         </button>
         {/* 纯 t2v：出片后端由 T2V_PROVIDER(lightx2v) 路由、不看这个选择 → 移除误导的 i2v 模型下拉(Wan2.2-I2V/LTX)。
             出片参数(帧数/帧率/步数/seed)在下方「更多参数」调,字段名与 lightx2v 一致、对 t2v 生效。 */}
