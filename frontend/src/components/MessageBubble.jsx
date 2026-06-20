@@ -802,7 +802,7 @@ export function ProductionPanel({ message, workspace, sessionId }) {
 
   // 「再续一段」：取现有成片末帧续生成、拼到末尾（同 vidParams 以便无缝拼接）。段数不写死。
   const appendPayload = (sceneId) => ({
-    scene_id: sceneId, workspace, session_id: sessionId, model,
+    scene_id: sceneId, workspace, session_id: sessionId, model: 'lightx2v-i2v',   // ★追加段走 i2v：从这镜末帧续生成
     motion_prompt: appendPrompt[sceneId] || '',
     count: Math.max(1, Number(appendCount[sceneId]) || 1),
     size: vidSize, video_params: vidParams,
@@ -1917,14 +1917,6 @@ export function ProductionPanel({ message, workspace, sessionId }) {
                     </button>
                   )
                 })()}
-                {s.scene_number > 1 && (
-                  <button onClick={() => runContinueOne(s.scene_id)} disabled={!!busy || !!sceneBusy[s.scene_id]}
-                    title="续这镜(i2v)：用上一镜的尾帧续生成这一镜(其它镜不动)。需先在 Colab 起 i2v server。"
-                    style={{ ...miniAct(false), border: '1px solid rgba(129,140,248,0.5)',
-                             background: sceneBusy[s.scene_id] === 'continue1' ? 'rgba(99,102,241,0.4)' : 'rgba(99,102,241,0.14)', color: '#a5b4fc' }}>
-                    {sceneBusy[s.scene_id] === 'continue1' ? '续接中…' : '🔗 续这镜'}
-                  </button>
-                )}
                 {!s.video && (
                   <label title="已有这镜的视频？直接上传当成片，跳过出图/出片。之后可在下方继续 AI 续接 / 换脸 / 无缝化。"
                     style={{ fontSize: 11, color: 'rgba(94,234,212,0.95)',
@@ -1967,6 +1959,20 @@ export function ProductionPanel({ message, workspace, sessionId }) {
                         border: '1px solid rgba(239,68,68,0.35)', background: 'rgba(239,68,68,0.12)',
                         color: 'rgba(252,165,165,1)', fontSize: 11.5, cursor: 'pointer',
                       }}>删除成片 · 重出</button>
+                    <input value={appendPrompt[s.scene_id] || ''}
+                      onChange={e => setAppendPrompt(p => ({ ...p, [s.scene_id]: e.target.value }))}
+                      placeholder="续接的新内容(运镜/动作/剧情)，留空=延续当前"
+                      disabled={busy || !!sceneBusy[s.scene_id]}
+                      style={{ flex: '1 1 200px', minWidth: 150, height: 26, padding: '0 10px', borderRadius: 6,
+                               border: '1px solid rgba(129,140,248,0.4)', background: 'rgba(99,102,241,0.08)',
+                               color: '#e5e7eb', fontSize: 11.5, outline: 'none' }} />
+                    <button onClick={() => runScene('append', s.scene_id)} disabled={busy || !!sceneBusy[s.scene_id]}
+                      title="续接：从这镜【末帧】用左边新提示词 i2v 续生成一段，追加到后面(5s→10s)。可反复加、能撤销。需先在 Colab 起 i2v server。"
+                      style={{
+                        height: 26, padding: '0 12px', borderRadius: 6, border: '1px solid rgba(129,140,248,0.5)',
+                        background: sceneBusy[s.scene_id] === 'append' ? 'rgba(99,102,241,0.4)' : 'rgba(99,102,241,0.14)',
+                        color: '#a5b4fc', fontSize: 11.5, cursor: (busy || !!sceneBusy[s.scene_id]) ? 'default' : 'pointer',
+                      }}>{sceneBusy[s.scene_id] === 'append' ? '续接中…' : '🔗 续接(+5s)'}</button>
                   </div>
                 </div>
               ) : (
