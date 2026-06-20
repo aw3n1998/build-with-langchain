@@ -2216,7 +2216,7 @@ async def _assemble_events(req: "AssembleRequest"):
     yield {"type": "batch_progress", "phase": "assemble", "label": "合成整集（拼接抹缝 + 旁白 + 字幕）…"}
     out = None
     try:
-        async for it in _run_with_logs(lambda: assemble_episode(req.project_id, voice=req.voice, with_subtitles=req.with_subtitles, bgm=req.bgm)):
+        async for it in _run_with_logs(lambda: assemble_episode.func(project_id=req.project_id, voice=req.voice, with_subtitles=req.with_subtitles, bgm=req.bgm)):
             if "_log" in it:
                 yield {"type": "log", "line": it["_log"]}
             else:
