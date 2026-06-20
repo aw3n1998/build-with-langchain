@@ -797,17 +797,21 @@ def render_continuation(project_id: str, params: dict | None = None) -> str:
     scenes = sorted(store.list_scenes(project_id), key=lambda s: s.get("scene_number") or 0)
     if not scenes:
         return "没有分镜。"
-    from mirage.app.pipeline.assembler import extract_last_frame
+    from mirage.app.pipeline.assembler import extract_last_frame, extract_first_frame
     try:
         pstyle = store.get_project_style(project_id) or {}
     except Exception:  # noqa: BLE001
         pstyle = {}
     merged = {**prov.default_params(), **{k: v for k, v in params.items() if v is not None and v != ""}}
-    for _k in ("video_mode", "lightning", "lock_character", "lock_face", "motion_prompts", "segments"):
+    for _k in ("video_mode", "lightning", "lock_character", "lock_face", "motion_prompts", "segments", "reanchor_every"):
         merged.pop(_k, None)
+    # ★周期重锚:每 K 镜把 i2v 首帧拉回「链头镜1 的干净正脸」而非上一镜退化尾帧,打断累积脸漂(0=关=纯链式)
+    reanchor_every = int((params or {}).get("reanchor_every") or 3)
     local_dir = video_dir()
     out_lines: list[str] = []
     prev_video = None
+    anchor_frame = None
+    chain_pos = 0
     for sc in scenes:
         sid = sc.get("id") or sc.get("scene_id")
         num = sc.get("scene_number") or 0
@@ -817,13 +821,28 @@ def render_continuation(project_id: str, params: dict | None = None) -> str:
                 return (f"链头 镜{num} 还没成片。续接需要镜1先有片当起点：\n"
                         "① 先用 t2v 出镜1(定调:胖哥+服装+场景) → ② 跑「§i2v续接」切到 i2v → ③ 再点「续接出片」。")
             prev_video = v
-            out_lines.append(f"链头 镜{num} ✓（沿用现成片）")
+            if reanchor_every > 0:
+                anchor_frame = os.path.join(local_dir, f"anchor_{project_id}.png")
+                try:
+                    extract_first_frame(v, anchor_frame)   # 锚帧 = 镜1 干净正脸首帧
+                    out_lines.append(f"链头 镜{num} ✓（沿用现成片）| 锚帧已取，每 {reanchor_every} 镜重锚一次")
+                except Exception:  # noqa: BLE001
+                    anchor_frame = None
+                    out_lines.append(f"链头 镜{num} ✓ | ⚠ 锚帧抽取失败 → 退纯链式")
+            else:
+                out_lines.append(f"链头 镜{num} ✓（沿用现成片）| 纯链式(reanchor_every=0)")
             continue
-        frame = os.path.join(local_dir, f"cont_{sid}_first.png")
-        try:
-            extract_last_frame(prev_video, frame)   # 上一镜尾帧 → 本镜首帧
-        except Exception as e:  # noqa: BLE001
-            return f"取上一镜尾帧失败(镜{num}): {e}\n(已完成: {', '.join(out_lines) or '无'})"
+        chain_pos += 1
+        use_anchor = bool(anchor_frame and os.path.exists(anchor_frame)
+                          and reanchor_every > 0 and chain_pos % reanchor_every == 0)
+        if use_anchor:
+            frame = anchor_frame                         # ★周期重锚:本镜首帧 = 镜1 干净正脸(清零累积漂移)
+        else:
+            frame = os.path.join(local_dir, f"cont_{sid}_first.png")
+            try:
+                extract_last_frame(prev_video, frame)    # 上一镜尾帧 → 本镜首帧
+            except Exception as e:  # noqa: BLE001
+                return f"取上一镜尾帧失败(镜{num}): {e}\n(已完成: {', '.join(out_lines) or '无'})"
         motion = sc.get("motion_prompt") or ""
         prompt = _compose_t2v_prompt(sc, motion, pstyle, lock_character=not _scene_multi_person(sc, motion))
         out = os.path.join(local_dir, f"{num:02d}_{sid}.mp4")
@@ -838,9 +857,9 @@ def render_continuation(project_id: str, params: dict | None = None) -> str:
         store.set_scene_video(sid, out)
         store.set_scene_state(sid, SceneState.COMPLETED)
         prev_video = out
-        out_lines.append(f"镜{num} 续接✓")
+        out_lines.append(f"镜{num} {'重锚✓(回镜1正脸)' if use_anchor else '续接✓(接上一镜尾帧)'}")
         out_lines.append(f"VIDFILE::{sid}::{out}")
-    return "尾帧续接完成（镜2 起逐镜接上一镜尾帧）。\n" + "\n".join(out_lines)
+    return "尾帧续接完成（i2v 链 + 周期重锚）。\n" + "\n".join(out_lines)
 
 
 def render_continuation_one(project_id: str, scene_id: str, params: dict | None = None) -> str:

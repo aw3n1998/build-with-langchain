@@ -115,6 +115,16 @@ def extract_last_frame(video_path: str, out_png: str) -> str:
     return out_png
 
 
+def extract_first_frame(video_path: str, out_png: str) -> str:
+    """抽取视频第一帧（周期重锚用：锚帧 = 链头镜1 的干净正脸首帧，每 K 镜把脸拉回它、防累积漂移）。"""
+    os.makedirs(os.path.dirname(os.path.abspath(out_png)), exist_ok=True)
+    res = _run([_ffmpeg(), "-y", "-hide_banner", "-i", video_path,
+                "-frames:v", "1", "-q:v", "2", out_png])
+    if res.returncode != 0 or not os.path.exists(out_png):
+        raise RuntimeError(f"抽取首帧失败: {(res.stderr or '')[-400:]}")
+    return out_png
+
+
 def concat_videos(paths: list[str], out_path: str, dedup_boundary: bool = False,
                   crossfade: float = 0.0) -> str:
     """尾帧接续的多段合一。
