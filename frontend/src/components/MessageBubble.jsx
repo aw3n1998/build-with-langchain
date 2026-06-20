@@ -1973,6 +1973,13 @@ export function ProductionPanel({ message, workspace, sessionId }) {
                         background: sceneBusy[s.scene_id] === 'append' ? 'rgba(99,102,241,0.4)' : 'rgba(99,102,241,0.14)',
                         color: '#a5b4fc', fontSize: 11.5, cursor: (busy || !!sceneBusy[s.scene_id]) ? 'default' : 'pointer',
                       }}>{sceneBusy[s.scene_id] === 'append' ? '续接中…' : '🔗 续接(+5s)'}</button>
+                    <button onClick={() => undoAppend(s.scene_id)} disabled={busy || !!sceneBusy[s.scene_id]}
+                      title="撤销上一段续接：成片回退到最近一次「续接」之前(可多次回退)。"
+                      style={{
+                        height: 26, padding: '0 10px', borderRadius: 6, border: '1px solid rgba(148,163,184,0.4)',
+                        background: sceneBusy[s.scene_id] === 'undo' ? 'rgba(148,163,184,0.3)' : 'transparent',
+                        color: '#cbd5e1', fontSize: 11.5, cursor: (busy || !!sceneBusy[s.scene_id]) ? 'default' : 'pointer',
+                      }}>{sceneBusy[s.scene_id] === 'undo' ? '撤销中…' : '↩ 撤销上一段'}</button>
                   </div>
                 </div>
               ) : (
