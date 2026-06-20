@@ -904,7 +904,10 @@ async def pipeline_loaded_loras():
     """列出 lightx2v server 当前【实际加载】的 LoRA —— 让前端直接看到「角色/蒸馏 LoRA 到底挂没挂」，不用再猜。
 
     权威来源：lightx2v 只认「起 server 的 config」(per-request 传会被忽略)。本端点优先读【正在运行的
-    lightx2v 进程的 --config_json】(最准,正是它启动时真正加载的那份),拿不到再退已知 Colab 路径。
+    lightx2v 进程的 --config_json】(最准,正是它启动时真正加载的那份)——这是唯一不受后端自身环境陈旧
+    影响的源:§5d 只重起 server、不重起后端,故后端进程里的 LX_CONFIG 可能仍停在挂 LoRA 前的旧值。
+    pgrep 拿不到时(Windows/无 pgrep/进程没起)再退环境变量 LX_CONFIG(§5d 重起 server 时会设),
+    最后退已知 Colab 路径(lora.json 优先于 use.json)。
     """
     import json as _json
     import os as _os
@@ -921,8 +924,9 @@ async def pipeline_loaded_loras():
     except Exception:  # noqa: BLE001  (Windows/无 pgrep 时跳过,走兜底路径)
         pass
     if not (cfg_path and _os.path.exists(cfg_path)):
-        for p in ("/content/wan_moe_t2v_lora.json", "/content/wan_moe_t2v_use.json"):
-            if _os.path.exists(p):
+        # pgrep 失效的兜底链:LX_CONFIG(§5d 挂 LoRA 后写的就是它) → lora.json → use.json
+        for p in (_os.environ.get("LX_CONFIG", ""), "/content/wan_moe_t2v_lora.json", "/content/wan_moe_t2v_use.json"):
+            if p and _os.path.exists(p):
                 cfg_path = p
                 break
     cfg: dict = {}
