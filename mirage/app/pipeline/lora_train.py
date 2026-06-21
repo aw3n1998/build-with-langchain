@@ -297,10 +297,10 @@ def _do_train_local(store, tid: str, dataset_dir: str, trigger: str, name: str,
 
 
 def dispatch_remote(store, tid: str, dataset_dir: str, trigger: str, name: str,
-                    base: str, steps: int) -> dict:
+                    base: str, steps: int, mode: str = "t2v") -> dict:
     """远程训练服务派发(LORA_TRAIN_ENDPOINT 非空时)。最小实现：POST 任务描述、标 QUEUED。"""
     payload = {"training_id": tid, "trigger_word": trigger, "name": name,
-               "base": base, "steps": steps, "dataset_dir": dataset_dir}
+               "base": base, "steps": steps, "dataset_dir": dataset_dir, "mode": mode}
     try:
         import requests
         requests.post(settings.LORA_TRAIN_ENDPOINT.rstrip("/") + "/train",
@@ -314,8 +314,8 @@ def dispatch_remote(store, tid: str, dataset_dir: str, trigger: str, name: str,
 
 def start_training(store, tid: str, dataset_dir: str, *, trigger: Optional[str] = None,
                    name: Optional[str] = None, base: Optional[str] = None,
-                   steps: Optional[int] = None) -> dict:
-    """开训入口(route 在 ≥门槛 后调用)。本地起线程或远程派发。返回更新后的训练 dict。"""
+                   steps: Optional[int] = None, mode: str = "t2v") -> dict:
+    """开训入口(route 在 ≥门槛 后调用)。本地起线程或远程派发。mode=t2v|i2v 决定 arch/底模/产物命名。返回更新后的训练 dict。"""
     t = store.get_lora_training(tid)
     if not t:
         raise ValueError(f"训练任务不存在: {tid}")
@@ -326,17 +326,17 @@ def start_training(store, tid: str, dataset_dir: str, *, trigger: Optional[str] 
     else:
         trigger = effective_trigger(trigger or t.get("trigger_word"), t.get("name")) or f"char_{tid[:6]}"
     name = name or t.get("name") or trigger
-    base = base or settings.LORA_TRAIN_BASE
+    base = base or (settings.LORA_TRAIN_I2V_BASE if mode == "i2v" else settings.LORA_TRAIN_BASE)
     steps = int(steps or t.get("steps") or settings.LORA_TRAIN_STEPS)
 
     if not is_local_runner():
-        return dispatch_remote(store, tid, dataset_dir, trigger, name, base, steps)
+        return dispatch_remote(store, tid, dataset_dir, trigger, name, base, steps, mode=mode)
 
     with _RUNNING_LOCK:
         if tid in _RUNNING and _RUNNING[tid].is_alive():
             return t  # 已在训，别重复开
         th = threading.Thread(target=_do_train_local,
-                              args=(store, tid, dataset_dir, trigger, name, base, steps),
+                              args=(store, tid, dataset_dir, trigger, name, base, steps, mode),
                               name=f"loratrain-{tid[:6]}", daemon=True)
         _RUNNING[tid] = th
         # 状态写入 + start() 一并纳入同一把锁：消除"已登记进 _RUNNING 但未 start"的

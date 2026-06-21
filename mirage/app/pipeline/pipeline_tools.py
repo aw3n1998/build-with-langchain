@@ -782,14 +782,16 @@ def _do_render_t2v(scene_id, scene, motion_prompt, params) -> str:
 
 
 def _i2v_provider():
-    """找一个能 i2v 的已注册 provider:优先默认视频模型(VIDEO_PROVIDER_DEFAULT,通常 wan2.2=ComfyUI i2v),
-    否则任意声明 i2v 能力的 provider。都没有返回 None(尾帧续接据此提示去配 ComfyUI)。"""
+    """找一个能 i2v 且走 http(ComfyUI)的已注册 provider:优先默认视频模型(VIDEO_PROVIDER_DEFAULT=wan2.2=ComfyUI i2v),
+    否则任意 i2v-capable 的 http provider。★必须 transport=='http'——续接调用点传 gpu=None,SSH provider 的
+    gpu.run() 会 AttributeError 崩;没有 http i2v provider 时返回 None,让调用方提示去配 COMFYUI_BASE_URL。"""
+    def _ok(p):
+        return "i2v" in getattr(p, "capabilities", set()) and getattr(p, "transport", "") == "http"
     pref = settings.VIDEO_PROVIDER_DEFAULT or video_provider_registry.default_name
-    if pref and video_provider_registry.has(pref) \
-            and "i2v" in getattr(video_provider_registry.get(pref), "capabilities", set()):
+    if pref and video_provider_registry.has(pref) and _ok(video_provider_registry.get(pref)):
         return video_provider_registry.get(pref)
     for _p in video_provider_registry._providers.values():
-        if "i2v" in getattr(_p, "capabilities", set()):
+        if _ok(_p):
             return _p
     return None
 
@@ -814,8 +816,8 @@ def render_continuation(project_id: str, params: dict | None = None) -> str:
     except Exception:  # noqa: BLE001
         pstyle = {}
     merged = {**prov.default_params(), **{k: v for k, v in params.items() if v is not None and v != ""}}
-    for _k in ("video_mode", "lightning", "lock_character", "lock_face", "motion_prompts", "segments", "reanchor_every"):
-        merged.pop(_k, None)
+    for _k in ("video_mode", "lock_character", "lock_face", "motion_prompts", "segments", "reanchor_every"):
+        merged.pop(_k, None)   # ★保留 lightning:ComfyUI i2v provider 读它选极速/满档(逐镜可切)
     # i2v 续接挂【项目级 i2v 角色 LoRA】(i2v 原生训的 wan_i2v_lora_*;没训过 i2v 则回退 t2v 的,会偏弱/漂)。
     # ComfyUI i2v provider 读 wan_i2v_lora_* 注入(需 i2v 模板含角色 LoRA 节点,见 comfyui.py)。
     _ci_hi = (pstyle.get("wan_i2v_lora_high") or pstyle.get("wan_t2v_lora_high") or "").strip()
@@ -906,8 +908,8 @@ def render_continuation_one(project_id: str, scene_id: str, params: dict | None 
     except Exception:  # noqa: BLE001
         pstyle = {}
     merged = {**prov.default_params(), **{k: v for k, v in params.items() if v is not None and v != ""}}
-    for _k in ("video_mode", "lightning", "lock_character", "lock_face", "motion_prompts", "segments"):
-        merged.pop(_k, None)
+    for _k in ("video_mode", "lock_character", "lock_face", "motion_prompts", "segments"):
+        merged.pop(_k, None)   # ★保留 lightning:ComfyUI i2v provider 读它选极速/满档
     # i2v 单镜续接同样挂项目级 i2v 角色 LoRA(同 render_continuation;wan_i2v_lora_* 优先,回退 t2v)。
     _ci_hi = (pstyle.get("wan_i2v_lora_high") or pstyle.get("wan_t2v_lora_high") or "").strip()
     _ci_lo = (pstyle.get("wan_i2v_lora_low") or pstyle.get("wan_t2v_lora_low") or "").strip()

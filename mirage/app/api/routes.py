@@ -914,13 +914,15 @@ async def pipeline_loaded_loras(project_id: str = "", workspace: str = ""):
         except Exception:  # noqa: BLE001
             ps = {}
     loras = []
+    _lora_dir = settings.COMFYUI_LORA_DIR or ""
     for mode in ("t2v", "i2v"):
         for tag in ("high", "low"):
             path = (ps.get(f"wan_{mode}_lora_{tag}") or "").strip()
             if path:
+                # 存的是 basename(由 ComfyUI 在自身 loras 目录按文件名加载)→ 校验时拼 COMFYUI_LORA_DIR,别拿裸名按 cwd 判
+                _exists = _os.path.exists(path) or (bool(_lora_dir) and _os.path.exists(_os.path.join(_lora_dir, path)))
                 loras.append({"kind": f"角色·{mode}", "name": f"{mode}_{tag}_noise",
-                              "file": _os.path.basename(path),
-                              "exists": _os.path.exists(path)})
+                              "file": _os.path.basename(path), "exists": _exists})
     return {
         "provider": settings.T2V_PROVIDER or "comfyui-t2v",
         "has_char": any(x["kind"].startswith("角色") for x in loras),
@@ -959,9 +961,14 @@ async def pipeline_provider_health(project_id: str = "", workspace: str = ""):
         ("comfyui-s2v", settings.COMFYUI_BASE_URL, "对口型(S2V)"),
     ]
     providers = {}
+    _probe_cache: dict = {}   # 多个 provider 共用同一 base_url(comfyui-t2v/wan2.2/comfyui-s2v 都是 COMFYUI_BASE_URL)→ 同址只探一次
+    async def _probe_once(b: str) -> bool:
+        if b not in _probe_cache:
+            _probe_cache[b] = await _probe(b)
+        return _probe_cache[b]
     for name, base, label in specs:
         enabled = video_provider_registry.has(name)   # 注册=门控通过(.env enabled + base 都配了)
-        reachable = (await _probe(base)) if (enabled and base) else False
+        reachable = (await _probe_once(base)) if (enabled and base) else False
         providers[name] = {"label": label, "enabled": enabled,
                            "reachable": reachable, "base_url": (base or "")}
     char_lora = {"high": False, "low": False, "i2v_high": False, "i2v_low": False}
@@ -2372,8 +2379,20 @@ def _do_lora_preview(req: "LoraPreviewRequest") -> str:
             f"t2v 后端 '{prov_name}' 未就绪：测试出片走 ComfyUI，需配 COMFYUI_BASE_URL。")
     prov = video_provider_registry.get(prov_name)
     out = os.path.join(video_dir(), f"lora_preview_{req.training_id}.mp4")
-    prov.generate(None, image_path="", prompt=prompt, out_remote=out,
-                  params={"size": "480*832", "frames": 33, "steps": 4})
+    # ★带上项目级角色 LoRA(训练完成 _link_after_train 已写进 wan_t2v_lora_*),否则测试片不带 LoRA、验不了脸。
+    # ★lightning='1':4 步必须走蒸馏 LoRA 模板;不开则是满档模板只跑 4 步=欠去噪出噪声(comfyui_t2v 缺蒸馏会自动回退满档)。
+    _pp = {"size": "480*832", "frames": 33, "steps": 4, "lightning": "1"}
+    _pid = (rec.get("project_id") or "").strip()
+    if _pid:
+        try:
+            _ps = store.get_project_style(_pid) or {}
+            if (_ps.get("wan_t2v_lora_high") or "").strip():
+                _pp["wan_t2v_lora_high"] = _ps["wan_t2v_lora_high"].strip()
+            if (_ps.get("wan_t2v_lora_low") or "").strip():
+                _pp["wan_t2v_lora_low"] = _ps["wan_t2v_lora_low"].strip()
+        except Exception:  # noqa: BLE001
+            pass
+    prov.generate(None, image_path="", prompt=prompt, out_remote=out, params=_pp)
     return f"测试片完成。VIDFILE::preview_{req.training_id}::{out}"
 
 

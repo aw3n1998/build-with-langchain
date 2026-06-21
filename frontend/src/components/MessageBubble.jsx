@@ -724,7 +724,7 @@ export function ProductionPanel({ message, workspace, sessionId }) {
   const [loraPrevUrl, setLoraPrevUrl] = useState({})     // {tid: 测试片 url}
   const loraDoPreview = async (tid) => {
     setLoraPrevBusy(p => ({ ...p, [tid]: true }))
-    setProgress('测试出片中…（480p/4步/33帧，约 1 分钟；用当前 server 已挂载的 LoRA）')
+    setProgress('测试出片中…（480p/4步/33帧，约 1 分钟；用项目已配置的角色 LoRA）')
     let gotVideo = false
     try {
       const jobId = await loraPreview(tid, workspace, sessionId)
@@ -886,7 +886,7 @@ export function ProductionPanel({ message, workspace, sessionId }) {
     // 预检(B.4):依赖没就绪就别静默等几分钟才失败——先弹清楚的提示,让用户决定
     if (kind === 'continuation' && !provReady('wan2.2')) {
       const go = await dialog.confirm('i2v 续接 server 未就绪', {
-        message: '续接需要 Colab「§i2v续接」起的 i2v server（lightx2v-i2v）。现在它没注册或连不上，提交多半直接失败。仍要提交吗？',
+        message: '续接需要 ComfyUI 就绪（配 COMFYUI_BASE_URL，由它的 i2v provider 续接）。现在它没注册或连不上，提交多半直接失败。仍要提交吗？',
         danger: true, confirmText: '仍要提交',
       })
       if (!go) return
@@ -1298,7 +1298,7 @@ export function ProductionPanel({ message, workspace, sessionId }) {
                 <button onClick={() => loraOp('train', t.id, { lora_mode: trainModeOf(t.id) })} disabled={loraBusy} style={panelBtn(loraBusy)}>开始训练({trainModeOf(t.id)})</button>
                 <button onClick={() => toggleLoraLog(t.id)} style={miniBtn2}>{loraLogOpen[t.id] ? '收起日志' : '日志/进度'}</button>
                 <button onClick={() => loraDoPreview(t.id)} disabled={loraPrevBusy[t.id]} style={miniBtn2}
-                  title="用当前 server 已挂载的 LoRA 出一条 480p/4步/33帧 短测试片(约 1 分钟)，验证 LoRA 学的人对不对">
+                  title="用项目已配置的角色 LoRA 出一条 480p/4步/33帧 短测试片(约 1 分钟)，验证 LoRA 学的人对不对">
                   {loraPrevBusy[t.id] ? '出片中…' : '测试出片'}
                 </button>
                 <button onClick={async () => { if (await dialog.confirm('清空这个 LoRA 的所有参考图？', { message: '删掉已传的图和旧训练产物（保留触发词设置），用于「干净重训」——避免上一轮旧图/旧标注残留进新训练集导致训出来不像。清空后重新上传即可。', danger: true, confirmText: '清空' })) loraOp('clear_images', t.id) }} disabled={loraBusy}
@@ -1306,7 +1306,7 @@ export function ProductionPanel({ message, workspace, sessionId }) {
                   style={{ ...miniBtn2, color: '#fca5a5', borderColor: 'rgba(239,68,68,0.4)' }}>清空重传</button>
               </div>
               <div style={{ fontSize: 10.5, color: 'var(--text-dim)', marginTop: 4 }}>
-                测试出片：预览当前 server 已挂载的 LoRA；先用笔记本 §5d 把这张卡训出的 LoRA 挂上再测。
+                测试出片：用项目已配置的角色 LoRA（训练完成会自动应用到项目）出片验脸。
               </div>
               {loraPrevUrl[t.id] && (
                 <video key={loraPrevUrl[t.id]} src={loraPrevUrl[t.id]} controls
@@ -1419,8 +1419,8 @@ export function ProductionPanel({ message, workspace, sessionId }) {
           {busy === 'finish' ? '出片合成中…' : `🎬 批量出片并合成（t2v · ${c.total} 镜）`}
         </button>
         <button onClick={() => runJob('continuation')} disabled={!!busy || !(c.total > 1)}
-          title={'续接出片(i2v)：镜1 先用 t2v 出好当链头，镜2+ 用上一镜尾帧续生成 → 跨镜服装/场景/光线/动作连续(纯 t2v 做不到)。前置：在 Colab 跑「§i2v续接」起 i2v server。i2v 默认 40 步、较慢。'
-            + (provReady('wan2.2') ? '' : '\n⚠ 当前 i2v server 未就绪（没起/连不上），点了会先弹提示。')}
+          title={'续接出片(i2v)：镜1 先用 t2v 出好当链头，镜2+ 用上一镜尾帧续生成 → 跨镜服装/场景/光线/动作连续(纯 t2v 做不到)。前置：配好 ComfyUI(COMFYUI_BASE_URL)，由其 i2v provider 续接。'
+            + (provReady('wan2.2') ? '' : '\n⚠ ComfyUI 未就绪（没配/连不上），点了会先弹提示。')}
           style={!(c.total > 1) ? panelBtn(false, true) : {
             height: 34, padding: '0 14px', borderRadius: 8,
             border: provReady('wan2.2') ? '1px solid rgba(129,140,248,0.55)' : '1px solid rgba(234,179,8,0.5)',
@@ -1445,8 +1445,8 @@ export function ProductionPanel({ message, workspace, sessionId }) {
           <input type="checkbox" checked={dedupBoundary} disabled={!!busy} onChange={e => setDedupBoundary(e.target.checked)} />
           续接去边界帧
         </label>
-        {/* 纯 t2v：出片后端由 T2V_PROVIDER(lightx2v) 路由、不看这个选择 → 移除误导的 i2v 模型下拉(Wan2.2-I2V/LTX)。
-            出片参数(帧数/帧率/步数/seed)在下方「更多参数」调,字段名与 lightx2v 一致、对 t2v 生效。 */}
+        {/* t2v：出片后端由 T2V_PROVIDER(comfyui-t2v) 路由、不看这个选择 → 移除误导的 i2v 模型下拉(Wan2.2-I2V/LTX)。
+            出片参数(帧数/帧率/步数/seed)在下方「更多参数」调,对 t2v 生效。 */}
         <select value={vidSize} disabled={!!busy} onChange={e => setVidSize(e.target.value)}
           title="出片分辨率 —— 480p 快(草稿/走量)，720p 精修(成片)。一键切，不用改 .env。" style={{ ...inputStyle, width: 'auto', height: 32 }}>
           <option value="">默认(跟随 .env)</option>
@@ -1459,7 +1459,7 @@ export function ProductionPanel({ message, workspace, sessionId }) {
         {/* 时长：用户按秒选，内部换成 Wan 要求的 4n+1 帧数(@16fps)。比直接填帧数直观,且避免填了非 4n+1 被 server 回退成 81≈5s。 */}
         <select value={vidParams.frames || 81} disabled={!!busy}
           onChange={e => setVidParams(p => ({ ...p, frames: Number(e.target.value) }))}
-          title="出片时长。Wan 帧数须为 4n+1，这里已按 16fps 换算好；想要更长就选更大的。注:若改了时长出片仍是 5 秒，说明你的 lightx2v server 按启动 config 锁了帧长——按笔记本 §5d 把帧长写进 config 重起即可。"
+          title="出片时长。Wan 帧数须为 4n+1，这里已按 16fps 换算好；想要更长就选更大的。"
           style={{ ...inputStyle, width: 'auto', height: 32 }}>
           <option value={81}>时长 ≈ 5 秒</option>
           <option value={129}>时长 ≈ 8 秒</option>
@@ -1514,7 +1514,7 @@ export function ProductionPanel({ message, workspace, sessionId }) {
           <div style={{ marginTop: 8, padding: '10px 12px', borderRadius: 8,
                         border: '1px solid var(--border)', background: 'rgba(255,255,255,0.02)' }}>
             <div style={{ fontSize: 10.5, fontWeight: 700, color: 'rgba(94,234,212,0.8)', marginBottom: 6 }}>
-              出片参数 · 帧数 / 帧率 / 采样步数 / seed（纯 t2v 走 lightx2v；帧数须 4n+1，如 81≈5s、121≈7.5s、161≈10s）
+              出片参数 · 帧数 / 帧率 / 采样步数 / seed（t2v 走 ComfyUI；帧数须 4n+1，如 81≈5s、121≈7.5s、161≈10s）
             </div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
               {curFields.map(f => (
