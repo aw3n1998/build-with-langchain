@@ -336,6 +336,8 @@ export function ProductionPanel({ message, workspace, sessionId }) {
   const dialog = useDialog()
   const pid = message.project_id
   const [proj, setProj] = useState(null)
+  // 首镜起头模式(per-scene):'t2v'=文生链头(默认)/'i2v'=从一张关键帧(上传/出图选中)i2v 起头、首帧脸钉死
+  const [firstFrameMode, setFirstFrameMode] = useState({})
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState('')       // '' | 'generate' | 'finish'
   const [progress, setProgress] = useState('')
@@ -454,9 +456,11 @@ export function ProductionPanel({ message, workspace, sessionId }) {
     // 多段时带上每段独立运镜提示词（AI 生成/手改）；单段不带（用分镜自身的 motion_prompt）
     const mp = segs > 1 ? (sceneSegPrompts[sceneId] || []).slice(0, segs) : []
     const ls = sceneLipsync[sceneId] ?? !!(proj?.scenes?.find(x => x.scene_id === sceneId)?.lipsync)
+    // 首镜可切 i2v 起头(firstFrameMode[sceneId]==='i2v'):后端 do_render_scene_video 走 i2v 分支、用该镜已选关键帧当首帧
+    const ffMode = firstFrameMode[sceneId] === 'i2v' ? 'i2v' : 't2v'
     return { scene_id: sceneId, workspace, session_id: sessionId,
       model, segments: segs, size: vidSize, video_params: { ...vidParams, ...(lockFace ? { lock_face: true } : {}) }, motion_prompts: mp, lipsync: ls,
-      video_mode: 't2v' }   // 纯 t2v：单镜「出片」直接文生(跳过出图/选图)
+      video_mode: ffMode }   // t2v=直接文生(跳过出图/选图);i2v=从关键帧起头(首帧脸钉死)
   }
 
   // 让 AI 据画面 + 一句中文意图，把动作拆成 N 段递进运镜提示词
@@ -519,6 +523,20 @@ export function ProductionPanel({ message, workspace, sessionId }) {
       await consume(jobId)
     } catch (e) { setProgress('单镜续接失败：' + String(e.message || e)) }
     finally { delete sceneJob.current[sceneId]; setSceneBusy(p => { const n = { ...p }; delete n[sceneId]; return n }) }
+  }
+
+  // 「上传关键帧」(首镜 i2v 起头用)：上传一张图当该镜首帧候选并自动选中 → 之后「出片(i2v·锁首帧)」从它 i2v 动起来。
+  // 复用 upload_candidate(登记候选)+select(选中)两步，落到「该镜有一张 selected 候选图」这个 i2v 出片前提。
+  const uploadKeyframe = async (sceneId, file) => {
+    if (busy || sceneBusy[sceneId]) return
+    setSceneBusy(p => ({ ...p, [sceneId]: 'keyframe' }))
+    try {
+      const { asset_id } = await uploadCandidate(sceneId, file, workspace)
+      await pipelineSelect(sceneId, asset_id, workspace)
+      await load()
+      setProgress('关键帧已上传并选中 → 点「出片(i2v·锁首帧)」从它起头')
+    } catch (e) { setProgress('上传关键帧失败：' + String(e.message || e)) }
+    finally { setSceneBusy(p => { const n = { ...p }; delete n[sceneId]; return n }) }
   }
 
   // 「上传视频续接」：把你的一段视频拼到该镜成片末尾，再从它的尾帧 AI 续写（复用续段的运镜词/段数）。
@@ -1405,7 +1423,8 @@ export function ProductionPanel({ message, workspace, sessionId }) {
         ① 各镜先 <b style={{ color: '#5fe8de' }}>出片(t2v)</b> 文生视频（或下方「批量出片并合成」整集出）
         → ② 要<b style={{ color: '#a5b4fc' }}>跨镜连贯 / 把镜头加长</b>时用 <b style={{ color: '#a5b4fc' }}>i2v 续接</b>（接上一镜尾帧续生成，需先起 i2v server）
         → ③ <b style={{ color: '#5eead4' }}>合成整集</b> 拼成成片。
-        <br />人物一致靠训好的 Wan-T2V 角色 LoRA（在「角色 &amp; LoRA」里训）。
+        <br />首镜想<b style={{ color: '#a5b4fc' }}>锁首帧脸</b>：在镜1点 <b style={{ color: '#a5b4fc' }}>⇄ i2v起头</b> → 传/选一张关键帧 → <b style={{ color: '#a5b4fc' }}>出片(i2v·锁首帧)</b>（首帧脸钉死，不赌 t2v 现生）。
+        <br />人物一致靠训好的 Wan 角色 LoRA（在「角色 &amp; LoRA」里训；i2v 出片会自动挂 wan_i2v_lora_*、回退 t2v）。
       </div>
 
       {/* 批量出片并合成（t2v）：对所有未出片分镜逐镜文生 → 合成整集（模型/分辨率可选）*/}
@@ -1626,19 +1645,51 @@ export function ProductionPanel({ message, workspace, sessionId }) {
                       <button onClick={() => stopScene(s.scene_id)} title="点击停止这个分镜的任务"
                         style={{ ...miniAct(false), border: '1px solid rgba(239,68,68,0.4)',
                                  background: 'rgba(239,68,68,0.16)', color: 'rgba(252,165,165,1)' }}>
-                        {sb === 'append' ? '续片中' : sb === 'undo' ? '撤销中' : '出片中'} {fmtElapsed(s.scene_id)} · 停止
+                        {sb === 'append' ? '续片中' : sb === 'undo' ? '撤销中' : sb === 'keyframe' ? '传关键帧中' : '出片中'} {fmtElapsed(s.scene_id)} · 停止
                       </button>
                     )
                   }
                   if (s.video) return null   // 已出片 → 操作都在下方成片区
                   const disabled = !!busy
                   const sec = estSec != null ? estSec : null
+                  // 链头镜(首镜)可选 i2v 起头:从一张关键帧(上传/出图选中)i2v、首帧脸钉死,不赌 t2v 现生。
+                  const isHead = (proj?.scenes || [])[0]?.scene_id === s.scene_id
+                  if (isHead && firstFrameMode[s.scene_id] === 'i2v') {
+                    return (
+                      <>
+                        {s.selected ? (
+                          <button onClick={() => runScene('render', s.scene_id)} disabled={disabled}
+                            title="从已选关键帧 i2v 出首镜:首帧脸钉死、不赌 t2v 现生(走 ComfyUI i2v,需 COMFYUI_BASE_URL)" style={miniAct(false, true)}>
+                            {`出片(i2v·锁首帧)${sec != null ? ` ≈${sec.toFixed(0)}s` : ''}`}
+                          </button>
+                        ) : (
+                          <label title="传一张关键帧当首帧(或用上方「出图」出几张、点选一张:角色配了参考脸即 PuLID 锁脸出图)→ i2v 从它动起来"
+                            style={{ fontSize: 11, color: 'rgba(165,180,252,0.95)', cursor: disabled ? 'default' : 'pointer',
+                                     border: '1px solid rgba(129,140,248,0.45)', borderRadius: 6, padding: '2px 8px', opacity: disabled ? 0.5 : 1 }}>
+                            上传关键帧
+                            <input type="file" accept="image/*" style={{ display: 'none' }} disabled={disabled}
+                              onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) uploadKeyframe(s.scene_id, f) }} />
+                          </label>
+                        )}
+                        <button onClick={() => setFirstFrameMode(p => ({ ...p, [s.scene_id]: 't2v' }))} disabled={disabled}
+                          title="改回 t2v 文生起头" style={miniAct(false)}>⇄ t2v</button>
+                      </>
+                    )
+                  }
                   // 纯 t2v：分镜文本直接出片(无出图/选图/对口型)。想长镜头先出 1 段、再用下方「再续一段」加长。
                   return (
-                    <button onClick={() => runScene('render', s.scene_id)} disabled={disabled}
-                      title="文本直接生成这镜视频(t2v)" style={miniAct(false, true)}>
-                      {`出片(t2v)${sec != null ? ` ≈${sec.toFixed(0)}s` : ''}`}
-                    </button>
+                    <>
+                      <button onClick={() => runScene('render', s.scene_id)} disabled={disabled}
+                        title="文本直接生成这镜视频(t2v)" style={miniAct(false, true)}>
+                        {`出片(t2v)${sec != null ? ` ≈${sec.toFixed(0)}s` : ''}`}
+                      </button>
+                      {isHead && (
+                        <button onClick={() => setFirstFrameMode(p => ({ ...p, [s.scene_id]: 'i2v' }))} disabled={disabled}
+                          title="改用关键帧 i2v 起头:首镜从一张关键帧动起来、首帧脸钉死(比 t2v 现生更可控,适合锁脸)" style={miniAct(false)}>
+                          ⇄ i2v起头
+                        </button>
+                      )}
+                    </>
                   )
                 })()}
                 {!s.video && (

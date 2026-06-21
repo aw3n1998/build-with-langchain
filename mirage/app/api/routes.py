@@ -2105,8 +2105,9 @@ async def _scene_render_events(req: "SceneRenderRequest"):
     from mirage.app.pipeline.pipeline_tools import do_render_scene_video
     set_workspace(req.workspace)
     params: dict = dict(req.video_params or {})
-    if (req.video_mode or "t2v") == "t2v":   # t2v 文生视频：路由到 _do_render_t2v(不需选图)
-        params["video_mode"] = "t2v"
+    # 显式透传出片模式(不再只在 t2v 时塞)：i2v 也要传，否则会回落到 scene.video_mode——
+    # 若该镜之前 t2v 出过片(video_mode 被设成 't2v')，首镜「i2v 起头」会被静默退回 t2v、忽略关键帧。
+    params["video_mode"] = "t2v" if (req.video_mode or "t2v") == "t2v" else "i2v"
     if req.segments and req.segments > 1:
         params["segments"] = req.segments
     if req.size:

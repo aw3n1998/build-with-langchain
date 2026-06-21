@@ -979,6 +979,20 @@ def do_render_scene_video(
     # 只剔除真正"未设置"的(None / 空串)；保留数值 0——seed=0 是合法可复现种子，
     # 旧的 `not in (None, "", 0)` 会连 0(及 False)一起吞掉，导致 seed=0 落空回退随机。
     merged = {**provider.default_params(), **{k: v for k, v in params.items() if v is not None and v != ""}}
+    # i2v 出片(含「首镜 i2v 起头·从选中关键帧」)挂【项目级 i2v 角色 LoRA】(同尾帧续接 render_continuation;
+    # wan_i2v_lora_* 优先,没训过 i2v 则回退 wan_t2v_lora_*,会偏弱/漂)——让 i2v 选图出片跨镜锁脸,
+    # 与续接一致(此前这条分支漏挂,首镜 i2v 锁脸只能靠关键帧本身)。ComfyUI i2v provider 读这两个键注入。
+    if is_http:
+        try:
+            _pstyle = store.get_project_style(scene.get("project_id") or "") or {}
+        except Exception:  # noqa: BLE001
+            _pstyle = {}
+        _ci_hi = (_pstyle.get("wan_i2v_lora_high") or _pstyle.get("wan_t2v_lora_high") or "").strip()
+        _ci_lo = (_pstyle.get("wan_i2v_lora_low") or _pstyle.get("wan_t2v_lora_low") or "").strip()
+        if _ci_hi and not merged.get("wan_i2v_lora_high"):
+            merged["wan_i2v_lora_high"] = _ci_hi
+        if _ci_lo and not merged.get("wan_i2v_lora_low"):
+            merged["wan_i2v_lora_low"] = _ci_lo
     # 尾帧接续段数（流水线级参数，不传给模型）：每段取末帧作为下一段输入，拼成连续长镜头。
     # 段数不写死：上限由 settings.MAX_CONTINUATION_SEGMENTS 决定（0=不限）。
     try:
