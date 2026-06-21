@@ -41,15 +41,16 @@ elif [ -n "$FLUX_BASE_URL" ]; then
   sz=$(stat -c%s "$BASE_DIR/$FLUX_BASE_FILE" 2>/dev/null || echo 0)
   [ "$sz" -lt 1000000 ] && echo "[warn] $FLUX_BASE_FILE 只有 ${sz}B,八成是 token/URL 错下成了错误页,请核对 FLUX_BASE_URL"
 else
-  get "$FLUX_BASE_REPO" "$FLUX_BASE_FILE" "$BASE_DIR"
+  get "$FLUX_BASE_REPO" "$FLUX_BASE_FILE" "$BASE_DIR" || echo "[warn] FLUX 底模没下到(gated 需 HF_TOKEN+接受许可;走 Wan t2v/i2v 主线可忽略)"
 fi
-# UNET-only 底模(默认;含 CivitAI 多数"checkpoint"其实是 UNET-only)需单独的 ae/t5xxl/clip_l。
-# ae 用 FLUX.1-schnell(Apache,非 gated,与 dev 同一 VAE)→ 全程免 HF_TOKEN。t5xxl/clip_l 也公开。
-# 真·全合一 checkpoint(自带 CLIP+VAE)才设 FLUX_BASE_KIND=checkpoint 跳过这三个。
+# UNET-only 底模(默认)需单独的 ae/t5xxl/clip_l——但这些只给【FLUX 出图】用,Wan t2v/i2v 主线不需要。
+# ★BFL 已把 FLUX.1-schnell/dev 设为 gated:没 `hf auth login`(token 须在 HF 接受 FLUX 许可)会 Access denied。
+# 故这三个 FLUX 辅件做成【非致命】:下不到只 warn 跳过,绝不中断后面真正要的 Wan 模型下载。
 if [ "$FLUX_BASE_KIND" != "checkpoint" ]; then
-  get black-forest-labs/FLUX.1-schnell ae.safetensors    "$M/vae"       # 非 gated,免 HF_TOKEN
-  get comfyanonymous/flux_text_encoders t5xxl_fp16.safetensors "$M/clip"
-  get comfyanonymous/flux_text_encoders clip_l.safetensors     "$M/clip"
+  _fw='[warn] FLUX 辅件没下到(gated 需 HF_TOKEN+接受许可;走 Wan t2v/i2v 不需要 FLUX 出图,可忽略)'
+  get black-forest-labs/FLUX.1-schnell ae.safetensors    "$M/vae"               || echo "$_fw"
+  get comfyanonymous/flux_text_encoders t5xxl_fp16.safetensors "$M/clip"        || echo "$_fw"
+  get comfyanonymous/flux_text_encoders clip_l.safetensors     "$M/clip"        || echo "$_fw"
 fi
 
 # ── Wan2.2-I2V-A14B 双专家 —— 精度档由 I2V_PRECISION 决定(笔记本第1格按 GPU 自动设)──
