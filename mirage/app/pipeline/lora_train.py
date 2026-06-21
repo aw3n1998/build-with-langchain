@@ -87,6 +87,15 @@ def is_local_runner() -> bool:
     return not (settings.LORA_TRAIN_ENDPOINT or "").strip()
 
 
+def _gpu_vram_gb() -> float:
+    """探测 GPU 0 显存(GB)；探测不到返回 0(调用方按"保守省显存"处理)。"""
+    try:
+        import torch
+        return torch.cuda.get_device_properties(0).total_memory / (1024 ** 3)
+    except Exception:  # noqa: BLE001
+        return 0.0
+
+
 def _resolve_low_vram() -> bool:
     """是否开 low_vram(把闲置专家挪 CPU 省显存)。auto=按显存：>48G 全 GPU 训(快、GPU 吃满)、≤48G 省显存。
     也可 LORA_TRAIN_LOW_VRAM=true/false 强制。"""
@@ -95,12 +104,30 @@ def _resolve_low_vram() -> bool:
         return True
     if v in ("false", "0", "no", "off"):
         return False
-    try:  # auto：按显存决定
-        import torch
-        gb = torch.cuda.get_device_properties(0).total_memory / (1024 ** 3)
-        return gb <= 48     # >48G(A100-80/H100/大卡)→全 GPU 训；≤48G→挪 CPU 省显存
-    except Exception:  # noqa: BLE001
-        return True         # 探测不到显存 → 保守省显存
+    gb = _gpu_vram_gb()          # auto：按显存决定
+    return gb == 0 or gb <= 48   # 探测不到→保守省显存；>48G(A100-80/H100/大卡)→全 GPU 训
+
+
+def _resolve_quantize() -> bool:
+    """是否量化底模(省显存,但加反量化开销)。auto=按显存：≥90G 特大卡(如 RTX PRO 6000 96G)用 bf16 免量化更快；
+    其余(含 A100-80G)保守开量化(稳、不 OOM)。LORA_TRAIN_QUANTIZE=true/false 强制。
+    A100-80G 想试 bf16 提速：手动设 false(bf16 底模 ~56G 装得下；OOM 再回 true)。"""
+    v = str(settings.LORA_TRAIN_QUANTIZE or "auto").strip().lower()
+    if v in ("true", "1", "yes", "on"):
+        return True
+    if v in ("false", "0", "no", "off"):
+        return False
+    gb = _gpu_vram_gb()
+    return not (gb >= 90)        # ≥90G→免量化(bf16 更快)；否则量化(稳，含探测不到时)
+
+
+def _resolve_grad_ckpt() -> bool:
+    """梯度检查点(省显存,但反向重算激活、慢~25%)。auto/true=开(安全默认)；
+    LORA_TRAIN_GRAD_CKPT=false 关掉提速(需显存余量，1024 桶+大卡才稳，否则可能 OOM)。"""
+    v = str(settings.LORA_TRAIN_GRAD_CKPT or "auto").strip().lower()
+    if v in ("false", "0", "no", "off"):
+        return False
+    return True                 # auto/true：安全默认开(关掉提速但有 OOM 风险，让用户显式 false)
 
 
 def count_images(dataset_dir: str) -> int:
@@ -121,6 +148,8 @@ def build_aitk_config(name: str, dataset_dir: str, trigger: str, base: str,
     dim = int(settings.LORA_TRAIN_NETWORK_DIM)
     res = int(settings.LORA_TRAIN_RESOLUTION)
     arch = "wan22_14b_i2v" if mode == "i2v" else "wan22_14b"
+    # 分辨率桶：含 1024(LORA_TRAIN_HIRES，默认开)学脸高频细节更足；关=只 [res, 1.5res]、快~40% 但脸细节略降。
+    buckets = sorted({res, int(res * 1.5)} | ({1024} if settings.LORA_TRAIN_HIRES else set()))
     return {
         "job": "extension",
         "config": {
@@ -135,9 +164,9 @@ def build_aitk_config(name: str, dataset_dir: str, trigger: str, base: str,
                     "folder_path": dataset_dir,
                     "caption_ext": "txt",
                     "num_frames": 1,                            # 图片训身份(单帧)
-                    # 多分辨率桶含 1024：脸/眼镜这类高频细节靠大桶才学得到（512 单桶时全身照里脸只剩 ~80-120px、糊掉）。
-                    # 对齐官方 ai-toolkit wan22_14b 例子的 [512,768,1024]。显存吃紧可去掉 1024。
-                    "resolution": sorted({res, int(res * 1.5), 1024}),
+                    # 多分辨率桶：含 1024(LORA_TRAIN_HIRES，默认开)时脸/眼镜高频细节靠大桶才学得到
+                    # (512 单桶时全身照里脸只剩 ~80-120px、糊掉)；关掉=只 [512,768]、快~40% 但脸细节略降。
+                    "resolution": buckets,
                     "cache_latents_to_disk": True,
                 }],
                 "train": {
@@ -146,7 +175,7 @@ def build_aitk_config(name: str, dataset_dir: str, trigger: str, base: str,
                     "gradient_accumulation_steps": 1,
                     "train_unet": True,
                     "train_text_encoder": False,
-                    "gradient_checkpointing": True,
+                    "gradient_checkpointing": _resolve_grad_ckpt(),   # 默认开(省显存);LORA_TRAIN_GRAD_CKPT=false 关掉提速~25%
                     "optimizer": "adamw8bit",
                     "lr": 1e-4,
                     "dtype": "bf16",
@@ -154,7 +183,7 @@ def build_aitk_config(name: str, dataset_dir: str, trigger: str, base: str,
                     "switch_boundary_every": 10,    # 对齐官方/社区(原 1 每步切专家、更抖更慢);仍约 50/50 覆盖高低噪
                 },
                 # ★arch=wan22_14b → ai-toolkit 走 MoE 双专家、一次出 high+low 两个 LoRA(别用 is_flux)
-                "model": {"name_or_path": base, "arch": arch, "quantize": True,
+                "model": {"name_or_path": base, "arch": arch, "quantize": _resolve_quantize(),
                           "low_vram": _resolve_low_vram(),   # 大卡(>48G)全 GPU 训、不挪 CPU；小卡才省显存
                           "model_kwargs": {"train_high_noise": True, "train_low_noise": True}},
                 # ★不生成训练中预览样图★：ai-toolkit 的 Wan2.2 采样路径调 diffusers encode_prompt 时把负向

@@ -90,6 +90,14 @@ class Settings(BaseSettings):
     LORA_TRAIN_RESOLUTION: int = 512     # 训练分辨率(短边；长边自动取 1.5x)
     LORA_TRAIN_NETWORK_DIM: int = 64     # LoRA rank(linear)；alpha 取一半。64 比 32 学人脸高频细节更足(从「神似」到「形似」)，14B 上显存代价小；显存吃紧可降回 32
     LORA_TRAIN_BATCH: int = 1            # batch_size(Wan 双专家训练吃显存，默认 1)
+    # ── 训练提速旋钮(均 .env 可调；OOM 就调回更省显存的一档)──────────────────────────
+    # 分辨率桶是否含 1024：含(默认)学脸高频细节更足；关=只 [512,768]、快~40% 但脸细节略降。
+    LORA_TRAIN_HIRES: bool = True
+    # 底模量化：auto(≥90G 大卡免量化、用 bf16 更快；其余含 A100-80G 保守开量化、稳不 OOM) / true / false。
+    #   A100-80G 想再快可手动设 false(bf16 底模 ~56G 装得下；OOM 再回 true)。
+    LORA_TRAIN_QUANTIZE: str = "auto"
+    # 梯度检查点：auto/true=开(省显存,但反向重算激活、慢~25%)；false=关(快~25%,需显存余量,可能 OOM)。
+    LORA_TRAIN_GRAD_CKPT: str = "auto"
     # 数据集自举(免上传自训)：每个角色自动生成多少张训练图、变体提示词(语言无关、可加可减、不写死)。
     LORA_BOOTSTRAP_COUNT: int = 16       # 自举默认生成张数(>=训练门槛 5)
     PULID_ENABLED: bool = True           # 单脸自举开关(需 ComfyUI 装 PuLID_Flux + 下配套模型)
