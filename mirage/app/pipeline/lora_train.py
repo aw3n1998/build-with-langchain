@@ -150,6 +150,38 @@ def build_aitk_config(name: str, dataset_dir: str, trigger: str, base: str,
     arch = "wan22_14b_i2v" if mode == "i2v" else "wan22_14b"
     # 分辨率桶：含 1024(LORA_TRAIN_HIRES，默认开)学脸高频细节更足；关=只 [res, 1.5res]、快~40% 但脸细节略降。
     buckets = sorted({res, int(res * 1.5)} | ({1024} if settings.LORA_TRAIN_HIRES else set()))
+    # 数据集：t2v 喂静图(num_frames=1)；★i2v 必须喂【视频 clip】(每段抽 LORA_TRAIN_I2V_FRAMES 帧、首帧自动当
+    # 条件)——纯静图(num_frames=1)对 i2v arch 条件张量为 None 必崩(get_noise_prediction)。i2v 可再混一个
+    # 【静图锚桶】(dataset_dir/_imgs 下干净正脸/多角度，num_repeats 配权)做身份监督、治脸漂。帧数须 4n+1。
+    if mode == "i2v":
+        datasets = [{
+            "folder_path": dataset_dir,                          # 放 .mp4 视频 clip + 同名 .txt caption
+            "caption_ext": "txt",
+            "num_frames": int(settings.LORA_TRAIN_I2V_FRAMES),   # 81 原生 / 显存紧 41/33(均 4n+1)
+            "resolution": buckets,
+            "cache_latents_to_disk": True,
+        }]
+        _imgs = dataset_dir.rstrip("/\\") + "_imgs"              # 静图锚桶(干净身份监督；治脸漂)
+        # ★同级目录(非子目录)：若 ai-toolkit 视频桶递归 glob dataset_dir,子目录里的 PNG 会被当视频读崩;
+        #   放同级 {dataset_dir}_imgs(仿 _out 隔离)彻底规避。
+        if settings.LORA_TRAIN_I2V_MIX_IMAGES and os.path.isdir(_imgs) and any(
+                f.lower().endswith(_IMG_EXTS) for f in os.listdir(_imgs)):
+            datasets.append({
+                "folder_path": _imgs,
+                "caption_ext": "txt",
+                "num_frames": 1,                                 # 锚=单帧干净静图
+                "num_repeats": int(settings.LORA_TRAIN_I2V_ANCHOR_REPEATS),
+                "resolution": buckets,
+                "cache_latents_to_disk": True,
+            })
+    else:
+        datasets = [{
+            "folder_path": dataset_dir,
+            "caption_ext": "txt",
+            "num_frames": 1,                                     # t2v：图片训身份(单帧)
+            "resolution": buckets,
+            "cache_latents_to_disk": True,
+        }]
     return {
         "job": "extension",
         "config": {
@@ -160,15 +192,7 @@ def build_aitk_config(name: str, dataset_dir: str, trigger: str, base: str,
                 "device": "cuda:0",
                 "network": {"type": "lora", "linear": dim, "linear_alpha": max(1, dim // 2)},
                 "save": {"dtype": "bf16", "save_every": 1000, "max_step_saves_to_keep": 2},
-                "datasets": [{
-                    "folder_path": dataset_dir,
-                    "caption_ext": "txt",
-                    "num_frames": 1,                            # 图片训身份(单帧)
-                    # 多分辨率桶：含 1024(LORA_TRAIN_HIRES，默认开)时脸/眼镜高频细节靠大桶才学得到
-                    # (512 单桶时全身照里脸只剩 ~80-120px、糊掉)；关掉=只 [512,768]、快~40% 但脸细节略降。
-                    "resolution": buckets,
-                    "cache_latents_to_disk": True,
-                }],
+                "datasets": datasets,   # t2v=静图桶；i2v=视频桶(+可选静图锚桶)，见上方构造
                 "train": {
                     "batch_size": int(settings.LORA_TRAIN_BATCH),
                     "steps": int(steps),

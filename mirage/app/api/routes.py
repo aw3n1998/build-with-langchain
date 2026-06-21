@@ -1807,14 +1807,17 @@ async def pipeline_lora_trainings(req: LoraActionRequest):
         t = store.get_lora_training(req.training_id)
         if not t:
             raise HTTPException(status_code=404, detail="训练任务不存在")
-        from mirage.app.pipeline import lora_train
+        from mirage.app.pipeline import lora_train, lora_bootstrap
         ddir = _lora_dir(req.training_id)
-        imgs = lora_train.count_images(ddir)        # 以磁盘为准(上传/自举都落这)
-        store.update_lora_training(req.training_id, image_count=imgs)
-        if imgs < 5:
+        # i2v 训练集是【视频 clip(.mp4)】，count_images 只数图片→恒 0 会误挡；i2v 用 clip 数判门槛。
+        _i2v = (req.lora_mode or "t2v") == "i2v"
+        n = lora_bootstrap._count_clips(ddir) if _i2v else lora_train.count_images(ddir)
+        store.update_lora_training(req.training_id, image_count=n)
+        if n < 5:
             store.update_lora_training(
                 req.training_id, status="DRAFT",
-                message="参考图太少：至少 5 张。可手动上传，或用『自动造训练集』免上传生成一套。")
+                message=(f"i2v 视频集太少：至少 5 段 clip(现 {n})。用『t2v造转身片→训i2v』自举生成。" if _i2v
+                         else "参考图太少：至少 5 张。可手动上传，或用『自动造训练集』免上传生成一套。"))
         else:
             # 本地 ai-toolkit 子进程(默认)或远程派发(LORA_TRAIN_ENDPOINT 非空)，执行器内部判定
             lora_train.start_training(store, req.training_id, ddir, mode=(req.lora_mode or "t2v"))
@@ -1830,7 +1833,8 @@ async def pipeline_lora_trainings(req: LoraActionRequest):
             appearance = (store.get_character(t["char_id"]) or {}).get("appearance") or ""
         lora_bootstrap.start_bootstrap(store, req.training_id, ddir, mode=(req.mode or "text"),
                                        appearance=appearance, count=(req.count or 0),
-                                       auto_train=bool(req.auto_train))
+                                       auto_train=bool(req.auto_train),
+                                       train_mode=(req.lora_mode or "t2v"))   # video 模式→i2v;text/pulid→t2v
     elif act == "log" and req.training_id:
         # 训练实时日志：tail ai-toolkit 的 _train.log + 当前状态/消息（前端轮询跟进度用）
         ddir = _lora_dir(req.training_id)

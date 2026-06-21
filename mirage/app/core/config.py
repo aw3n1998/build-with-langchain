@@ -82,6 +82,10 @@ class Settings(BaseSettings):
     # i2v 人物 LoRA 训练底模(diffusers;ai-toolkit arch=wan22_14b_i2v)。前端训练「模式=i2v」时用它,
     # 而非 t2v 的 LORA_TRAIN_BASE。t2v 训的 LoRA 套 i2v 错配(强度只能压 0.5、脸漂),i2v 出片要 i2v 原生 LoRA。
     LORA_TRAIN_I2V_BASE: str = "ai-toolkit/Wan2.2-I2V-A14B-Diffusers-bf16"
+    # i2v 原生 LoRA 训练数据：必须喂【视频 clip】(num_frames>1)；纯静图(=1)对 i2v arch 条件张量为 None 必崩。
+    LORA_TRAIN_I2V_FRAMES: int = 81       # i2v 每段抽帧数(须 4n+1：81 原生 / 41 / 33；显存紧可降)
+    LORA_TRAIN_I2V_MIX_IMAGES: bool = True  # 混一个静图锚桶(dataset_dir/_imgs 干净正脸)做身份监督、治脸漂
+    LORA_TRAIN_I2V_ANCHOR_REPEATS: int = 2  # 静图锚桶 num_repeats(身份监督权重；越大越偏静图身份)
     # 训练显存策略：auto(按显存自动：>48G 全 GPU 训、GPU 吃满更快；≤48G 把闲置专家挪 CPU 省显存) / true(强制省显存) / false(强制全 GPU)
     LORA_TRAIN_LOW_VRAM: str = "auto"
     # 本地训练执行器(照搬 notebook LW1/LW2 已验证的 ai-toolkit Wan 配方)。均可 .env 覆盖、不写死。

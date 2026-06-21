@@ -789,7 +789,9 @@ export function ProductionPanel({ message, workspace, sessionId }) {
     const { mode, count } = bootOf(tid)
     setLoraBusy(true)
     try {
-      const r = await loraAction(pid, 'bootstrap', tid, workspace, { mode, count: Number(count) || 0, auto_train: true })
+      // video 模式=用 t2v LoRA 造转身片→造完即训【i2v】原生 LoRA；text/pulid=造静图→训 t2v
+      const lora_mode = mode === 'video' ? 'i2v' : 't2v'
+      const r = await loraAction(pid, 'bootstrap', tid, workspace, { mode, count: Number(count) || 0, auto_train: true, lora_mode })
       await load()
       const t = (r.trainings || []).find(x => x.id === tid)
       setProgress(t?.message || '自动造训练集已启动…造完会自动开训，进度看这张卡的状态。')
@@ -1347,7 +1349,14 @@ export function ProductionPanel({ message, workspace, sessionId }) {
                   style={{ ...inputStyle, height: 26, width: 'auto' }}>
                   <option value="text">纯文字零图</option>
                   <option value="pulid">单张脸图(PuLID)</option>
+                  <option value="video">t2v造转身片→训i2v</option>
                 </select>
+                {bootOf(t.id).mode === 'video' && (
+                  <span style={{ fontSize: 10, color: 'var(--text-dim)', whiteSpace: 'nowrap' }}
+                    title="用项目已训好的 t2v 角色 LoRA 批量造『转身短视频』当 i2v 训练集→造完自动训 i2v 原生 LoRA(锁脸不漂)。前置:本项目须先有训好的 t2v LoRA。">
+                    需先有 t2v LoRA · 造 {bootOf(t.id).count} 段
+                  </span>
+                )}
                 {bootOf(t.id).mode === 'pulid' && (
                   <label style={{ ...miniBtn2, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
                     <Icon.Plus size={12} />传参考脸
