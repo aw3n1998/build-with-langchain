@@ -126,17 +126,20 @@ class ComfyUIProvider(VideoProvider):
                                         "i2v_fp8_lightning_template.json", "i2v-lightning")
         else:
             template = ch.load_workflow(settings.COMFYUI_WORKFLOW_I2V, "i2v_gguf_template.json", "i2v")
-        # 角色 LoRA(i2v 原生训的 wan_i2v_lora_*,用于尾帧续接锁脸):仅当 i2v 模板含 %CHAR_HI_LORA% 占位时注入,
-        # 否则跳过(不破坏现有模板)。★要生效,i2v 模板需仿 t2v(comfyui_t2v.py 的 69/70 角色 LoRA 节点)加占位符+节点。
-        import json as _json
-        if "%CHAR_HI_LORA%" in _json.dumps(template):
-            _chi = (params.get("wan_i2v_lora_high") or settings.WAN_I2V_LORA_HIGH or "").strip()
-            _clo = (params.get("wan_i2v_lora_low") or settings.WAN_I2V_LORA_LOW or "").strip()
-            if _chi:
-                mapping["%CHAR_HI_LORA%"] = _chi
-                mapping["%CHAR_HI_STR%"] = float(params.get("wan_i2v_lora_str_high") or settings.WAN_I2V_LORA_STR_HIGH)
-                mapping["%CHAR_LO_LORA%"] = _clo or _chi
-                mapping["%CHAR_LO_STR%"] = float(params.get("wan_i2v_lora_str_low") or settings.WAN_I2V_LORA_STR_LOW)
+        # 角色 LoRA(i2v 原生训的 wan_i2v_lora_*,续接锁脸):i2v 模板的 69/70 节点(仿 t2v)——有 LoRA 就填、
+        # 空则摘节点(_strip_lora_node,避免空 lora_name 触发 ComfyUI node_errors)。对没加 69/70 的模板:strip 是
+        # no-op、填进 mapping 的占位也会被 fill_template 忽略,故两类模板都安全。
+        from mirage.app.pipeline.providers.comfyui_t2v import _strip_lora_node
+        _chi = (params.get("wan_i2v_lora_high") or settings.WAN_I2V_LORA_HIGH or "").strip()
+        _clo = (params.get("wan_i2v_lora_low") or settings.WAN_I2V_LORA_LOW or "").strip()
+        if _chi:
+            mapping["%CHAR_HI_LORA%"] = _chi
+            mapping["%CHAR_HI_STR%"] = float(params.get("wan_i2v_lora_str_high") or settings.WAN_I2V_LORA_STR_HIGH)
+            mapping["%CHAR_LO_LORA%"] = _clo or _chi
+            mapping["%CHAR_LO_STR%"] = float(params.get("wan_i2v_lora_str_low") or settings.WAN_I2V_LORA_STR_LOW)
+        else:
+            _strip_lora_node(template, "69")
+            _strip_lora_node(template, "70")
         t0 = time.time()
         client_id = f"mirage-{os.getpid()}-{int(t0)}"
         with httpx.Client() as client:

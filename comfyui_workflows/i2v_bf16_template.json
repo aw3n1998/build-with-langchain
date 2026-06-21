@@ -15,15 +15,25 @@
       "weight_dtype": "default"
     }
   },
+  "69": {
+    "class_type": "LoraLoaderModelOnly",
+    "_meta": { "title": "高噪 角色 LoRA(i2v 身份;空则 provider 摘除节点)" },
+    "inputs": { "model": ["37", 0], "lora_name": "%CHAR_HI_LORA%", "strength_model": "%CHAR_HI_STR%" }
+  },
+  "70": {
+    "class_type": "LoraLoaderModelOnly",
+    "_meta": { "title": "低噪 角色 LoRA(i2v 身份)" },
+    "inputs": { "model": ["41", 0], "lora_name": "%CHAR_LO_LORA%", "strength_model": "%CHAR_LO_STR%" }
+  },
   "65": {
     "class_type": "ModelSamplingSD3",
     "_meta": { "title": "高噪 shift(Wan必需;官方i2v sample_shift=5;缺它运动僵硬/发糊)" },
-    "inputs": { "shift": "%SHIFT%", "model": ["37", 0] }
+    "inputs": { "shift": "%SHIFT%", "model": ["69", 0] }
   },
   "66": {
     "class_type": "ModelSamplingSD3",
     "_meta": { "title": "低噪 shift(同高噪)" },
-    "inputs": { "shift": "%SHIFT%", "model": ["41", 0] }
+    "inputs": { "shift": "%SHIFT%", "model": ["70", 0] }
   },
   "38": {
     "class_type": "CLIPLoader",

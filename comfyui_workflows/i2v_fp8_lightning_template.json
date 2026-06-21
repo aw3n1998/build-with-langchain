@@ -19,15 +19,25 @@
     "_meta": { "title": "低噪 Lightning LoRA(★必须用 low_noise 那个)" },
     "inputs": { "model": ["41", 0], "lora_name": "%LIGHT_LO_LORA%", "strength_model": "%LIGHT_LO_STR%" }
   },
+  "69": {
+    "class_type": "LoraLoaderModelOnly",
+    "_meta": { "title": "高噪 角色 LoRA(i2v 身份;串在 Lightning 之后;空则 provider 摘除节点)" },
+    "inputs": { "model": ["67", 0], "lora_name": "%CHAR_HI_LORA%", "strength_model": "%CHAR_HI_STR%" }
+  },
+  "70": {
+    "class_type": "LoraLoaderModelOnly",
+    "_meta": { "title": "低噪 角色 LoRA(i2v 身份)" },
+    "inputs": { "model": ["68", 0], "lora_name": "%CHAR_LO_LORA%", "strength_model": "%CHAR_LO_STR%" }
+  },
   "65": {
     "class_type": "ModelSamplingSD3",
     "_meta": { "title": "高噪 shift" },
-    "inputs": { "shift": "%SHIFT%", "model": ["67", 0] }
+    "inputs": { "shift": "%SHIFT%", "model": ["69", 0] }
   },
   "66": {
     "class_type": "ModelSamplingSD3",
     "_meta": { "title": "低噪 shift" },
-    "inputs": { "shift": "%SHIFT%", "model": ["68", 0] }
+    "inputs": { "shift": "%SHIFT%", "model": ["70", 0] }
   },
   "38": {
     "class_type": "CLIPLoader",
