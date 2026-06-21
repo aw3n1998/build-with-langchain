@@ -53,7 +53,6 @@ class Settings(BaseSettings):
     GPU_PYTHON: str = "/root/autodl-tmp/miniconda3/bin/python"
     GPU_WAN_REPO: str = "/root/autodl-tmp/Wan2.2"
     GPU_WAN_CKPT: str = "/root/autodl-tmp/models/Wan-AI/Wan2.2-I2V-A14B"   # A14B 双专家(5B 已彻底弃用)
-    GPU_FLUX_SCRIPT: Optional[str] = None           # 旧版单图脚本（已弃用，保留向后兼容）
     GPU_OUTPUT_DIR: str = "/root/autodl-tmp/pipeline_out"
     GPU_SCENES_DIR: str = "/root/autodl-tmp/cael_scenes"
     # FLUX 多候选出图（单次加载、多种子；本地源会自动上传，无需手动部署）
@@ -80,6 +79,9 @@ class Settings(BaseSettings):
     # ★训练底模(diffusers)与 t2v 出片底模(lightx2v / ComfyUI fp8)是两套，各管训练/推理。
     # Colab 上 LW1 下到本地持久化目录后，把本项设成那个本地路径更省(免训练时重下 ~56G)。仅原创虚构成年角色，遵守合规前置。
     LORA_TRAIN_BASE: str = "ai-toolkit/Wan2.2-T2V-A14B-Diffusers-bf16"
+    # i2v 人物 LoRA 训练底模(diffusers;ai-toolkit arch=wan22_14b_i2v)。前端训练「模式=i2v」时用它,
+    # 而非 t2v 的 LORA_TRAIN_BASE。t2v 训的 LoRA 套 i2v 错配(强度只能压 0.5、脸漂),i2v 出片要 i2v 原生 LoRA。
+    LORA_TRAIN_I2V_BASE: str = "ai-toolkit/Wan2.2-I2V-A14B-Diffusers-bf16"
     # 训练显存策略：auto(按显存自动：>48G 全 GPU 训、GPU 吃满更快；≤48G 把闲置专家挪 CPU 省显存) / true(强制省显存) / false(强制全 GPU)
     LORA_TRAIN_LOW_VRAM: str = "auto"
     # 本地训练执行器(照搬 notebook LW1/LW2 已验证的 ai-toolkit Wan 配方)。均可 .env 覆盖、不写死。
@@ -153,30 +155,25 @@ class Settings(BaseSettings):
     WAN_T2V_LORA_LOW: str = ""
     WAN_T2V_LORA_STR_HIGH: float = 1.0
     WAN_T2V_LORA_STR_LOW: float = 1.0
+    # i2v 角色 LoRA(i2v 原生训的;用于尾帧续接锁脸)。高/低噪各一,空=不挂。训练「模式=i2v」产物自动写进项目级
+    # wan_i2v_lora_* (见 lora_train._link_after_train);也可在 .env 设全局默认。强度可 0.8-1.0(i2v 原生不必压 0.5)。
+    WAN_I2V_LORA_HIGH: str = ""
+    WAN_I2V_LORA_LOW: str = ""
+    WAN_I2V_LORA_STR_HIGH: float = 0.9
+    WAN_I2V_LORA_STR_LOW: float = 0.9
     # t2v 极速档蒸馏 LoRA(★与 i2v 的不同文件!)。文件名以 HF lightx2v/Wan2.2-Distill-Loras 实际为准,可在 .env 覆盖。
     WAN_T2V_LIGHTNING_LORA_HIGH: str = "wan2.2_t2v_A14b_high_noise_lora_rank64_lightx2v_4step.safetensors"
     WAN_T2V_LIGHTNING_LORA_LOW: str = "wan2.2_t2v_A14b_low_noise_lora_rank64_lightx2v_4step.safetensors"
-    # ── t2v 出片后端选择 ──────────────────────────────────────────
-    # comfyui-t2v = 走 ComfyUI(默认)；lightx2v-t2v = 走 lightx2v 引擎(纯 t2v 可彻底不用 ComfyUI、更快)。
+    # ── t2v 出片后端 ──────────────────────────────────────────────
+    # t2v 走 ComfyUI(comfyui-t2v provider，配 COMFYUI_BASE_URL 才注册)。保留此键以便将来并存其它 t2v 后端。
     T2V_PROVIDER: str = "comfyui-t2v"
-    # lightx2v(ModelTC/LightX2V)文生视频后端:专做 Wan 快速推理(你的 4 步蒸馏 LoRA 娘家),起 HTTP server 接入。
-    LIGHTX2V_ENABLED: bool = False          # 配了端点 + 起了 server 才注册;默认关(免没装时选了跑不了)
-    LIGHTX2V_BASE_URL: str = ""             # 如 http://127.0.0.1:8189(与 ComfyUI 8188 错开)
-    LIGHTX2V_MODEL_T2V: str = ""            # lightx2v 端 Wan2.2-T2V 权重目录/标识(按 lightx2v 文档)
-    LIGHTX2V_DISTILL_LORA_HIGH: str = ""    # 蒸馏 LoRA(高噪);走 lora_configs 时必须显式列,否则丢 4 步加速
-    LIGHTX2V_DISTILL_LORA_LOW: str = ""     # 蒸馏 LoRA(低噪)
-    LIGHTX2V_OUTPUT_DIR: str = ""           # lightx2v server 存片目录(同机取片用);空=默认 <install>/lightx2v/server_cache/outputs
     # Stand-In 强锁脸(WeChatCV/Stand-In)文生视频后端:给一张参考脸跨镜硬锁身份,免训练。另起包装 server(默认 8190),
     # 不走 lightx2v(它自带 DiffSynth 引擎)。由「出片模式=t2v + 前端强锁脸开关 + 该角色有参考脸」路由(见 _do_render_t2v)。
     STANDIN_ENABLED: bool = False           # 配了端点 + 跑了 Colab §Stand-In 起 server 才注册;默认关
     STANDIN_BASE_URL: str = ""              # 如 http://127.0.0.1:8190(与 lightx2v 8189 错开)
     STANDIN_STEPS: int = 20                 # 锁脸无蒸馏采样步数(20 起细;Stand-In 不挂蒸馏 LoRA,身份来自参考脸)
-    # lightx2v 图生视频(i2v)后端 —— 用于「尾帧续接」(镜N 用镜N-1 尾帧当首帧续生成,跨镜画面连续)。
-    # 轮流跑:与 t2v server 不同端口、但同一时刻只起一个(96G 装不下两套);i2v 底模放 Drive。默认 40 步(慢)。
-    LIGHTX2V_I2V_ENABLED: bool = False       # 跑了 Colab §i2v续接 起 i2v server 才注册
-    LIGHTX2V_I2V_BASE_URL: str = ""          # 如 http://127.0.0.1:8190(与 t2v 8189 错开)
-    LIGHTX2V_MODEL_I2V: str = ""             # i2v 端 Wan2.2-I2V-A14B 权重目录(Drive 路径)
-    LIGHTX2V_I2V_STEPS: int = 40             # i2v 采样步数(默认 40+CFG;4 步蒸馏只有 nvfp4 版,默认走 bf16)
+    # 注:i2v 尾帧续接(镜N 用镜N-1 尾帧当首帧续生成)现走 ComfyUI i2v provider(wan2.2),
+    # 复用 WAN_LIGHTNING_LORA_*(极速)+ WAN_T2V_LORA_*/项目级 i2v 角色 LoRA(锁脸);不再起独立 lightx2v i2v server。
     # ── 视频模型解耦：默认 Provider + LTX-Video 配置 ──────────────
     # 默认用哪个视频模型（对应 providers 注册名：wan2.2 / ltx）
     VIDEO_PROVIDER_DEFAULT: str = "wan2.2"

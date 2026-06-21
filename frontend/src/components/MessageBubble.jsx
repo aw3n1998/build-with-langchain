@@ -1,6 +1,8 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
 import { Icon } from './icons'
 import { useDialog } from './Dialog'
+import { ParamCard, VideoParamCard, HelpTip } from './production/ParamCards'
+import { panelBtn, miniAct, miniBtn, miniBtn2, inputStyle } from './production/uiStyles'
 
 // 面板参数持久化：存到浏览器 localStorage，刷新后不丢，省得每次重设。
 // 只用于「设置类」状态（模型/尺寸/段数/高级参数等），不用于每镜临时态或拉取的数据。
@@ -24,7 +26,7 @@ import { fileUrl, getVideoProviders, getImageProviders, getProject, batchGenerat
          suggestContinuation, sceneGenerate, sceneRender, sceneAppend,
          cancelJob, listActiveJobs,
          projectStyle, sceneAdd, sceneDelete, listLoras,
-         oneClick, autoSelect, uploadCharacterFace, getLoadedLoras } from '../api'
+         oneClick, autoSelect, uploadCharacterFace, getLoadedLoras, getProviderHealth } from '../api'
 
 /**
  * MessageBubble — 消息渲染
@@ -319,338 +321,6 @@ function ImageWall({ images, onSelectImage, stale }) {
   )
 }
 
-/* ── 出图参数交互卡 ─────────────────────────────────── */
-function ParamCard({ message, onGenerate, stale }) {
-  const [p, setP] = useState(message.params)
-  const submitted = message.submitted || stale   // 回合结束后参数卡也失效
-  const sizePreset = `${p.width}x${p.height}`
-  // param_form 内输入框用青色描边（对齐 mockup），其余沿用 inputStyle
-  const cyanInput = { ...inputStyle, border: '1px solid rgba(0,189,176,0.25)' }
-
-  const field = (label, key, type = 'number', opts) => (
-    <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-      <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{label}</span>
-      {opts ? (
-        <select value={p[key]} disabled={submitted}
-          onChange={e => setP({ ...p, [key]: e.target.value })}
-          style={cyanInput}>
-          {opts.map(o => <option key={o.v} value={o.v}>{o.label}</option>)}
-        </select>
-      ) : (
-        <input type={type} value={p[key]} disabled={submitted}
-          onChange={e => setP({ ...p, [key]: type === 'number' ? Number(e.target.value) : e.target.value })}
-          style={cyanInput} />
-      )}
-    </label>
-  )
-
-  return (
-    <div style={{
-      border: '1px solid rgba(0,189,176,0.3)', background: 'rgba(0,189,176,0.05)',
-      borderRadius: 12, padding: '15px 17px',
-    }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#00bdb0" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M15 4V2"/><path d="M8 9h2"/><path d="m3 21 9-9"/><path d="M12.2 6.2 11 5"/></svg>
-        <span style={{ fontSize: 12.5, fontWeight: 600, color: '#5fe8de' }}>出图参数卡 param_form</span>
-      </div>
-
-      <label style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 10 }}>
-        <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>提示词（角色触发词已自动加好）</span>
-        <textarea value={p.image_prompt} disabled={submitted} rows={2}
-          onChange={e => setP({ ...p, image_prompt: e.target.value })}
-          style={{ ...cyanInput, resize: 'vertical', fontFamily: 'inherit' }} />
-      </label>
-
-      {/* 常用：张数 + 尺寸（小白只看这些）*/}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: 10, marginBottom: 10 }}>
-        {field('张数', 'n')}
-        <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>尺寸</span>
-          <select value={sizePreset} disabled={submitted}
-            onChange={e => { const [w, h] = e.target.value.split('x').map(Number); setP({ ...p, width: w, height: h }) }}
-            style={cyanInput}>
-            <option value="768x1024">768×1024 竖屏</option>
-            <option value="1024x768">1024×768 横屏</option>
-            <option value="1024x1024">1024×1024 方形</option>
-            <option value={sizePreset}>{sizePreset}（当前）</option>
-          </select>
-        </label>
-      </div>
-
-      {/* 高级：步数 / guidance / seed / 显存（折叠）*/}
-      <AdvancedSection>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: 10 }}>
-          {field('步数', 'steps')}
-          {field('guidance', 'guidance', 'number')}
-          {field('seed(-1随机)', 'seed')}
-          {field('显存', 'offload', 'text', [{ v: 'model', label: 'model 快' }, { v: 'sequential', label: 'sequential 省显存' }])}
-        </div>
-      </AdvancedSection>
-
-      <button
-        onClick={() => onGenerate?.(message.id, p)}
-        disabled={submitted}
-        style={{
-          marginTop: 12,
-          height: 34, padding: '0 20px', borderRadius: 8, border: 'none',
-          background: submitted ? 'rgba(255,255,255,0.06)' : '#00bdb0',
-          color: submitted ? 'var(--text-muted)' : '#04201e',
-          fontSize: 13, fontWeight: 600, cursor: submitted ? 'default' : 'pointer',
-        }}>
-        {submitted ? '已提交出图' : '出图'}
-      </button>
-    </div>
-  )
-}
-
-/* ── 出视频参数交互卡（多模型 + schema 驱动）─────────── */
-
-// 小问号 + 悬停说明气泡
-function HelpTip({ text }) {
-  const [show, setShow] = useState(false)
-  if (!text) return null
-  return (
-    <span style={{ position: 'relative', display: 'inline-flex', verticalAlign: 'middle' }}
-      onMouseEnter={() => setShow(true)} onMouseLeave={() => setShow(false)}>
-      <span style={{
-        width: 13, height: 13, borderRadius: '50%', border: '1px solid var(--text-muted)',
-        color: 'var(--text-muted)', fontSize: 9, fontWeight: 700, lineHeight: '11px',
-        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-        marginLeft: 5, cursor: 'help',
-      }}>?</span>
-      {show && (
-        <span style={{
-          position: 'absolute', bottom: '150%', left: '50%', transform: 'translateX(-50%)',
-          width: 210, padding: '8px 11px', borderRadius: 8, background: '#0b0c0e',
-          border: '1px solid var(--border)', color: 'rgba(255,255,255,0.85)',
-          fontSize: 11, lineHeight: 1.55, fontWeight: 400, textTransform: 'none', letterSpacing: 0,
-          zIndex: 60, boxShadow: '0 6px 22px rgba(0,0,0,0.55)', whiteSpace: 'normal', textAlign: 'left',
-        }}>{text}</span>
-      )}
-    </span>
-  )
-}
-
-// 老事件没有 fields 时的兜底 schema。与后端 Wan2.2/ComfyUI provider 字段对齐(frames/fps/steps/negative)，
-// 避免旧事件显示成 frame_num(≤25)/sample_steps 那套过时的 2 参数(A14B 早已不是 ≤25/24fps 的旧 5B 档)。
-function legacyVideoFields(params) {
-  return [
-    { key: 'size', label: '分辨率(宽*高)', type: 'select', default: params.size || '720*1280',
-      help: '成片宽×高。竖屏适合手机；越大越清晰也越慢。',
-      options: [
-        { value: '480*832', label: '480×832 竖屏快出' },
-        { value: '720*1280', label: '720×1280 竖屏高清' },
-        { value: '832*480', label: '832×480 横屏快出' },
-        { value: '1280*720', label: '1280×720 横屏高清' },
-      ] },
-    { key: 'frames', label: '帧数', type: 'number', default: params.frames ?? params.frame_num ?? 81,
-      help: '总帧数。时长≈帧数÷帧率。A14B 常用 81（≈5 秒）。' },
-    { key: 'fps', label: '帧率', type: 'number', default: params.fps ?? 16,
-      help: '每秒帧数。Wan 系常用 16。' },
-    { key: 'steps', label: '采样步数', type: 'number', default: params.steps ?? params.sample_steps ?? 30,
-      help: '去噪步数，一般 20-30。' },
-    { key: 'negative', label: '负向提示词', type: 'text', default: params.negative ?? '',
-      help: '不想要的内容（避免畸形/水印等）。' },
-  ]
-}
-
-function fieldsToValues(fields) {
-  const v = {}
-  for (const f of fields) v[f.key] = f.default
-  return v
-}
-
-function VideoParamCard({ message, onRenderVideo, stale }) {
-  const submitted = message.submitted || stale
-  const init = message.params || {}
-
-  // 全部模型的 schema（注册即出现）：优先从后端拉取，失败则用事件里携带的当前模型 schema 兜底
-  const [providers, setProviders] = useState(null)   // [{name, display_name, fields}]
-  const [model, setModel] = useState(init.model || '')
-  const [motionPrompt, setMotionPrompt] = useState(init.motion_prompt || '')
-
-  // 当前模型的字段定义
-  const curFields = useMemo(() => {
-    const fromProviders = providers?.find(p => p.name === model)?.fields
-    if (fromProviders) return fromProviders
-    if (init.fields && (model === init.model || !model)) return init.fields
-    return legacyVideoFields(init)
-  }, [providers, model, init])
-
-  const [values, setValues] = useState(() =>
-    fieldsToValues(init.fields || legacyVideoFields(init)))
-
-  const simpleFields = curFields.filter(f => !f.advanced)
-  const advancedFields = curFields.filter(f => f.advanced)
-
-  // 拉取所有模型（仅活跃卡片需要；stale/已提交的历史卡片不必）
-  useEffect(() => {
-    if (submitted) return
-    let alive = true
-    getVideoProviders()
-      .then(d => {
-        if (!alive) return
-        setProviders(d.providers || [])
-        if (!model && d.default) setModel(d.default)
-      })
-      .catch(() => {})
-    return () => { alive = false }
-  }, [submitted])  // eslint-disable-line react-hooks/exhaustive-deps
-
-  // 切换模型时，按该模型 schema 重置参数值
-  const switchModel = (name) => {
-    setModel(name)
-    const f = providers?.find(p => p.name === name)?.fields
-    if (f) setValues(fieldsToValues(f))
-  }
-
-  const models = (providers && providers.length)
-    ? providers.map(p => ({ name: p.name, display_name: p.display_name }))
-    : (init.models || (init.model ? [{ name: init.model, display_name: init.model }] : []))
-
-  const submit = () => {
-    onRenderVideo?.(message.id, {
-      scene_id: init.scene_id,
-      motion_prompt: motionPrompt,
-      model,
-      params: values,
-    })
-  }
-
-  // 预计时长 = 帧数 ÷ 帧率 × 接续段数。Wan 用 frame_num + 固定 24fps；LTX 用 num_frames + 可调 fps。
-  const estDuration = useMemo(() => {
-    const frames = Number(values.frame_num ?? values.num_frames)
-    const fps = Number(values.fps) || 24   // 无 fps 字段（如 Wan2.2）按 24fps 估
-    const segs = Math.max(1, Number(values.segments) || 1)
-    if (!frames || !fps) return null
-    return { sec: (frames / fps) * segs, frames, fps, segs }
-  }, [values])
-
-  const renderField = (f) => {
-    const val = values[f.key]
-    const set = (v) => setValues(prev => ({ ...prev, [f.key]: v }))
-    return (
-      <label key={f.key} style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: '1 1 130px', minWidth: 120 }}>
-        <span style={{ fontSize: 11, color: 'var(--text-muted)', display: 'inline-flex', alignItems: 'center' }}>
-          {f.label}<HelpTip text={f.help} />
-        </span>
-        {f.type === 'select' ? (
-          <select value={val} disabled={submitted}
-            onChange={e => {
-              const opt = f.options?.find(o => String(o.value) === e.target.value)
-              set(opt ? opt.value : e.target.value)
-            }} style={inputStyle}>
-            {(f.options || []).map(o => (
-              <option key={String(o.value)} value={String(o.value)}>{o.label}</option>
-            ))}
-          </select>
-        ) : (
-          <input type={f.type === 'number' ? 'number' : 'text'} value={val ?? ''} disabled={submitted}
-            onChange={e => set(f.type === 'number' ? Number(e.target.value) : e.target.value)}
-            style={inputStyle} />
-        )}
-      </label>
-    )
-  }
-
-  return (
-    <div style={{
-      border: '1px solid rgba(0,189,176,0.3)', background: 'rgba(0,189,176,0.05)',
-      borderRadius: 12, padding: '15px 17px',
-    }}>
-      {/* 顶部横条：标题 + 模型选择 + 预计时长，一行读完 */}
-      <div style={{
-        display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 12, marginBottom: 12,
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#00bdb0" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="m12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z"/></svg>
-          <span style={{ fontSize: 12.5, fontWeight: 600, color: '#5fe8de' }}>出视频参数卡 video_param_form</span>
-        </div>
-
-        {/* 模型选择（≥2 个模型时显示） */}
-        {models.length > 1 && (
-          <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span style={{ fontSize: 11, color: 'var(--text-muted)', display: 'inline-flex', alignItems: 'center' }}>
-              模型<HelpTip text="选择视频生成模型。Wan2.2 画质更高但更慢；LTX 出片更快，适合先预演看效果。" />
-            </span>
-            <select value={model} disabled={submitted}
-              onChange={e => switchModel(e.target.value)} style={{ ...inputStyle, width: 'auto' }}>
-              {models.map(m => <option key={m.name} value={m.name}>{m.display_name}</option>)}
-            </select>
-          </label>
-        )}
-
-        {/* 预计时长：新手不用心算，改帧数/帧率会实时变 */}
-        {estDuration && (
-          <div style={{
-            marginLeft: 'auto', display: 'flex', alignItems: 'baseline', gap: 6,
-            padding: '5px 12px', borderRadius: 8,
-            background: 'rgba(0,189,176,0.08)', border: '1px solid rgba(0,189,176,0.2)',
-          }}>
-            <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>预计时长</span>
-            <span style={{ fontSize: 16, fontWeight: 700, color: 'rgba(94,234,212,1)' }}>
-              ≈ {estDuration.sec.toFixed(1)}s
-            </span>
-            <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-              （{estDuration.frames}帧÷{estDuration.fps}fps{estDuration.segs > 1 ? `×${estDuration.segs}段` : ''}）
-            </span>
-          </div>
-        )}
-      </div>
-
-      <label style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 12 }}>
-        <span style={{ fontSize: 11, color: 'var(--text-muted)', display: 'inline-flex', alignItems: 'center' }}>
-          运镜 / 动态提示词<HelpTip text="描述镜头怎么动、画面怎么变：如推近、拉远、摇镜、人物动作、光影流动等，越具体效果越好。" />
-        </span>
-        <textarea value={motionPrompt} disabled={submitted} rows={2}
-          onChange={e => setMotionPrompt(e.target.value)}
-          style={{ ...inputStyle, height: 'auto', padding: '6px 8px', resize: 'vertical', fontFamily: 'inherit' }} />
-      </label>
-
-      {/* 常用参数横向铺开（小白只看这些）；高级参数折叠 */}
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: 12, alignItems: 'flex-end' }}>
-        {simpleFields.map(renderField)}
-        <button
-          onClick={submit}
-          disabled={submitted}
-          style={{
-            flex: '0 0 auto', height: 30, padding: '0 22px', borderRadius: 8,
-            border: 'none',
-            background: submitted ? 'rgba(255,255,255,0.06)' : '#00bdb0',
-            color: submitted ? 'var(--text-muted)' : '#04201e',
-            fontSize: 13, fontWeight: 600, cursor: submitted ? 'default' : 'pointer',
-          }}>
-          {submitted ? '已提交' : '出视频'}
-        </button>
-      </div>
-
-      {advancedFields.length > 0 && (
-        <AdvancedSection>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'flex-end' }}>
-            {advancedFields.map(renderField)}
-          </div>
-        </AdvancedSection>
-      )}
-    </div>
-  )
-}
-
-/* 折叠的「高级参数」区：小白默认看不到，进阶用户点开 */
-function AdvancedSection({ children }) {
-  const [open, setOpen] = useState(false)
-  return (
-    <div style={{ marginTop: 2 }}>
-      <button onClick={() => setOpen(o => !o)} style={{
-        background: 'none', border: 'none', cursor: 'pointer', padding: '2px 0',
-        color: 'var(--text-muted)', fontSize: 11, display: 'inline-flex', alignItems: 'center', gap: 4,
-      }}>
-        <span style={{ display: 'inline-block', transform: open ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }}>▸</span>
-        高级参数
-      </button>
-      {open && <div style={{ marginTop: 8 }}>{children}</div>}
-    </div>
-  )
-}
 
 /* ── 制作面板：纯 t2v 流程（拆分镜 → 逐镜文生视频 → 合成整集）──────── */
 const STATE_LABEL = {
@@ -687,8 +357,12 @@ export function ProductionPanel({ message, workspace, sessionId }) {
   const [imgAdv, setImgAdv] = usePersistedState('imgAdv', { steps: '', guidance: '', seed: '', offload: '' })
   const [vidParams, setVidParams] = usePersistedState('vidParams', {})
   const [lockFace, setLockFace] = usePersistedState('lockFace', false)   // 强锁脸(Stand-In):有参考脸的角色镜走「一张脸硬锁」通道(需先跑 Colab §Stand-In)
-  const [loadedLoras, setLoadedLoras] = useState(null)   // lightx2v server 当前实际加载的 LoRA(查看用)
+  const [loadedLoras, setLoadedLoras] = useState(null)   // 项目已配置的角色 LoRA(t2v/i2v,查看用)
   const [loraStatusBusy, setLoraStatusBusy] = useState(false)
+  const [health, setHealth] = useState(null)   // 出片后端预检 provider_health:{providers:{name:{enabled,reachable,...}}, char_lora}
+  const [dedupBoundary, setDedupBoundary] = usePersistedState('dedupBoundary', false)  // 续接整集:合成时去掉镜间重复边界帧
+  // 某后端是否就绪(已注册+可达)的小工具,供 B.2/B.4 按钮禁用与内联提示
+  const provReady = (name) => !!(health?.providers?.[name]?.enabled && health.providers[name].reachable)
   const [sceneBusy, setSceneBusy] = useState({})   // {sceneId: 'generate'|'render'|'append'}
   const [appendPrompt, setAppendPrompt] = useState({})  // {sceneId: 追加段的运镜提示词(可空)}
   const [appendCount, setAppendCount] = useState({})    // {sceneId: 本次追加几段}
@@ -746,6 +420,13 @@ export function ProductionPanel({ message, workspace, sessionId }) {
     if (showLogs) logEndRef.current?.scrollIntoView({ block: 'nearest' })
   }, [logs, showLogs])
 
+  // 出片后端预检：进面板拉一次（用于按钮禁用 + 提交前内联提示：强锁脸/i2v 续接 server 起没起、角色 LoRA 挂没挂）
+  useEffect(() => {
+    let ok = true
+    getProviderHealth(pid || '', workspace || null).then(h => { if (ok) setHealth(h) }).catch(() => {})
+    return () => { ok = false }
+  }, [pid, workspace])
+
   // 出视频预估时长（秒）= 帧数 ÷ 帧率 × 接续段数。
   // 帧数/帧率优先用「更多参数」覆盖值；没设就回退到所选模型 schema 的默认值
   // ——这样默认（不开高级参数）也能显示预估，否则 vidParams 为空时永远算不出（功能等于消失）。
@@ -802,7 +483,7 @@ export function ProductionPanel({ message, workspace, sessionId }) {
 
   // 「再续一段」：取现有成片末帧续生成、拼到末尾（同 vidParams 以便无缝拼接）。段数不写死。
   const appendPayload = (sceneId) => ({
-    scene_id: sceneId, workspace, session_id: sessionId, model: 'lightx2v-i2v',   // ★追加段走 i2v：从这镜末帧续生成
+    scene_id: sceneId, workspace, session_id: sessionId, model: 'wan2.2',   // ★追加段走 i2v(ComfyUI)：从这镜末帧续生成
     motion_prompt: appendPrompt[sceneId] || '',
     count: Math.max(1, Number(appendCount[sceneId]) || 1),
     size: vidSize, video_params: vidParams,
@@ -1053,7 +734,7 @@ export function ProductionPanel({ message, workspace, sessionId }) {
         else if ((ev.type === 'error' || ev.type === 'tool_result') && ev.content) setProgress('测试出片：' + ev.content)
         else if (ev.type === 'log' && ev.line) setProgress('测试出片中…' + String(ev.line).slice(-90))
       }
-      if (!gotVideo) setProgress('测试出片结束但没拿到视频——多半出片那步报错了。看 Colab 的 lightx2v 日志（§日志速查 或 tail /content/lightx2v.log）定位。')
+      if (!gotVideo) setProgress('测试出片结束但没拿到视频——多半出片那步报错了。看 Colab 的 ComfyUI 日志定位。')
     } catch (e) { setProgress('测试出片失败：' + String(e.message || e)) }
     finally { setLoraPrevBusy(p => ({ ...p, [tid]: false })) }
   }
@@ -1063,6 +744,8 @@ export function ProductionPanel({ message, workspace, sessionId }) {
   const [loraBoot, setLoraBoot] = useState({})   // {tid:{mode,count}}
   const bootOf = (tid) => loraBoot[tid] || { mode: 'text', count: 16 }
   const setBootOf = (tid, patch) => setLoraBoot(b => ({ ...b, [tid]: { ...bootOf(tid), ...patch } }))
+  const [loraTrainMode, setLoraTrainMode] = useState({})   // {tid:'t2v'|'i2v'} 训练目标(t2v文生/i2v续接锁脸)
+  const trainModeOf = (tid) => loraTrainMode[tid] || 't2v'
   const loraUploadRefFile = async (tid, file) => {
     if (!file) return
     setLoraBusy(true)
@@ -1077,10 +760,10 @@ export function ProductionPanel({ message, workspace, sessionId }) {
     try { await uploadCharacterFace(charId, proj?.id || '', file, workspace); await load(); setProgress('参考脸已上传（出片勾「强锁脸(Stand-In)」即用它锁这张脸）') }
     catch (e) { setProgress('参考脸上传失败：' + String(e.message || e)) }
   }
-  // 查 lightx2v server 当前【实际加载】的 LoRA(权威:读运行中 server 的 config)——核对角色/蒸馏挂没挂
+  // 查本项目已配置的角色 LoRA(t2v/i2v)——ComfyUI 按文件名加载,读项目级配置
   const checkLoadedLoras = async () => {
     setLoraStatusBusy(true)
-    try { setLoadedLoras(await getLoadedLoras()) }
+    try { setLoadedLoras(await getLoadedLoras(pid, workspace)) }
     catch (e) { setProgress('查询已挂 LoRA 失败：' + String(e.message || e)) }
     finally { setLoraStatusBusy(false) }
   }
@@ -1200,6 +883,21 @@ export function ProductionPanel({ message, workspace, sessionId }) {
 
   const runJob = async (kind) => {
     if (busy) return
+    // 预检(B.4):依赖没就绪就别静默等几分钟才失败——先弹清楚的提示,让用户决定
+    if (kind === 'continuation' && !provReady('wan2.2')) {
+      const go = await dialog.confirm('i2v 续接 server 未就绪', {
+        message: '续接需要 Colab「§i2v续接」起的 i2v server（lightx2v-i2v）。现在它没注册或连不上，提交多半直接失败。仍要提交吗？',
+        danger: true, confirmText: '仍要提交',
+      })
+      if (!go) return
+    }
+    if (kind === 'finish' && lockFace && !provReady('standin-t2v')) {
+      const go = await dialog.confirm('强锁脸 server 未就绪', {
+        message: '勾了强锁脸(Stand-In)，但它的 server 没起/连不上 → 本次会自动回退普通出片（不锁脸）。继续吗？',
+        confirmText: '继续(不锁脸)',
+      })
+      if (!go) return
+    }
     startAt.current.batch = Date.now()
     setLogs([]); setShowLogs(true)
     setBusy(kind); setProgress('提交任务…')
@@ -1213,6 +911,7 @@ export function ProductionPanel({ message, workspace, sessionId }) {
         size: (kind === 'finish' || kind === 'continuation') ? vidSize : '',
         video_params: kind === 'finish' ? { ...vidParams, ...(lockFace ? { lock_face: true } : {}) }
           : (kind === 'continuation' ? { ...vidParams } : {}),
+        dedup_boundary: kind === 'assemble' ? !!dedupBoundary : false,   // 续接整集合成:去镜间重复边界帧(A.2)
         video_mode: 't2v',   // 纯 t2v：批量出片直接逐镜文生(跳过出图/选图)
         n: kind === 'generate' ? imgN : 0,
         width: kind === 'generate' ? (iw || 0) : 0,
@@ -1225,6 +924,7 @@ export function ProductionPanel({ message, workspace, sessionId }) {
       })
       batchJob.current = jobId
       await consume(jobId)
+      if (kind === 'continuation') setDedupBoundary(true)   // 续接过 → 合成整集默认去镜间重复边界帧
     } catch (e) {
       setProgress('任务失败：' + String(e.message || e))
     } finally {
@@ -1529,35 +1229,34 @@ export function ProductionPanel({ message, workspace, sessionId }) {
 
         <div style={subBox}>
           <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 8 }}>
-            人物 LoRA 训练（Wan-T2V）—— 一次训出 high+low 两个 Wan LoRA、t2v 出片锁定这个角色（t2v 没首帧，人物一致全靠它）。
+            人物 LoRA 训练 —— 一次训出 high+low 两个 Wan LoRA、出片锁定这个角色（t2v 没首帧，人物一致全靠它）。
+            训练目标可选 <b>t2v</b>(文生视频锁脸) 或 <b>i2v</b>(图生视频/尾帧续接锁脸，底模不同)——一镜到底续接用 i2v。
             手动传 20-30 张同脸图开训。<b style={{ color: '#ffb454' }}>务必含 8-10 张脸部特写（脸占大半画面、戴眼镜要拍清）</b>——
             只传全身照的话脸太小、训出来只像体型不像脸（头号坑）。混搭：脸特写 8-10 张 + 半身 5-6 + 全身 4-5。
-            <b style={{ color: '#5fe8de' }}>免上传自训·造图</b> 需出图后端 ComfyUI；纯 lightx2v t2v 无 ComfyUI → 请手动上传。
+            <b style={{ color: '#5fe8de' }}>免上传自训·造图</b> 需出图后端 ComfyUI（配 COMFYUI_BASE_URL）。
           </div>
-          {/* 当前 server 实际加载的 LoRA(权威:读运行中 lightx2v 的 --config_json)——一眼看出角色/蒸馏挂没挂 */}
+          {/* 本项目已配置的角色 LoRA(t2v/i2v)——ComfyUI 按 workflow 文件名加载,这里读项目级配置 */}
           <div style={{ border: '1px dashed var(--border)', borderRadius: 6, padding: 8, marginBottom: 8 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
               <button onClick={checkLoadedLoras} disabled={loraStatusBusy} style={{ ...miniBtn2, cursor: 'pointer' }}>
-                {loraStatusBusy ? '查询中…' : '🔄 查看 server 当前已挂 LoRA'}
+                {loraStatusBusy ? '查询中…' : '🔄 查看本项目已配置 LoRA'}
               </button>
-              <span style={{ fontSize: 11, color: 'var(--text-dim)' }}>核对角色/蒸馏 LoRA 到底挂没挂（权威=lightx2v 起服务的 config）</span>
+              <span style={{ fontSize: 11, color: 'var(--text-dim)' }}>核对角色 LoRA(t2v/i2v)挂没挂（训练完成会自动应用到项目）</span>
             </div>
             {loadedLoras && (
               <div style={{ marginTop: 6, fontSize: 12 }}>
                 {(loadedLoras.loras || []).length === 0 ? (
-                  <div style={{ color: '#fca5a5' }}>⚠ 没读到已挂 LoRA。{loadedLoras.note}<br /><span style={{ color: 'var(--text-dim)', fontSize: 10 }}>来源: {loadedLoras.source}</span></div>
+                  <div style={{ color: '#fca5a5' }}>⚠ 本项目还没配置角色 LoRA。{loadedLoras.note}</div>
                 ) : (
                   <>
                     <div style={{ color: loadedLoras.has_char ? '#34d399' : '#ffb454', marginBottom: 4 }}>
-                      {loadedLoras.has_char ? '✅ 已挂角色 LoRA（出片会像你训的人）' : '⚠ 只挂了蒸馏、没挂角色 LoRA → 出片不会像你训的人（去 §5d 挂上）'}
-                      {loadedLoras.infer_steps != null && <span style={{ color: 'var(--text-dim)' }}>　·　步数 {loadedLoras.infer_steps}{loadedLoras.enable_cfg ? '（CFG开·高画质档）' : '（蒸馏档）'}</span>}
+                      {loadedLoras.has_char ? '✅ 已配置角色 LoRA（出片会像你训的人）' : '⚠ 没配置角色 LoRA → 出片不会像你训的人'}
                     </div>
                     {loadedLoras.loras.map((l, i) => (
                       <div key={i} style={{ color: l.exists ? 'var(--text-muted)' : '#fca5a5', fontFamily: 'monospace', fontSize: 11 }}>
-                        {l.kind === '角色' ? '🧑 ' : '⚡ '}{l.kind} · {l.name} · str {l.strength} · {l.file}{l.exists ? '' : ' ❌文件不存在'}
+                        🧑 {l.kind} · {l.name} · {l.file}{l.exists ? '' : ' ❌文件不存在'}
                       </div>
                     ))}
-                    <div style={{ color: 'var(--text-dim)', fontSize: 10, marginTop: 4 }}>来源: {loadedLoras.source}</div>
                   </>
                 )}
               </div>
@@ -1590,7 +1289,13 @@ export function ProductionPanel({ message, workspace, sessionId }) {
                   <option value="">⚠ 不打标(训出会不像)</option>
                   {(proj?.characters || []).map(c => <option key={c.id} value={c.id}>{c.name || '(未命名)'}</option>)}
                 </select>
-                <button onClick={() => loraOp('train', t.id)} disabled={loraBusy} style={panelBtn(loraBusy)}>开始训练</button>
+                <select value={trainModeOf(t.id)} onChange={e => setLoraTrainMode(p => ({ ...p, [t.id]: e.target.value }))}
+                  title="t2v=文生视频锁脸(默认);i2v=图生视频/尾帧续接锁脸(底模不同,一镜到底续接用这个)"
+                  style={{ ...inputStyle, height: 26, width: 'auto' }}>
+                  <option value="t2v">训练目标: t2v 文生</option>
+                  <option value="i2v">训练目标: i2v 续接</option>
+                </select>
+                <button onClick={() => loraOp('train', t.id, { lora_mode: trainModeOf(t.id) })} disabled={loraBusy} style={panelBtn(loraBusy)}>开始训练({trainModeOf(t.id)})</button>
                 <button onClick={() => toggleLoraLog(t.id)} style={miniBtn2}>{loraLogOpen[t.id] ? '收起日志' : '日志/进度'}</button>
                 <button onClick={() => loraDoPreview(t.id)} disabled={loraPrevBusy[t.id]} style={miniBtn2}
                   title="用当前 server 已挂载的 LoRA 出一条 480p/4步/33帧 短测试片(约 1 分钟)，验证 LoRA 学的人对不对">
@@ -1693,12 +1398,14 @@ export function ProductionPanel({ message, workspace, sessionId }) {
         </div>
       )}
 
-      {/* 文生视频(t2v)：不出图/不选图——分镜文本直接生成视频。每镜单出，或下面批量出整集，或顶部「✨ 一键」从小说全自动。 */}
+      {/* 出片流程说明(B.2):讲清 t2v 出片 与 i2v 续接 的关系,避免 4 个入口看着都能点却不知用哪个 */}
       <div style={{ fontSize: 12, color: 'var(--text-dim)', marginBottom: 10, padding: '10px 12px',
-        border: '1px dashed var(--border)', borderRadius: 8, lineHeight: 1.7 }}>
-        🎬 <b style={{ color: 'var(--text-secondary)' }}>文生视频 (t2v)</b>：不出图、不选图——分镜文本直接生成视频。
-        每镜点「<b style={{ color: '#5fe8de' }}>出片(t2v)</b>」单出，或用下面「批量出片并合成」整集出。
-        人物一致靠训好的 Wan-T2V 角色 LoRA（在「角色 &amp; LoRA」里训）。
+        border: '1px dashed var(--border)', borderRadius: 8, lineHeight: 1.9 }}>
+        🎬 <b style={{ color: 'var(--text-secondary)' }}>出片流程</b>：
+        ① 各镜先 <b style={{ color: '#5fe8de' }}>出片(t2v)</b> 文生视频（或下方「批量出片并合成」整集出）
+        → ② 要<b style={{ color: '#a5b4fc' }}>跨镜连贯 / 把镜头加长</b>时用 <b style={{ color: '#a5b4fc' }}>i2v 续接</b>（接上一镜尾帧续生成，需先起 i2v server）
+        → ③ <b style={{ color: '#5eead4' }}>合成整集</b> 拼成成片。
+        <br />人物一致靠训好的 Wan-T2V 角色 LoRA（在「角色 &amp; LoRA」里训）。
       </div>
 
       {/* 批量出片并合成（t2v）：对所有未出片分镜逐镜文生 → 合成整集（模型/分辨率可选）*/}
@@ -1712,13 +1419,15 @@ export function ProductionPanel({ message, workspace, sessionId }) {
           {busy === 'finish' ? '出片合成中…' : `🎬 批量出片并合成（t2v · ${c.total} 镜）`}
         </button>
         <button onClick={() => runJob('continuation')} disabled={!!busy || !(c.total > 1)}
-          title="续接出片(i2v)：镜1 先用 t2v 出好当链头，镜2+ 用上一镜尾帧续生成 → 跨镜服装/场景/光线/动作连续(纯 t2v 做不到)。前置：在 Colab 跑「§i2v续接」起 i2v server。i2v 默认 40 步、较慢。"
+          title={'续接出片(i2v)：镜1 先用 t2v 出好当链头，镜2+ 用上一镜尾帧续生成 → 跨镜服装/场景/光线/动作连续(纯 t2v 做不到)。前置：在 Colab 跑「§i2v续接」起 i2v server。i2v 默认 40 步、较慢。'
+            + (provReady('wan2.2') ? '' : '\n⚠ 当前 i2v server 未就绪（没起/连不上），点了会先弹提示。')}
           style={!(c.total > 1) ? panelBtn(false, true) : {
-            height: 34, padding: '0 14px', borderRadius: 8, border: '1px solid rgba(129,140,248,0.55)',
+            height: 34, padding: '0 14px', borderRadius: 8,
+            border: provReady('wan2.2') ? '1px solid rgba(129,140,248,0.55)' : '1px solid rgba(234,179,8,0.5)',
             background: busy === 'continuation' ? 'rgba(99,102,241,0.5)' : 'transparent',
-            color: '#a5b4fc', fontSize: 12.5, fontWeight: 600, cursor: busy ? 'default' : 'pointer',
+            color: provReady('wan2.2') ? '#a5b4fc' : '#eab308', fontSize: 12.5, fontWeight: 600, cursor: busy ? 'default' : 'pointer',
           }}>
-          {busy === 'continuation' ? '续接中…' : '🔗 续接出片(i2v·连贯)'}
+          {busy === 'continuation' ? '续接中…' : ('🔗 续接出片(i2v·连贯)' + (provReady('wan2.2') ? '' : ' ⚠'))}
         </button>
         <button onClick={() => runJob('assemble')} disabled={!!busy || !(c.total > 0)}
           title="合成整集：把所有已出片的分镜按序拼成一条短剧（去重帧 + crossfade 0.4s 抹接缝跳变 + 旁白/字幕）。不重出片、不占 GPU。"
@@ -1729,6 +1438,13 @@ export function ProductionPanel({ message, workspace, sessionId }) {
           }}>
           {busy === 'assemble' ? '合成中…' : '🎬 合成整集'}
         </button>
+        {/* 续接整集去边界帧(A.2):i2v 续接里镜N首帧=镜N-1尾帧,直接拼有1帧卡顿;续接过会自动勾上 */}
+        <label style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, alignSelf: 'center',
+                        color: dedupBoundary ? '#5eead4' : 'var(--text-muted)', cursor: busy ? 'default' : 'pointer' }}
+          title="续接整集去边界帧：i2v 续接里每镜首帧=上一镜尾帧，直接拼会有 1 帧卡顿；勾上合成时丢掉重复帧。各镜独立出片不用勾(用了 i2v 续接会自动勾)。">
+          <input type="checkbox" checked={dedupBoundary} disabled={!!busy} onChange={e => setDedupBoundary(e.target.checked)} />
+          续接去边界帧
+        </label>
         {/* 纯 t2v：出片后端由 T2V_PROVIDER(lightx2v) 路由、不看这个选择 → 移除误导的 i2v 模型下拉(Wan2.2-I2V/LTX)。
             出片参数(帧数/帧率/步数/seed)在下方「更多参数」调,字段名与 lightx2v 一致、对 t2v 生效。 */}
         <select value={vidSize} disabled={!!busy} onChange={e => setVidSize(e.target.value)}
@@ -1750,8 +1466,21 @@ export function ProductionPanel({ message, workspace, sessionId }) {
           <option value={161}>时长 ≈ 10 秒</option>
           <option value={241}>时长 ≈ 15 秒</option>
         </select>
-        {/* 画质档(步数)从主行移除:与「更多参数·采样步数」重复,且本机 server 多忽略 per-request 步数(画质实际在 §5d 配)——别再误导。
-            强锁脸(Stand-In)移到「更多参数」(进阶,需另起 server)。主行只留:出片 + 分辨率 + 时长 + 预估。 */}
+        {/* B.3:把最影响成片的两个开关从折叠/别页提到显眼处 —— 强锁脸 + 接续段数 */}
+        <label style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12, alignSelf: 'center',
+                        color: lockFace ? '#5fe8de' : 'var(--text-muted)', cursor: busy ? 'default' : 'pointer' }}
+          title="强锁脸(Stand-In)：给传过参考脸的角色镜「一张脸硬锁身份」(跨镜更稳、免训练)。需先在 Colab 跑「§Stand-In」起 server;没起会自动回退普通出片。">
+          <input type="checkbox" checked={lockFace} disabled={!!busy} onChange={e => setLockFace(e.target.checked)} />
+          强锁脸{lockFace && !provReady('standin-t2v') ? '（⚠server未就绪）' : ''}
+        </label>
+        <label style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12, alignSelf: 'center', color: 'var(--text-muted)' }}
+          title="接续段数：每镜尾帧接续生成几段拼成更长镜头(段越多越长且连贯)。1=单段。也可在单镜卡片里单独覆盖。">
+          接续段数
+          <input type="number" min={1} max={20} value={segments} disabled={!!busy}
+            onChange={e => setSegments(Math.max(1, Number(e.target.value) || 1))}
+            style={{ ...inputStyle, width: 56, height: 28 }} />
+        </label>
+        {/* 画质档(步数)从主行移除:与「更多参数·采样步数」重复,且本机 server 多忽略 per-request 步数(画质实际在 §5d 配)——别再误导。 */}
         {estSec != null && (
           <span style={{ fontSize: 11, color: 'rgba(94,234,212,0.95)', alignSelf: 'center',
                          padding: '0 8px', borderRadius: 6, background: 'rgba(0,189,176,0.1)',
@@ -1810,12 +1539,7 @@ export function ProductionPanel({ message, workspace, sessionId }) {
                 </label>
               ))}
             </div>
-            <label style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 12, marginTop: 10,
-                            color: lockFace ? '#5fe8de' : 'var(--text-muted)', cursor: 'pointer' }}
-              title="强锁脸(Stand-In)：给角色传过参考脸的镜头用「一张脸硬锁身份」出片(跨镜更稳、免训练)。需先在 Colab 跑「§Stand-In」起 server;没起就自动回退普通出片。进阶功能,默认关。">
-              <input type="checkbox" checked={lockFace} disabled={!!busy} onChange={e => setLockFace(e.target.checked)} />
-              强锁脸 Stand-In（进阶 · 需先起 server）
-            </label>
+            {/* 强锁脸已上提到上方出片控制行(B.3),此处不再重复 */}
           </div>
         )}
       </div>
@@ -1950,8 +1674,8 @@ export function ProductionPanel({ message, workspace, sessionId }) {
                          style={{ width: '100%', maxHeight: 300, borderRadius: 8, display: 'block' }} />
                   {upscaleRow(s.scene_id, 'scene', s.scene_id, '')}
                   {faceswapRow(s.scene_id, 'scene', s.scene_id, '')}
-                  {/* 纯 t2v：尾帧接续(再续一段/上传视频续接/撤销)是 i2v 功能、lightx2v 不支持 → 已移除。
-                      想要更长镜头:把上方「画质档/更多参数」的帧数调大(t2v 单镜一次性生成,81→121→161)。 */}
+                  {/* 这镜成片后的操作行:删除重出 / i2v 续接(+5s,接本镜尾帧续生成,可反复加、能撤销)。
+                      i2v 续接是刻意保留的功能(跨镜/加长连贯),需先在 Colab 起 i2v server;另:t2v 单镜也可把上方时长调大一次性出更长。 */}
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 6, alignItems: 'center' }}>
                     <button onClick={() => delSceneVideo(s.scene_id)} disabled={busy || !!sceneBusy[s.scene_id]}
                       title="删除这个分镜的成片，可重新出片" style={{
@@ -2197,24 +1921,7 @@ function SegmentPromptsEditor({ segs, prompts, intent, busy, onIntent, onGenerat
   )
 }
 
-const panelBtn = (active, disabled) => ({
-  height: 32, padding: '0 14px', borderRadius: 8, border: 'none',
-  background: disabled ? 'rgba(255,255,255,0.06)' : active ? '#5254cc' : '#6366f1',
-  color: disabled ? 'var(--text-muted)' : '#fff',
-  fontSize: 12.5, fontWeight: 600, cursor: disabled ? 'default' : 'pointer',
-})
-// 单镜操作小按钮（出图=紫、出视频=青）
-const miniAct = (active, teal) => ({
-  height: 22, padding: '0 9px', borderRadius: 6, fontSize: 11, fontWeight: 600, cursor: 'pointer',
-  border: `1px solid ${teal ? 'rgba(0,189,176,0.4)' : 'rgba(99,102,241,0.4)'}`,
-  background: active ? (teal ? 'rgba(0,189,176,0.3)' : 'rgba(99,102,241,0.3)')
-    : (teal ? 'rgba(0,189,176,0.14)' : 'rgba(99,102,241,0.14)'),
-  color: teal ? 'rgba(94,234,212,1)' : 'rgba(190,192,255,1)',
-})
-const miniBtn = {
-  width: 24, height: 24, borderRadius: 6, border: '1px solid var(--border)',
-  background: 'rgba(255,255,255,0.05)', color: 'var(--text-sec)', cursor: 'pointer', fontSize: 13,
-}
+// panelBtn / miniAct / miniBtn 已抽到 ./production/uiStyles（顶部 import）
 // 把「说话人：台词」逐行解析成 [{speaker,text}]（中英文冒号都认；空行跳过）
 function _parseDlg(s) {
   return (s || '').split('\n').map(line => {
@@ -2244,18 +1951,7 @@ const VOICES = [
   { v: 'en-US-AriaNeural', label: 'EN · Aria · 女 · 成熟' },
   { v: 'en-GB-SoniaNeural', label: 'EN-GB · Sonia · 女 · 英式高傲' },
 ]
-// 多字小按钮（本集风格 / 新增分镜等）：自动宽度 + 不换行，避免文字竖排
-const miniBtn2 = {
-  height: 24, padding: '0 9px', borderRadius: 6, border: '1px solid var(--border)',
-  background: 'rgba(255,255,255,0.05)', color: 'var(--text-sec)', cursor: 'pointer',
-  fontSize: 12, whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center', gap: 4,
-}
-
-const inputStyle = {
-  height: 30, padding: '0 8px', borderRadius: 6, border: '1px solid var(--border)',
-  background: 'rgba(255,255,255,0.04)', color: 'rgba(255,255,255,0.85)', fontSize: 12,
-  width: '100%', colorScheme: 'dark',
-}
+// miniBtn2 / inputStyle 已抽到 ./production/uiStyles（顶部 import）
 
 /* ── 可复用模板库小条：存当前值为模板 + 套用/删除已存模板（风格/运镜/提示词复用）── */
 function TemplateBar({ kind, label, getContent, onApply, workspace }) {

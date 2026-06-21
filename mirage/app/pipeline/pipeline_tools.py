@@ -724,17 +724,16 @@ def _do_render_t2v(scene_id, scene, motion_prompt, params) -> str:
     store = get_store()
     store.set_scene_video_mode(scene_id, "t2v")   # 标记本镜=t2v：合成时据此走 TTS 配音(t2v 无自带音轨)
     # 强锁脸(Stand-In):前端开了 lock_face 且该镜角色有参考脸 + Stand-In server 已注册 → 走硬锁脸通道(给一张脸跨镜稳);
-    #   否则走 lightx2v(快)。参考脸经 base 签名的 image_path 传给 provider(t2v 一般忽略它,Stand-In 复用它当参考脸)。
+    #   否则走默认 t2v(ComfyUI)。参考脸经 base 签名的 image_path 传给 provider(t2v 一般忽略它,Stand-In 复用它当参考脸)。
     ref_face = _scene_ref_face(store, scene)
     want_standin = (bool((params or {}).get("lock_face")) and bool(ref_face)
                     and video_provider_registry.has("standin-t2v"))
-    _prov = "standin-t2v" if want_standin else (settings.T2V_PROVIDER or "comfyui-t2v")   # comfyui-t2v / lightx2v-t2v
+    _prov = "standin-t2v" if want_standin else (settings.T2V_PROVIDER or "comfyui-t2v")   # comfyui-t2v
     if not video_provider_registry.has(_prov):
-        # bug:配的 provider 没注册(如默认 comfyui-t2v 但纯 t2v 只注册了 lightx2v-t2v)→ 自动回退到已注册的 t2v provider
-        _prov = next((a for a in ("lightx2v-t2v", "comfyui-t2v") if video_provider_registry.has(a)), _prov)
+        # 配的 t2v provider 没注册 → 回退到已注册的 comfyui-t2v
+        _prov = "comfyui-t2v" if video_provider_registry.has("comfyui-t2v") else _prov
     if not video_provider_registry.has(_prov):
-        return (f"文生视频(t2v)后端 '{_prov}' 未就绪：lightx2v 需 LIGHTX2V_ENABLED + LIGHTX2V_BASE_URL 且已起 server；"
-                "ComfyUI 需 COMFYUI_BASE_URL。暂未就绪时把「出片模式」切回 i2v。")
+        return ("文生视频(t2v)后端未就绪：t2v 走 ComfyUI，需配 COMFYUI_BASE_URL（Colab 启 ComfyUI 那格）。")
     t2v = video_provider_registry.get(_prov)
     local_dir = video_dir()
     final_local = os.path.join(local_dir, f"{scene['scene_number']:02d}_{scene_id}.mp4")
@@ -782,18 +781,30 @@ def _do_render_t2v(scene_id, scene, motion_prompt, params) -> str:
             f"已下载到本机: {final_local}\nVIDFILE::{scene_id}::{final_local}")
 
 
+def _i2v_provider():
+    """找一个能 i2v 的已注册 provider:优先默认视频模型(VIDEO_PROVIDER_DEFAULT,通常 wan2.2=ComfyUI i2v),
+    否则任意声明 i2v 能力的 provider。都没有返回 None(尾帧续接据此提示去配 ComfyUI)。"""
+    pref = settings.VIDEO_PROVIDER_DEFAULT or video_provider_registry.default_name
+    if pref and video_provider_registry.has(pref) \
+            and "i2v" in getattr(video_provider_registry.get(pref), "capabilities", set()):
+        return video_provider_registry.get(pref)
+    for _p in video_provider_registry._providers.values():
+        if "i2v" in getattr(_p, "capabilities", set()):
+            return _p
+    return None
+
+
 def render_continuation(project_id: str, params: dict | None = None) -> str:
     """尾帧续接(i2v):项目内分镜按序——镜1 必须已有成片(t2v 出的链头);镜2.. 用上一镜【尾帧】当首帧走 i2v 续生成,
-    服装/场景/光线/动作跨镜连续(纯 t2v 做不到的"续接")。需先在 Colab 跑「§i2v续接」起 i2v server(lightx2v-i2v 注册)。
+    服装/场景/光线/动作跨镜连续(纯 t2v 做不到的"续接")。i2v 走 ComfyUI i2v provider(wan2.2),需配 COMFYUI_BASE_URL。
 
-    轮流跑约束:i2v server 与 t2v server 不同时(96G 装不下),所以用法=先(t2v)出镜1当链头→切 i2v→本函数续 2..N。
+    用法:先(t2v)出镜1当链头 → 本函数用 i2v 续 2..N(每镜接上一镜尾帧)。
     """
     params = params or {}
     store = get_store()
-    if not video_provider_registry.has("lightx2v-i2v"):
-        return ("i2v 续接后端未就绪：请先在 Colab 跑「§i2v续接」格起 i2v server"
-                "(它会停 t2v 腾显存、从 Drive 加载 i2v 底模、起 lightx2v --task i2v、写 .env 重启后端)。")
-    prov = video_provider_registry.get("lightx2v-i2v")
+    prov = _i2v_provider()
+    if prov is None:
+        return ("i2v 续接后端未就绪：需配 COMFYUI_BASE_URL(其 i2v provider=wan2.2 即用于尾帧续接)。")
     scenes = sorted(store.list_scenes(project_id), key=lambda s: s.get("scene_number") or 0)
     if not scenes:
         return "没有分镜。"
@@ -805,6 +816,14 @@ def render_continuation(project_id: str, params: dict | None = None) -> str:
     merged = {**prov.default_params(), **{k: v for k, v in params.items() if v is not None and v != ""}}
     for _k in ("video_mode", "lightning", "lock_character", "lock_face", "motion_prompts", "segments", "reanchor_every"):
         merged.pop(_k, None)
+    # i2v 续接挂【项目级 i2v 角色 LoRA】(i2v 原生训的 wan_i2v_lora_*;没训过 i2v 则回退 t2v 的,会偏弱/漂)。
+    # ComfyUI i2v provider 读 wan_i2v_lora_* 注入(需 i2v 模板含角色 LoRA 节点,见 comfyui.py)。
+    _ci_hi = (pstyle.get("wan_i2v_lora_high") or pstyle.get("wan_t2v_lora_high") or "").strip()
+    _ci_lo = (pstyle.get("wan_i2v_lora_low") or pstyle.get("wan_t2v_lora_low") or "").strip()
+    if _ci_hi and not merged.get("wan_i2v_lora_high"):
+        merged["wan_i2v_lora_high"] = _ci_hi
+    if _ci_lo and not merged.get("wan_i2v_lora_low"):
+        merged["wan_i2v_lora_low"] = _ci_lo
     # ★周期重锚:每 K 镜把 i2v 首帧拉回「链头镜1 的干净正脸」而非上一镜退化尾帧,打断累积脸漂(0=关=纯链式)
     reanchor_every = int((params or {}).get("reanchor_every") or 3)
     local_dir = video_dir()
@@ -867,9 +886,9 @@ def render_continuation_one(project_id: str, scene_id: str, params: dict | None 
     用于快速试参 / 单独修某一镜，不必整集重跑。第 1 镜没有上一镜，须用 t2v 出。"""
     params = params or {}
     store = get_store()
-    if not video_provider_registry.has("lightx2v-i2v"):
-        return "i2v 续接后端未就绪：先在 Colab 跑「§i2v续接」起 i2v server。"
-    prov = video_provider_registry.get("lightx2v-i2v")
+    prov = _i2v_provider()
+    if prov is None:
+        return "i2v 续接后端未就绪：需配 COMFYUI_BASE_URL(其 i2v provider=wan2.2)。"
     scenes = sorted(store.list_scenes(project_id), key=lambda s: s.get("scene_number") or 0)
     idx = next((i for i, s in enumerate(scenes) if (s.get("id") or s.get("scene_id")) == scene_id), -1)
     if idx < 0:
@@ -889,6 +908,13 @@ def render_continuation_one(project_id: str, scene_id: str, params: dict | None 
     merged = {**prov.default_params(), **{k: v for k, v in params.items() if v is not None and v != ""}}
     for _k in ("video_mode", "lightning", "lock_character", "lock_face", "motion_prompts", "segments"):
         merged.pop(_k, None)
+    # i2v 单镜续接同样挂项目级 i2v 角色 LoRA(同 render_continuation;wan_i2v_lora_* 优先,回退 t2v)。
+    _ci_hi = (pstyle.get("wan_i2v_lora_high") or pstyle.get("wan_t2v_lora_high") or "").strip()
+    _ci_lo = (pstyle.get("wan_i2v_lora_low") or pstyle.get("wan_t2v_lora_low") or "").strip()
+    if _ci_hi and not merged.get("wan_i2v_lora_high"):
+        merged["wan_i2v_lora_high"] = _ci_hi
+    if _ci_lo and not merged.get("wan_i2v_lora_low"):
+        merged["wan_i2v_lora_low"] = _ci_lo
     local_dir = video_dir()
     sid = sc.get("id") or sc.get("scene_id")
     frame = os.path.join(local_dir, f"cont_{sid}_first.png")
@@ -1391,13 +1417,15 @@ def open_production_panel(project_id: str) -> str:
 
 
 @tool
-def assemble_episode(project_id: str, voice: str = "", with_subtitles: bool = True, bgm: str = "") -> str:
+def assemble_episode(project_id: str, voice: str = "", with_subtitles: bool = True, bgm: str = "",
+                     dedup_boundary: bool = False) -> str:
     """【成片合成】把项目下所有已出片的分镜按顺序拼成一条完整短剧 mp4（本地完成，不占 GPU）。
 
     自动：分镜旁白(narration)经 TTS 配音、音画对齐（旁白长则末帧冻结）、统一分辨率、
     旁白字幕（烧录优先）、可选背景音乐（低音量垫底、不盖人声）。产物 episode_<project>.mp4 落工作目录 video_out 并内嵌播放。
 
     用户说"合成/拼起来/出完整视频/成片"时调用。需至少一个分镜已完成出片。
+    dedup_boundary=True：整集由 i2v 跨镜续接生成时(镜 N 首帧==镜 N-1 尾帧)开启，丢第 2 镜起首帧消除拼接重复帧卡顿。
 
     Args:
         project_id: 项目 ID。
@@ -1460,7 +1488,8 @@ def assemble_episode(project_id: str, voice: str = "", with_subtitles: bool = Tr
     out = os.path.join(local, f"episode_{project_id}.mp4")
     try:
         info = assemble_clips(clips, out, voice=(voice or DEFAULT_VOICE),
-                              with_subtitles=with_subtitles, bgm=(bgm or None))
+                              with_subtitles=with_subtitles, bgm=(bgm or None),
+                              dedup_boundary=bool(dedup_boundary))
     except Exception as e:  # noqa: BLE001
         return f"成片合成失败: {type(e).__name__}: {e}"
 

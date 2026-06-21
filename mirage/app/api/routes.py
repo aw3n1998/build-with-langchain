@@ -900,68 +900,81 @@ async def pipeline_character_face(
 
 
 @router.get("/pipeline/loaded_loras")
-async def pipeline_loaded_loras():
-    """列出 lightx2v server 当前【实际加载】的 LoRA —— 让前端直接看到「角色/蒸馏 LoRA 到底挂没挂」，不用再猜。
+async def pipeline_loaded_loras(project_id: str = "", workspace: str = ""):
+    """列出本项目【已配置的角色 LoRA】(t2v / i2v)，供前端核对挂没挂。
 
-    权威来源：lightx2v 只认「起 server 的 config」(per-request 传会被忽略)。本端点优先读【正在运行的
-    lightx2v 进程的 --config_json】(最准,正是它启动时真正加载的那份)——这是唯一不受后端自身环境陈旧
-    影响的源:§5d 只重起 server、不重起后端,故后端进程里的 LX_CONFIG 可能仍停在挂 LoRA 前的旧值。
-    pgrep 拿不到时(Windows/无 pgrep/进程没起)再退环境变量 LX_CONFIG(§5d 重起 server 时会设),
-    最后退已知 Colab 路径(lora.json 优先于 use.json)。
+    迁到 ComfyUI 后：LoRA 由出片 workflow 按文件名加载（无独立 server config 可读）。这里改读项目级
+    project_style 的 wan_t2v_lora_* / wan_i2v_lora_*（训练完成自动写入，见 lora_train._link_after_train）。
     """
-    import json as _json
     import os as _os
-    import subprocess as _sp
-    prov = settings.T2V_PROVIDER or ""
-    cfg_path = ""
-    try:   # 从运行中的 server 进程命令行取 --config_json(权威=它实际加载的配置)
-        out = _sp.run(["pgrep", "-af", "lightx2v.server"], capture_output=True, text=True, timeout=5).stdout
-        for line in out.splitlines():
-            toks = line.split()
-            if "--config_json" in toks:
-                cfg_path = toks[toks.index("--config_json") + 1]
-                break
-    except Exception:  # noqa: BLE001  (Windows/无 pgrep 时跳过,走兜底路径)
-        pass
-    if not (cfg_path and _os.path.exists(cfg_path)):
-        # pgrep 失效的兜底链:LX_CONFIG(§5d 挂 LoRA 后写的就是它) → lora.json → use.json
-        for p in (_os.environ.get("LX_CONFIG", ""), "/content/wan_moe_t2v_lora.json", "/content/wan_moe_t2v_use.json"):
-            if p and _os.path.exists(p):
-                cfg_path = p
-                break
-    cfg: dict = {}
-    if cfg_path and _os.path.exists(cfg_path):
+    ps: dict = {}
+    if project_id:
         try:
-            cfg = _json.load(open(cfg_path))
+            ps = _ws_store(workspace or None).get_project_style(project_id) or {}
         except Exception:  # noqa: BLE001
-            cfg = {}
-    distill_set = {(settings.LIGHTX2V_DISTILL_LORA_HIGH or "").strip(), (settings.LIGHTX2V_DISTILL_LORA_LOW or "").strip()} - {""}
+            ps = {}
     loras = []
-    for it in (cfg.get("lora_configs") or []):
-        path = str(it.get("path") or "")
-        base = _os.path.basename(path)
-        low = (path + "|" + base).lower()
-        is_distill = (path in distill_set) or any(k in low for k in ("lightning", "distill", "lightx2v_t2v_lora", "4step", "seko", "lightx2v"))
-        loras.append({
-            "kind": "蒸馏加速" if is_distill else "角色",
-            "name": it.get("name", ""),               # high_noise_model / low_noise_model
-            "file": base,
-            "strength": it.get("strength", 1.0),
-            "exists": (_os.path.exists(path) if path else False),
-        })
-    has_char = any(x["kind"] == "角色" for x in loras)
+    for mode in ("t2v", "i2v"):
+        for tag in ("high", "low"):
+            path = (ps.get(f"wan_{mode}_lora_{tag}") or "").strip()
+            if path:
+                loras.append({"kind": f"角色·{mode}", "name": f"{mode}_{tag}_noise",
+                              "file": _os.path.basename(path),
+                              "exists": _os.path.exists(path)})
     return {
-        "provider": prov,
-        "running": bool(cfg_path and _os.path.exists(cfg_path)),
-        "source": cfg_path or "(未找到 server 配置——server 没起、或后端不在同机)",
-        "infer_steps": cfg.get("infer_steps"),
-        "enable_cfg": cfg.get("enable_cfg"),
-        "has_char": has_char,
+        "provider": settings.T2V_PROVIDER or "comfyui-t2v",
+        "has_char": any(x["kind"].startswith("角色") for x in loras),
         "loras": loras,
-        "note": ("强锁脸(Stand-In)通道不读这里——它身份来自参考脸+自带适配器,不走 lightx2v 的 lora_configs。"
-                 if prov == "standin-t2v" else
-                 "这是 lightx2v server 起服务时真正加载的 LoRA(权威挂载点);改 LoRA/换角色要重跑笔记本 §5d。"),
+        "note": "ComfyUI 出片按 workflow 文件名加载角色 LoRA；此列表来自项目级配置（训练完成自动写入）。",
     }
+
+
+@router.get("/pipeline/provider_health")
+async def pipeline_provider_health(project_id: str = "", workspace: str = ""):
+    """前端预检:隐藏出片后端是否就绪(已注册 + server 可达)+ 该项目是否已训角色 LoRA。
+
+    用于在「强锁脸 / i2v 续接 / 已训LoRA出片」提交**前**给内联提示——别让用户点了等几分钟才发现
+    server 没起 / LoRA 没挂(静默失败是当前最坑的 UX)。可达性=对 base_url 发个 2s 短探测,有响应即算 server 在。
+    """
+    import httpx as _httpx
+    from mirage.app.pipeline.providers import video_provider_registry
+
+    async def _probe(base: str) -> bool:
+        base = (base or "").rstrip("/")
+        if not base:
+            return False
+        for path in ("/v1/health", "/"):   # standin 有 /v1/health;ComfyUI 退根路径,拿到任何 HTTP 响应即视为可达
+            try:
+                async with _httpx.AsyncClient(timeout=2.0) as c:
+                    await c.get(base + path)
+                return True
+            except Exception:  # noqa: BLE001  (连不上/超时 → 试下一个,都失败=不可达)
+                continue
+        return False
+
+    specs = [
+        ("standin-t2v", settings.STANDIN_BASE_URL, "强锁脸(Stand-In)"),
+        ("comfyui-t2v", settings.COMFYUI_BASE_URL, "文生视频(t2v)"),
+        ("wan2.2", settings.COMFYUI_BASE_URL, "图生视频/尾帧续接(i2v)"),
+        ("comfyui-s2v", settings.COMFYUI_BASE_URL, "对口型(S2V)"),
+    ]
+    providers = {}
+    for name, base, label in specs:
+        enabled = video_provider_registry.has(name)   # 注册=门控通过(.env enabled + base 都配了)
+        reachable = (await _probe(base)) if (enabled and base) else False
+        providers[name] = {"label": label, "enabled": enabled,
+                           "reachable": reachable, "base_url": (base or "")}
+    char_lora = {"high": False, "low": False, "i2v_high": False, "i2v_low": False}
+    if project_id:
+        try:
+            ps = _ws_store(workspace or None).get_project_style(project_id) or {}
+            char_lora = {"high": bool((ps.get("wan_t2v_lora_high") or "").strip()),
+                         "low": bool((ps.get("wan_t2v_lora_low") or "").strip()),
+                         "i2v_high": bool((ps.get("wan_i2v_lora_high") or "").strip()),
+                         "i2v_low": bool((ps.get("wan_i2v_lora_low") or "").strip())}
+        except Exception:  # noqa: BLE001
+            pass
+    return {"providers": providers, "char_lora": char_lora}
 
 
 @router.get("/pipeline/jobs/{job_id}/events")
@@ -1755,6 +1768,7 @@ class LoraActionRequest(BaseModel):
     count: int | None = None
     appearance: str | None = None
     auto_train: bool = True       # 造完即训(一键免上传自训)
+    lora_mode: str = "t2v"        # 训练目标:t2v(文生视频)/i2v(图生视频续接锁脸)→决定 arch/底模/产物命名
 
 
 @router.post("/pipeline/lora_trainings")
@@ -1796,7 +1810,7 @@ async def pipeline_lora_trainings(req: LoraActionRequest):
                 message="参考图太少：至少 5 张。可手动上传，或用『自动造训练集』免上传生成一套。")
         else:
             # 本地 ai-toolkit 子进程(默认)或远程派发(LORA_TRAIN_ENDPOINT 非空)，执行器内部判定
-            lora_train.start_training(store, req.training_id, ddir)
+            lora_train.start_training(store, req.training_id, ddir, mode=(req.lora_mode or "t2v"))
     elif act == "bootstrap" and req.training_id:
         # 免上传自训：系统自己造训练集(text=零图 / pulid=单脸)，造完可自动开训
         t = store.get_lora_training(req.training_id)
@@ -2206,6 +2220,7 @@ class AssembleRequest(BaseModel):
     voice: str = ""
     with_subtitles: bool = True
     bgm: str = ""
+    dedup_boundary: bool = False   # 整集由 i2v 跨镜续接生成时开启:丢第2镜起首帧消除拼接重复帧卡顿
 
 
 async def _assemble_events(req: "AssembleRequest"):
@@ -2216,7 +2231,7 @@ async def _assemble_events(req: "AssembleRequest"):
     yield {"type": "batch_progress", "phase": "assemble", "label": "合成整集（拼接抹缝 + 旁白 + 字幕）…"}
     out = None
     try:
-        async for it in _run_with_logs(lambda: assemble_episode.func(project_id=req.project_id, voice=req.voice, with_subtitles=req.with_subtitles, bgm=req.bgm)):
+        async for it in _run_with_logs(lambda: assemble_episode.func(project_id=req.project_id, voice=req.voice, with_subtitles=req.with_subtitles, bgm=req.bgm, dedup_boundary=req.dedup_boundary)):
             if "_log" in it:
                 yield {"type": "log", "line": it["_log"]}
             else:
@@ -2282,8 +2297,8 @@ class LoraPreviewRequest(BaseModel):
     """LoRA 训练卡「测试出片」：用当前 lightx2v server 已挂载的 LoRA 出一条短测试片快速验脸。
 
     注意 lightx2v 限制：LoRA 只能在起 server 时挂、per-request 无效，所以预览的始终是
-    「当前 server 挂的那个 LoRA」（非这张卡指定的）。前端须提示：先用 §5d 把这张卡训出的
-    LoRA 挂上再测，否则看到的是上一个挂载的 LoRA。
+    出的是项目级已配置的角色 LoRA（ComfyUI 按 workflow 文件名加载）。训练完成会自动应用到项目，
+    否则测试片不带角色 LoRA。
     """
     training_id: str
     workspace: str | None = None
@@ -2326,8 +2341,8 @@ def _do_lora_preview(req: "LoraPreviewRequest") -> str:
     """阻塞出一条 LoRA 测试片（在线程里跑，log 经 log_bus 心跳流式）。
 
     prompt = (该 LoRA 记录 trigger_word 或 名字 slug) + 绑定角色外貌（没有用通用人像）；
-    走 settings.T2V_PROVIDER(默认 lightx2v-t2v) 的 provider.generate 出 480p/4步/33帧≈2s 短片。
-    ★lightx2v LoRA 只能起 server 时挂、per-request 无效——出的是「当前 server 挂的那个 LoRA」。
+    走 settings.T2V_PROVIDER(默认 comfyui-t2v) 的 provider.generate 出 480p/4步/33帧≈2s 短片。
+    ★ComfyUI 按 workflow 文件名加载角色 LoRA(项目级 wan_t2v_lora_*)；训练完成会自动应用到项目。
     """
     from mirage.app.pipeline.runtime import set_workspace, video_dir
     from mirage.app.pipeline.store import get_store
@@ -2349,12 +2364,12 @@ def _do_lora_preview(req: "LoraPreviewRequest") -> str:
             trigger = effective_trigger(char.get("trigger_word"), char.get("name"))  # 绑了角色→和打 caption 同一触发词
     prompt = (f"{trigger}, {appearance or 'portrait, upper body, standing, plain background'}, "
               "cinematic, high detail")
-    prov_name = settings.T2V_PROVIDER or "lightx2v-t2v"
+    prov_name = settings.T2V_PROVIDER or "comfyui-t2v"
+    if not video_provider_registry.has(prov_name):
+        prov_name = "comfyui-t2v" if video_provider_registry.has("comfyui-t2v") else prov_name
     if not video_provider_registry.has(prov_name):
         raise GpuConfigError(
-            f"t2v 后端 '{prov_name}' 未就绪：测试出片需先配好 lightx2v"
-            "（LIGHTX2V_ENABLED + LIGHTX2V_BASE_URL 并起 server）"
-            "并按 §5d 把这张卡训出的 LoRA 挂上。")
+            f"t2v 后端 '{prov_name}' 未就绪：测试出片走 ComfyUI，需配 COMFYUI_BASE_URL。")
     prov = video_provider_registry.get(prov_name)
     out = os.path.join(video_dir(), f"lora_preview_{req.training_id}.mp4")
     prov.generate(None, image_path="", prompt=prompt, out_remote=out,

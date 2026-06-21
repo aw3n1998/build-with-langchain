@@ -213,6 +213,7 @@ def assemble_clips(
     with_subtitles: bool = True,
     crossfade: float | None = None,
     bgm: str | None = None,
+    dedup_boundary: bool = False,
 ) -> dict:
     """把分镜 clips 合成一条成片。
 
@@ -223,6 +224,8 @@ def assemble_clips(
         with_subtitles: 是否加旁白字幕（优先烧录，失败软字幕）。
         crossfade: 镜间交叉叠化秒数；None=用 settings.ASSEMBLE_CROSSFADE；0=硬切。失败自动回退硬切。
         bgm: 背景音乐文件路径；None=用 settings.BGM_PATH；空=不加。
+        dedup_boundary: 整集由 i2v 跨镜续接生成时(镜 N 首帧 == 镜 N-1 尾帧)开启——丢掉第 2 镜起的首帧,
+            消除拼接处的重复帧卡顿。独立出片(各镜不相干)保持 False。
     Returns:
         {"out": 路径, "duration": 总秒, "scenes": N, "tts": 用了旁白?, "subtitles": "burned|soft|none", "bgm": bool}
     """
@@ -241,7 +244,7 @@ def assemble_clips(
     try:
         return _assemble_in(work, clips, out_path, ff, tw, th,
                             voice=voice, with_subtitles=with_subtitles,
-                            crossfade=cf, bgm=bgm_path)
+                            crossfade=cf, bgm=bgm_path, dedup_boundary=dedup_boundary)
     finally:
         import shutil
         shutil.rmtree(work, ignore_errors=True)   # 中间片段每次几十MB，必须清理（成败都清）
@@ -314,7 +317,7 @@ def _tts_dialogue(lines: list[dict], out_mp3: str, ff: str, default_voice: str) 
 
 def _assemble_in(work: str, clips: list[dict], out_path: str, ff: str,
                  tw: int, th: int, *, voice: str, with_subtitles: bool,
-                 crossfade: float = 0.0, bgm: str = "") -> dict:
+                 crossfade: float = 0.0, bgm: str = "", dedup_boundary: bool = False) -> dict:
     parts: list[str] = []
     durs: list[float] = []
     sub_texts: list[str] = []
@@ -341,7 +344,10 @@ def _assemble_in(work: str, clips: list[dict], out_path: str, ff: str,
             tts_used = tts_used or has_narr
 
         # 统一分辨率 + 帧率 + 末帧冻结补齐 + 统一编码
-        vf = (f"scale={tw}:{th}:force_original_aspect_ratio=decrease,"
+        # 跨镜 i2v 续接:第 2 镜起首帧 == 上一镜尾帧 → 丢首帧消除拼接处重复帧卡顿(在缩放前 trim 并重置时间戳)。
+        dedup_prefix = "trim=start_frame=1,setpts=PTS-STARTPTS," if (dedup_boundary and i >= 1) else ""
+        vf = (dedup_prefix +
+              f"scale={tw}:{th}:force_original_aspect_ratio=decrease,"
               f"pad={tw}:{th}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps={FPS}")
         if freeze > 0.05:
             vf += f",tpad=stop_mode=clone:stop_duration={freeze:.3f}"

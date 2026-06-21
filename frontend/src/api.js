@@ -354,9 +354,22 @@ export async function uploadCharacterFace(charId, projectId, file, workspace = n
   return r.json()
 }
 
-// 列出 lightx2v server 当前【实际加载】的 LoRA（读运行中 server 的 --config_json）——前端核对角色/蒸馏 LoRA 挂没挂
-export async function getLoadedLoras() {
-  const r = await fetch(`${getBase()}/pipeline/loaded_loras`)
+// 列出本项目【已配置的角色 LoRA】(t2v/i2v)——前端核对挂没挂(ComfyUI 按 workflow 文件名加载,无 server config 可读)
+export async function getLoadedLoras(projectId = '', workspace = null) {
+  const qs = new URLSearchParams()
+  if (projectId) qs.set('project_id', projectId)
+  if (workspace) qs.set('workspace', workspace)
+  const r = await fetch(`${getBase()}/pipeline/loaded_loras?${qs.toString()}`)
+  if (!r.ok) throw new Error(`status ${r.status}`)
+  return r.json()
+}
+// 预检:隐藏出片后端是否就绪(已注册+server 可达)+ 该项目是否已训角色 LoRA。
+// 供前端在「强锁脸/i2v 续接/已训 LoRA 出片」提交前给内联提示,免静默等几分钟才失败。
+export async function getProviderHealth(projectId = '', workspace = null) {
+  const qs = new URLSearchParams()
+  if (projectId) qs.set('project_id', projectId)
+  if (workspace) qs.set('workspace', workspace)
+  const r = await fetch(`${getBase()}/pipeline/provider_health?${qs.toString()}`)
   if (!r.ok) throw new Error(`status ${r.status}`)
   return r.json()
 }
@@ -394,8 +407,8 @@ export async function loraAction(projectId, action, trainingId = null, workspace
   })
   if (!r.ok) throw new Error(`status ${r.status}`); return r.json()
 }
-// 测试出片：用「当前 lightx2v server 已挂载的 LoRA」出一条 480p/4步/33帧 短测试片，验证 LoRA 学的人对不对。
-// ⚠️ lightx2v LoRA 只能起 server 时挂、per-request 无效 → 预览的是当前 server 挂的那个 LoRA(不是任意指定这张卡的)。返回 job_id，用 streamJobEvents 跟随(video 事件)。
+// 测试出片：用项目级已配置的角色 LoRA 出一条 480p/4步/33帧 短测试片，验证 LoRA 学的人对不对。
+// ⚠️ ComfyUI 按 workflow 文件名加载角色 LoRA(项目级)；训练完成会自动应用到项目。返回 job_id，用 streamJobEvents 跟随(video 事件)。
 export async function loraPreview(trainingId, workspace = null, sessionId = null) {
   return submitJob('/pipeline/lora_preview', { training_id: trainingId, workspace, session_id: sessionId })
 }

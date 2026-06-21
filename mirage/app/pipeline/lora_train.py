@@ -110,15 +110,17 @@ def count_images(dataset_dir: str) -> int:
 
 
 def build_aitk_config(name: str, dataset_dir: str, trigger: str, base: str,
-                      steps: int, training_folder: str) -> dict:
-    """生成 ai-toolkit **Wan2.2-T2V** 配置(照搬 notebook LW2；数值走 settings 可配，不写死)。
+                      steps: int, training_folder: str, mode: str = "t2v") -> dict:
+    """生成 ai-toolkit Wan2.2 配置(照搬 notebook LW2；数值走 settings 可配，不写死)。
 
-    arch=wan22_14b → MoE 双专家，一次出 high+low 两个 LoRA（给 t2v 文生视频锁人物）。
+    mode=t2v → arch=wan22_14b(t2v 文生视频锁人物)；mode=i2v → arch=wan22_14b_i2v(i2v 尾帧续接锁脸,
+    底模须是 Wan2.2-I2V diffusers=LORA_TRAIN_I2V_BASE)。均 MoE 双专家，一次出 high+low 两个 LoRA。
     图片即可训身份（图片教外观、动作由底模出）；★caption 只写【触发词】、不写外观（外观写进 caption
     会和「触发词→身份」绑定打架，训出来不像；外观留给出片时的画面提示词）。
     """
     dim = int(settings.LORA_TRAIN_NETWORK_DIM)
     res = int(settings.LORA_TRAIN_RESOLUTION)
+    arch = "wan22_14b_i2v" if mode == "i2v" else "wan22_14b"
     return {
         "job": "extension",
         "config": {
@@ -152,7 +154,7 @@ def build_aitk_config(name: str, dataset_dir: str, trigger: str, base: str,
                     "switch_boundary_every": 10,    # 对齐官方/社区(原 1 每步切专家、更抖更慢);仍约 50/50 覆盖高低噪
                 },
                 # ★arch=wan22_14b → ai-toolkit 走 MoE 双专家、一次出 high+low 两个 LoRA(别用 is_flux)
-                "model": {"name_or_path": base, "arch": "wan22_14b", "quantize": True,
+                "model": {"name_or_path": base, "arch": arch, "quantize": True,
                           "low_vram": _resolve_low_vram(),   # 大卡(>48G)全 GPU 训、不挪 CPU；小卡才省显存
                           "model_kwargs": {"train_high_noise": True, "train_low_noise": True}},
                 # ★不生成训练中预览样图★：ai-toolkit 的 Wan2.2 采样路径调 diffusers encode_prompt 时把负向
@@ -186,10 +188,11 @@ def _tail(path: str, n: int) -> str:
         return ""
 
 
-def _link_after_train(store, tid: str, trigger: str, lora_high: str, lora_low: str) -> None:
+def _link_after_train(store, tid: str, trigger: str, lora_high: str, lora_low: str,
+                      mode: str = "t2v") -> None:
     """训练完成回写：① 绑定角色记下 trained_lora_id(反向链)；
-    ② 项目若还没设 Wan-T2V 出片 LoRA，自动把这套 high/low 应用为本剧 t2v 角色 LoRA
-    (单主角短剧直接生效；不覆盖已有手设；热生效、无需重启)。"""
+    ② 项目若还没设该模式的出片 LoRA，自动把这套 high/low 应用为本剧角色 LoRA
+    (t2v→wan_t2v_lora_*；i2v→wan_i2v_lora_*；单主角短剧直接生效；不覆盖已有手设；热生效)。"""
     t = store.get_lora_training(tid) or {}
     cid = t.get("char_id")
     # ★项目级/角色级触发词都写成 effective_trigger 结果(和 caption、出片注入同一个 zk token)——
@@ -205,15 +208,17 @@ def _link_after_train(store, tid: str, trigger: str, lora_high: str, lora_low: s
     if pid:
         try:
             st = store.get_project_style(pid)
-            if not (st.get("wan_t2v_lora_high") or "").strip():
-                store.update_project_style(pid, wan_t2v_lora_high=lora_high,
-                                           wan_t2v_lora_low=lora_low, trigger_word=eff)
+            _hi_key = "wan_i2v_lora_high" if mode == "i2v" else "wan_t2v_lora_high"
+            _lo_key = "wan_i2v_lora_low" if mode == "i2v" else "wan_t2v_lora_low"
+            if not (st.get(_hi_key) or "").strip():
+                store.update_project_style(pid, trigger_word=eff,
+                                           **{_hi_key: lora_high, _lo_key: lora_low})
         except Exception:  # noqa: BLE001
             pass
 
 
 def _do_train_local(store, tid: str, dataset_dir: str, trigger: str, name: str,
-                    base: str, steps: int) -> None:
+                    base: str, steps: int, mode: str = "t2v") -> None:
     """后台线程：跑 ai-toolkit → 拷贝产物到 loras → 更新 DB 状态。"""
     slug = _slug(trigger or name)
     job_name = f"{slug}_lora"
@@ -232,7 +237,7 @@ def _do_train_local(store, tid: str, dataset_dir: str, trigger: str, name: str,
                 tid, status="FAILED",
                 message=f"ai-toolkit 未就绪（{run_py} 不存在）。Colab 请先跑 notebook L1 格安装，或在 .env 设 AI_TOOLKIT_DIR。")
             return
-        cfg = build_aitk_config(job_name, dataset_dir, trigger, base, steps, training_folder)
+        cfg = build_aitk_config(job_name, dataset_dir, trigger, base, steps, training_folder, mode=mode)
         cfg_path = _write_config(cfg, dataset_dir)
         logger.info("LoRA 训练开始 tid=%s trigger=%s base=%s steps=%s cfg=%s",
                     tid, trigger, base, steps, cfg_path)
@@ -255,7 +260,7 @@ def _do_train_local(store, tid: str, dataset_dir: str, trigger: str, name: str,
             src = next((o for o in tagged if not any(c.isdigit() for c in os.path.basename(o))), None) \
                 or (tagged[-1] if tagged else None)
             if src:
-                dst = os.path.join(settings.COMFYUI_LORA_DIR, f"{slug}_wan_t2v_{tag}.safetensors")
+                dst = os.path.join(settings.COMFYUI_LORA_DIR, f"{slug}_wan_{mode}_{tag}.safetensors")
                 shutil.copy(src, dst)
                 reg[tag] = os.path.basename(dst)
                 # ★把"存到哪"写进日志+心跳:训完用户能看到 LoRA 落到 char_loras 的确切路径(§5d 就从这找)
@@ -273,10 +278,10 @@ def _do_train_local(store, tid: str, dataset_dir: str, trigger: str, name: str,
             return
         store.update_lora_training(
             tid, status="DONE", output_path=reg["high"], trigger_word=trigger,
-            message=(f"训练完成 ✓ LoRA 已存到 {settings.COMFYUI_LORA_DIR}/（{reg['high']} / {reg['low']}）。"
-                     f"跑笔记本 §5d 重起即自动挂上；§5d 没自动找到就重开一下 notebook（git pull 后浏览器里的旧格子不会自动刷新）。"))
+            message=(f"训练完成 ✓ {mode} LoRA 已存到 {settings.COMFYUI_LORA_DIR}/（{reg['high']} / {reg['low']}）"
+                     f"并自动应用为本项目角色 LoRA。ComfyUI 出片按文件名加载（i2v 续接需 i2v 模板含角色 LoRA 节点）。"))
         try:
-            _link_after_train(store, tid, trigger, reg["high"], reg["low"])
+            _link_after_train(store, tid, trigger, reg["high"], reg["low"], mode=mode)
         except Exception:  # noqa: BLE001
             logger.warning("训练完成后回写角色/项目失败 tid=%s", tid)
         logger.info("LoRA 训练完成 tid=%s → %s / %s", tid, reg["high"], reg["low"])

@@ -42,19 +42,9 @@ if settings.COMFYUI_BASE_URL:
 if settings.COMFYUI_BASE_URL:
     from mirage.app.pipeline.providers.comfyui_t2v import ComfyUIT2VProvider
     video_provider_registry.register(ComfyUIT2VProvider())
-# lightx2v 文生视频后端(不走 ComfyUI):配了 LIGHTX2V_ENABLED + 端点才注册。纯 t2v 可只用它、彻底不开 ComfyUI。
-if settings.LIGHTX2V_ENABLED and settings.LIGHTX2V_BASE_URL:
-    from mirage.app.pipeline.providers.lightx2v import Lightx2vT2VProvider
-    video_provider_registry.register(Lightx2vT2VProvider())
 # Stand-In 强锁脸文生视频后端(WeChatCV/Stand-In,另起包装 server,不走 lightx2v):配了 STANDIN_ENABLED + 端点才注册。
 # 隐藏 Provider,由「出片模式=t2v + 强锁脸开关 + 该角色有参考脸」路由(见 pipeline_tools._do_render_t2v)。
 if settings.STANDIN_ENABLED and settings.STANDIN_BASE_URL:
     from mirage.app.pipeline.providers.standin import StandInT2VProvider
     video_provider_registry.register(StandInT2VProvider())
-# lightx2v 图生视频(i2v)后端 —— 用于「尾帧续接」:镜N 用镜N-1 尾帧当首帧续生成(跨镜画面连续)。
-# 隐藏 Provider,由「续接出片」按需路由(见 pipeline_tools._continuation_*)。配了 LIGHTX2V_I2V_ENABLED + 端点才注册。
-if settings.LIGHTX2V_I2V_ENABLED and settings.LIGHTX2V_I2V_BASE_URL:
-    from mirage.app.pipeline.providers.lightx2v_i2v import Lightx2vI2VProvider
-    video_provider_registry.register(Lightx2vI2VProvider())
-
 __all__ = ["VideoProvider", "video_provider_registry"]
