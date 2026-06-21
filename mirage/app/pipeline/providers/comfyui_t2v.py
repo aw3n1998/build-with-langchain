@@ -101,8 +101,10 @@ class ComfyUIT2VProvider(VideoProvider):
             shift = float(params.get("shift") or settings.WAN_SHIFT)
             tmpl = settings.COMFYUI_WORKFLOW_T2V or "comfyui_workflows/t2v_fp8_template.json"
             tmpl_default, bf16_tmpl = "t2v_fp8_template.json", "comfyui_workflows/t2v_bf16_template.json"
-        # 无原生 fp8 卡(A100/V100，cell-1 探测=fp16)→ 用 bf16 模板,避免 sm_80 跑模拟 fp8;仅当仍是 fp8 默认模板时切
-        if (settings.T2V_PRECISION or "").lower() in ("fp16", "bf16") and tmpl.endswith(tmpl_default):
+        # 无原生 fp8 卡(A100/V100，cell-1 探测=fp16)→ 用 bf16 模板,避免 sm_80 跑模拟 fp8;仅当仍是 fp8 默认模板时切。
+        # ★T2V_PRECISION 回退跟随 I2V_PRECISION：cell1 只写了 I2V_PRECISION、漏写 T2V_PRECISION,而同一张卡精度一致,
+        #   不回退则 t2v 永远走 fp8 模板、引用没下的 fp8 模型(A100 上 t2v 出片 UNETLoader 报 not in list)。
+        if (settings.T2V_PRECISION or settings.I2V_PRECISION or "").lower() in ("fp16", "bf16") and tmpl.endswith(tmpl_default):
             tmpl = bf16_tmpl
         mapping = {
             "%PROMPT%": prompt or "",
