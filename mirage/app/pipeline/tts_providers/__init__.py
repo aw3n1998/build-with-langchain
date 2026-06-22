@@ -12,21 +12,26 @@ from __future__ import annotations
 from mirage.app.core.config import settings
 from mirage.app.core.logger import get_logger
 from mirage.app.pipeline.tts_providers.base import TTSProvider, tts_registry
-from mirage.app.pipeline.tts_providers.edge_tts_provider import EdgeTTSProvider
 
 logger = get_logger("pipeline.tts")
 
-# edge-tts 永远注册(保底/回退)。默认引擎由 TTS_PROVIDER_DEFAULT 决定(缺省 edge-tts)。
-_def = (settings.TTS_PROVIDER_DEFAULT or "edge-tts").strip()
-tts_registry.register(EdgeTTSProvider(), default=(_def in ("", "edge-tts")))
+# ★edge-tts 已弃用（基础合成音没用）。默认/保底引擎 = CosyVoice2（自托管克隆，自带 LibriVox 爬来的成熟女声当默认音色）。
+# 配了 COSYVOICE2_BASE_URL 才注册（没起 8193 server 时整条配音链无声，需起 server）。
+_def = (settings.TTS_PROVIDER_DEFAULT or "cosyvoice2").strip()
+if settings.COSYVOICE2_BASE_URL:
+    try:
+        from mirage.app.pipeline.tts_providers.cosyvoice2 import CosyVoice2Provider
+        tts_registry.register(CosyVoice2Provider(), default=True)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[tts] CosyVoice2 注册失败: %s", e)
 
-# IndexTTS2 自托管克隆:配了 INDEXTTS2_ENABLED + 端点才注册(没起 server 时整条链自动只用 edge-tts，不报错)。
+# IndexTTS2 自托管克隆（可选，情感控制更细）：配了 INDEXTTS2_ENABLED + 端点才注册。
 if settings.INDEXTTS2_ENABLED and settings.INDEXTTS2_BASE_URL:
     try:
         from mirage.app.pipeline.tts_providers.indextts2 import IndexTTS2Provider
-        tts_registry.register(IndexTTS2Provider(), default=(_def == "indextts2"))
+        tts_registry.register(IndexTTS2Provider(), default=(not settings.COSYVOICE2_BASE_URL))
     except Exception as e:  # noqa: BLE001
-        logger.warning("[tts] IndexTTS2 注册失败(回退 edge-tts): %s", e)
+        logger.warning("[tts] IndexTTS2 注册失败: %s", e)
 
 
 def _normalize(voice) -> dict:
@@ -35,11 +40,12 @@ def _normalize(voice) -> dict:
     if isinstance(voice, dict):
         d = {k: (v or "") for k, v in voice.items()}
         eng = (d.get("engine") or "").strip()
-        if not eng:
-            eng = tts_registry.default_name if (d.get("ref_audio") or d.get("voice_id")) else "edge-tts"
+        if not eng or eng == "edge-tts":   # edge 已弃用：旧 spec/裸 dict 一律落到默认引擎
+            eng = tts_registry.default_name or "cosyvoice2"
         d["engine"] = eng
         return d
-    return {"engine": "edge-tts", "voice": (voice or "")}
+    # 裸字符串(老 edge 音色 id 已无意义) → 默认引擎(CosyVoice2)，用其默认音色。
+    return {"engine": tts_registry.default_name or "cosyvoice2", "voice": (voice or "")}
 
 
 def synth_tts(text: str, out_path: str, voice="") -> bool:
@@ -52,18 +58,23 @@ def synth_tts(text: str, out_path: str, voice="") -> bool:
     if not (text or "").strip():
         return False
     spec = _normalize(voice)
-    engine = spec.pop("engine", "") or "edge-tts"
+    engine = spec.pop("engine", "") or (tts_registry.default_name or "cosyvoice2")
     prov = tts_registry.get(engine)
     ok = False
     if prov is not None:
         try:
             ok = prov.synth(text, out_path, **spec)
         except Exception as e:  # noqa: BLE001
-            logger.warning("[tts] 引擎 %s 异常(回退 edge-tts): %s", engine, e)
-    if not ok and engine != "edge-tts" and tts_registry.has("edge-tts"):
-        logger.info("[tts] %s 未出音 → 回退 edge-tts", engine)
+            logger.warning("[tts] 引擎 %s 异常(回退默认引擎): %s", engine, e)
+    # 回退到默认引擎(CosyVoice2)。edge-tts 已弃用,不再兜底。
+    _fb = tts_registry.default_name
+    if not ok and _fb and engine != _fb and tts_registry.has(_fb):
+        logger.info("[tts] %s 未出音 → 回退默认引擎 %s", engine, _fb)
         try:
-            ok = tts_registry.get("edge-tts").synth(text, out_path, voice=spec.get("voice", ""))
+            ok = tts_registry.get(_fb).synth(text, out_path, voice=spec.get("voice", ""),
+                                             ref_audio=spec.get("ref_audio", ""),
+                                             voice_id=spec.get("voice_id", ""),
+                                             emotion=spec.get("emotion", ""))
         except Exception:  # noqa: BLE001
             ok = False
     return ok

@@ -284,6 +284,10 @@ class Settings(BaseSettings):
     INDEXTTS2_ENABLED: bool = False
     INDEXTTS2_BASE_URL: str = ""             # 包装 server 端点(Colab 跑「§IndexTTS2」格写入，默认 http://127.0.0.1:8191)
     INDEXTTS2_DEFAULT_EMOTION: str = ""      # 缺省情感(空=中性)；每镜可由 scene.emotion 覆盖
+    # CosyVoice2 自托管克隆+情感：默认/保底引擎（替代 edge-tts，已弃用基础合成音）。配了 BASE_URL 才注册。
+    # CosyVoice2-0.5B 无内置预置音 → server 端 COSYVOICE_DEFAULT_REF（爬来的成熟女声）当没参考音时的默认音色。
+    COSYVOICE2_ENABLED: bool = True
+    COSYVOICE2_BASE_URL: str = ""            # 包装 server 端点，默认 http://127.0.0.1:8193
     # 口型对齐（出片后处理，引擎无关可插拔；不做 VideoProvider）。没配/server 没起=自动跳过，不报错。
     LIPSYNC_ENGINE: str = ""                  # ""=关(只配音不缝嘴) / "latentsync" / "wav2lip"
     LATENTSYNC_ENABLED: bool = False          # 门控：配了 ENABLED+BASE_URL 才会尝试缝嘴

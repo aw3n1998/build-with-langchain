@@ -24,7 +24,7 @@ from mirage.app.core.logger import get_logger
 
 logger = get_logger("pipeline.assembler")
 
-DEFAULT_VOICE = "zh-CN-YunxiNeural"   # 沉稳男声旁白；女声可用 zh-CN-XiaoxiaoNeural
+DEFAULT_VOICE = ""   # ★edge-tts 已弃用：空=走默认引擎(CosyVoice2)的默认音色(LibriVox 爬来的成熟女声)
 
 
 def _ffmpeg() -> str:

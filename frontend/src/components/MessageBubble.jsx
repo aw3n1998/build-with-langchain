@@ -1252,13 +1252,11 @@ export function ProductionPanel({ message, workspace, sessionId }) {
                 onBlur={e => e.target.value !== (c.trigger_word || '') && charOp('update', { char_id: c.id, trigger_word: e.target.value })}
                 style={{ ...inputStyle, height: 28, width: '100%', boxSizing: 'border-box', marginBottom: 4 }} />
               <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                <span style={{ fontSize: 11, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>音色</span>
-                <select defaultValue={c.voice || ''}
-                  onChange={e => charOp('update', { char_id: c.id, voice: e.target.value, voice_engine: '' })}
-                  title="该角色的预置配音音色（声音圣经）；选它=用 edge-tts 预置音（会关掉克隆）。想要真人感克隆音色请点右边「传参考音」。"
-                  style={{ ...inputStyle, height: 28, flex: 1, opacity: c.voice_engine ? 0.5 : 1 }}>
-                  {VOICES.map(v => <option key={v.v} value={v.v}>{v.label}</option>)}
-                </select>
+                <span style={{ fontSize: 11, flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                               color: c.ref_audio_path ? '#34d399' : 'var(--text-muted)' }}
+                  title="配音引擎 = CosyVoice2（自托管克隆）。没传参考音=用默认成熟女声；传了参考音=克隆该角色专属音色。edge-tts 基础合成音已弃用。">
+                  {c.ref_audio_path ? '🎙 克隆音色 ✓' : '🎙 默认音色 (CosyVoice2)'}
+                </span>
                 <label title="传一张该角色清晰正脸 → 出片勾「强锁脸(Stand-In)」即用它跨镜锁定这张脸(免训练)。"
                   style={{ ...miniBtn2, cursor: 'pointer', color: c.ref_image_path ? '#34d399' : undefined, whiteSpace: 'nowrap' }}>
                   {c.ref_image_path ? '换参考脸 ✓' : '传参考脸'}
