@@ -23,7 +23,7 @@ import { fileUrl, getVideoProviders, getImageProviders, getProject, batchGenerat
          deleteCandidate, deleteSceneVideo, sceneUndoAppend, deleteEpisode, suggestSegmentPrompts,
          autoStoryboard, autoFill, characters as charactersApi, templatesApi,
          loraCreate, loraAction, loraUploadImage, loraUploadRef, loraPreview,
-         suggestContinuation, sceneGenerate, sceneRender, sceneAppend,
+         suggestContinuation, sceneGenerate, sceneRender, sceneAppend, sceneLipsync,
          cancelJob, listActiveJobs,
          projectStyle, sceneAdd, sceneDelete, listLoras,
          oneClick, autoSelect, uploadCharacterFace, uploadCharacterVoice, getLoadedLoras, getProviderHealth } from '../api'
@@ -367,6 +367,8 @@ export function ProductionPanel({ message, workspace, sessionId }) {
   const provReady = (name) => !!(health?.providers?.[name]?.enabled && health.providers[name].reachable)
   const [sceneBusy, setSceneBusy] = useState({})   // {sceneId: 'generate'|'render'|'append'}
   const [appendPrompt, setAppendPrompt] = useState({})  // {sceneId: 追加段的运镜提示词(可空)}
+  const [appendNarr, setAppendNarr] = useState({})      // {sceneId: 续接段台词(配音，可空)}
+  const [appendEmo, setAppendEmo] = useState({})        // {sceneId: 续接段情感(happy/angry/sad/afraid/surprised/'')}
   const [appendCount, setAppendCount] = useState({})    // {sceneId: 本次追加几段}
   const [appendLang, setAppendLang] = useState({})      // {sceneId: 'zh'|'en'} 推荐语言
   const [appendSugBusy, setAppendSugBusy] = useState({})// {sceneId: AI 推荐请求中}
@@ -491,6 +493,8 @@ export function ProductionPanel({ message, workspace, sessionId }) {
     motion_prompt: appendPrompt[sceneId] || '',
     count: Math.max(1, Number(appendCount[sceneId]) || 1),
     size: vidSize, video_params: vidParams,
+    seg_narration: appendNarr[sceneId] || '',   // 续接段台词→角色克隆+情感 TTS，音频定段长，配音叠回成片
+    emotion: appendEmo[sceneId] || '',
   })
   const runScene = async (kind, sceneId) => {
     if (busy || sceneBusy[sceneId]) return
@@ -522,6 +526,20 @@ export function ProductionPanel({ message, workspace, sessionId }) {
       sceneJob.current[sceneId] = jobId
       await consume(jobId)
     } catch (e) { setProgress('单镜续接失败：' + String(e.message || e)) }
+    finally { delete sceneJob.current[sceneId]; setSceneBusy(p => { const n = { ...p }; delete n[sceneId]; return n }) }
+  }
+
+  // 「口型同步」：把这镜【已有成片】按音轨(续接段配的情感语音)/旁白做 LatentSync 缝嘴，嘴型对到台词。需起 LatentSync server。
+  const runLipsync = async (sceneId) => {
+    if (busy || sceneBusy[sceneId]) return
+    startAt.current[sceneId] = Date.now()
+    setLogs([]); setShowLogs(true)
+    setSceneBusy(p => ({ ...p, [sceneId]: 'lipsync' }))
+    try {
+      const jobId = await sceneLipsync({ scene_id: sceneId, workspace, session_id: sessionId })
+      sceneJob.current[sceneId] = jobId
+      await consume(jobId)
+    } catch (e) { setProgress('口型同步失败：' + String(e.message || e)) }
     finally { delete sceneJob.current[sceneId]; setSceneBusy(p => { const n = { ...p }; delete n[sceneId]; return n }) }
   }
 
@@ -1765,8 +1783,30 @@ export function ProductionPanel({ message, workspace, sessionId }) {
                       style={{ flex: '1 1 200px', minWidth: 150, height: 26, padding: '0 10px', borderRadius: 6,
                                border: '1px solid rgba(129,140,248,0.4)', background: 'rgba(99,102,241,0.08)',
                                color: '#e5e7eb', fontSize: 11.5, outline: 'none' }} />
+                    <input value={appendNarr[s.scene_id] || ''}
+                      onChange={e => setAppendNarr(p => ({ ...p, [s.scene_id]: e.target.value }))}
+                      placeholder="台词(配音，留空=不配)"
+                      disabled={busy || !!sceneBusy[s.scene_id]}
+                      title="续接段台词 → 用该镜角色的克隆音色+情感配音，音频多长片多长，自动叠回成片。留空=只续画面不配音。"
+                      style={{ flex: '1 1 150px', minWidth: 110, height: 26, padding: '0 10px', borderRadius: 6,
+                               border: '1px solid rgba(52,211,153,0.45)', background: 'rgba(16,185,129,0.08)',
+                               color: '#e5e7eb', fontSize: 11.5, outline: 'none' }} />
+                    <select value={appendEmo[s.scene_id] || ''}
+                      onChange={e => setAppendEmo(p => ({ ...p, [s.scene_id]: e.target.value }))}
+                      disabled={busy || !!sceneBusy[s.scene_id]}
+                      title="续接段台词的情感(克隆引擎 IndexTTS2 支持)"
+                      style={{ height: 26, borderRadius: 6, border: '1px solid rgba(52,211,153,0.45)',
+                               background: 'rgba(16,185,129,0.08)', color: '#e5e7eb', fontSize: 11.5, outline: 'none' }}>
+                      <option value="">情感:中性</option>
+                      <option value="happy">开心</option>
+                      <option value="angry">愤怒</option>
+                      <option value="sad">悲伤</option>
+                      <option value="afraid">害怕</option>
+                      <option value="surprised">惊讶</option>
+                      <option value="calm">平静</option>
+                    </select>
                     <button onClick={() => runScene('append', s.scene_id)} disabled={busy || !!sceneBusy[s.scene_id]}
-                      title="续接：从这镜【末帧】用左边新提示词 i2v 续生成一段，追加到后面(5s→10s)。可反复加、能撤销。需先在 Colab 起 i2v server。"
+                      title="续接：从这镜【末帧】i2v 续生成一段(保人物/场景连贯)，追加到后面。填了台词会用克隆音色+情感配音并叠回。可反复加、能撤销。需 ComfyUI i2v server。"
                       style={{
                         height: 26, padding: '0 12px', borderRadius: 6, border: '1px solid rgba(129,140,248,0.5)',
                         background: sceneBusy[s.scene_id] === 'append' ? 'rgba(99,102,241,0.4)' : 'rgba(99,102,241,0.14)',
@@ -1779,6 +1819,13 @@ export function ProductionPanel({ message, workspace, sessionId }) {
                         background: sceneBusy[s.scene_id] === 'undo' ? 'rgba(148,163,184,0.3)' : 'transparent',
                         color: '#cbd5e1', fontSize: 11.5, cursor: (busy || !!sceneBusy[s.scene_id]) ? 'default' : 'pointer',
                       }}>{sceneBusy[s.scene_id] === 'undo' ? '撤销中…' : '↩ 撤销上一段'}</button>
+                    <button onClick={() => runLipsync(s.scene_id)} disabled={busy || !!sceneBusy[s.scene_id]}
+                      title="口型同步：把这镜成片按音轨(续接段配的情感语音)/旁白做 LatentSync 缝嘴，嘴型对到台词(只对正脸特写有效)。产物为独立新文件、原片保留。需起 LatentSync server(8192)。"
+                      style={{
+                        height: 26, padding: '0 12px', borderRadius: 6, border: '1px solid rgba(34,197,94,0.5)',
+                        background: sceneBusy[s.scene_id] === 'lipsync' ? 'rgba(34,197,94,0.4)' : 'rgba(34,197,94,0.14)',
+                        color: '#86efac', fontSize: 11.5, cursor: (busy || !!sceneBusy[s.scene_id]) ? 'default' : 'pointer',
+                      }}>{sceneBusy[s.scene_id] === 'lipsync' ? '缝嘴中…' : '👄 口型同步'}</button>
                   </div>
                 </div>
               ) : (
