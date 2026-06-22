@@ -44,6 +44,13 @@ _SYSTEM = (
     "   - lipsync: 布尔。这镜【单个】人物**正脸近景**开口说话=true（对口型镜：image_prompt 必须含 'frontal face close-up, facing camera'，否则后期没法对口型）；\n"
     "     画外音/背影/侧脸/远景/空镜/物件特写/【多人对话(用dialogue)】一律 false（看不到嘴=纯配音画外音，镜头可任意景别）。\n"
     "   - character: 这镜的主要出场角色名（用用户给的角色名；无具体人物如空镜/物件则填空串）。\n"
+    "   - seconds: 这镜目标时长（整数秒，AI 按内容自己定，别都一样长）。动作/空镜按节奏估：急促快切 2-3s、"
+    "一般动作或一句台词 3-4s、缓慢空镜/氛围 4-6s；复杂动作拆出的递进短镜每镜 2-3s。说话镜也给估计值（≈中文字数÷4 秒）。\n"
+    "   - continue_prev: 布尔。这镜是否【紧接上一镜的连续动作 / 同一镜头的延续】=true（→ 用上一镜尾帧 i2v 续接，"
+    "保人物+空间连贯；典型：复杂动作拆出的递进短镜、同场景同一角色的连续动作）；镜头切换/换场景/换机位/换主体/"
+    "新人物登场=false（→ 全新 t2v 出片，避免把上一镜的旧画面带进来）。★第 1 镜必须 false。\n"
+    "   - sfx: 布尔。这镜是否需要【环境/动作音效】=true（有明显动作或环境声：奔跑/打斗/篮球/脚步/开门/雨/街道/"
+    "人群/风/水/机械等 → 后期 AI 音效模型按画面自动配同步音效，垫在人声之下）；纯静态对话特写、无动静的空镜=false。\n"
     "3) 连贯优先：按【叙事 beat】切镜——一个动作单元 / 一句关键对话 = 一镜，别把同一段动作切成很多碎镜（镜越少、每镜越长，跨镜漂移越少、越连贯）。\n"
     "   **动作与台词分镜**：若一个 beat 既有明显动作又有一句反应台词（如摔倒后喊「好疼」），拆成两镜——先动作镜（lipsync=false、景别随意），紧跟一个正脸台词镜（lipsync=true、image_prompt 给正脸近景）；别把动作+台词塞一镜（否则配音/对口型对不上时机）。\n"
     "   **★复杂/多步动作必须拆成多个递进短镜（重要，否则会跳变/瞬移）**：脱衣/换装/穿戴、打斗格斗、起身→走动→坐下、翻越/爬/跳、复杂手部操作（开锁/解扣/倒水/点烟）等——单个约 5 秒文生镜根本演不出中间过程，模型会走捷径直接「跳变」（如衣服突然从身上消失、没有过渡）。把这类动作拆成 3-5 个连续短镜，**每镜只演一个最小子动作**，并把中间机械细节写进 motion_prompt（英文 + slowly / gradually / continuous / smooth cloth physics）。示例（脱外套）：镜A 指尖抓衣领向下解→镜B 外套滑下一侧肩膀→镜C 袖子褪到手肘→镜D 外套褪下垂落手中。这些镜 character 同一人、environment 复用、景别可递进（特写手→中景→全身），靠剪辑连成一套完整动作。注意：这与上一条『少切碎镜』不冲突——简单叙事别过度切，但复杂【物理动作】是必须拆的例外。\n"
@@ -54,7 +61,8 @@ _SYSTEM = (
     "只输出这个 JSON 数组，不要任何解释、前后缀、代码块标记。"
 )
 
-_FIELDS = ("title", "image_prompt", "motion_prompt", "narration", "subtitle", "lipsync", "character", "dialogue")
+_FIELDS = ("title", "image_prompt", "motion_prompt", "narration", "subtitle", "lipsync", "character",
+           "dialogue", "seconds", "continue_prev", "sfx")
 
 
 def _coerce_dialogue(v) -> str:
@@ -87,6 +95,19 @@ def _as_bool(v) -> bool:
     return bool(v)
 
 
+def _as_int(v, default: int = 0) -> int:
+    """稳健解析 LLM 给的整数（可能是 '3'、'3秒'、3.0、None）。失败回 default。"""
+    if isinstance(v, bool):
+        return default
+    if isinstance(v, (int, float)):
+        return int(v)
+    if isinstance(v, str):
+        m = re.search(r"-?\d+", v)
+        if m:
+            return int(m.group(0))
+    return default
+
+
 def _coerce_scenes(text: str, n: int, style: str = "") -> list[dict]:
     """把 LLM 输出解析成长度严格为 N 的分镜 dict 列表（健壮容错）。"""
     scenes: list[dict] = []
@@ -110,6 +131,12 @@ def _coerce_scenes(text: str, n: int, style: str = "") -> list[dict]:
                         "lipsync": _as_bool(it.get("lipsync")),
                         "character": str(it.get("character") or "").strip(),
                         "dialogue": _coerce_dialogue(it.get("dialogue")),
+                        # ★每镜 AI 自定时长 + 是否续接上一镜（第1镜强制不续接）
+                        "seconds": max(0, _as_int(it.get("seconds"), 0)),
+                        "continue_prev": (i > 0 and _as_bool(it.get("continue_prev"))),
+                        # ★是否要环境/动作音效；LLM 没给则默认「非对口型镜=要、对口型特写=不要」
+                        "sfx": (_as_bool(it.get("sfx")) if it.get("sfx") is not None
+                                else not _as_bool(it.get("lipsync"))),
                     })
         except Exception as e:  # noqa: BLE001
             logger.warning("[storyboard] JSON 解析失败，将走保底: %s", e)
@@ -121,7 +148,8 @@ def _coerce_scenes(text: str, n: int, style: str = "") -> list[dict]:
         k = len(scenes) + 1
         scenes.append({"title": f"镜{k}", "image_prompt": (style or "电影感，写实").strip("，"),
                        "motion_prompt": "缓慢推近，自然光影", "narration": "",
-                       "subtitle": "", "lipsync": False, "character": "", "dialogue": ""})
+                       "subtitle": "", "lipsync": False, "character": "", "dialogue": "",
+                       "seconds": 0, "continue_prev": False, "sfx": False})
     return scenes
 
 

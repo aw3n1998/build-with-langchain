@@ -605,13 +605,14 @@ def _do_render_lipsync_s2v(scene_id, scene, asset, prompt, params) -> str:
     # 旁白(台词) → TTS 本地音频
     from mirage.app.pipeline.assembler import _tts
     audio_local = os.path.join(local_dir, f"{scene['scene_number']:02d}_{scene_id}_voice.mp3")
-    voice = (scene.get("voice") or "").strip() or settings.COMFYUI_S2V_TTS_VOICE   # 角色音色优先
+    # 角色配了克隆引擎→用克隆音色(声音圣经,与续接/合成一致);否则 scene.voice / 默认音色(裸串→CosyVoice2 默认)。
+    voice = _scene_voice_spec(get_store(), scene, (scene.get("emotion") or ""))
     ok_tts = _tts(line, audio_local, voice)
-    if not ok_tts:                       # edge-tts 偶发网络抖动：退避重试一次
+    if not ok_tts:                       # 偶发抖动：退避重试一次
         import time as _t; _t.sleep(1.0)
         ok_tts = _tts(line, audio_local, voice)
     if not ok_tts:
-        return "对口型失败：台词转语音(TTS)没成功（edge-tts 需联网，已重试）。"
+        return "对口型失败：台词转语音(TTS)没成功（已重试）。请确认配音引擎就绪（CosyVoice2 端点）。"
     # 只剔除真正"未设置"的(None/空串)；保留数值 0——seed=0 是合法可复现种子（与主 i2v 一致）。
     merged = {**s2v.default_params(),
               **{k: v for k, v in (params or {}).items() if v is not None and v != ""}}
@@ -645,6 +646,9 @@ def _do_render_lipsync_s2v(scene_id, scene, asset, prompt, params) -> str:
     except (GpuRunError, RuntimeError, OSError) as e:
         store.set_scene_state(scene_id, SceneState.FAILED, force=True)
         return f"对口型出片失败: {e}"
+    if not _video_ok(final_local):
+        store.set_scene_state(scene_id, SceneState.FAILED, force=True)
+        return f"对口型异常：产物缺失或为空（{final_local}）——已标 FAILED，请重出。"
     store.set_scene_video(scene_id, final_local)
     store.set_scene_state(scene_id, SceneState.COMPLETED)
     return (f"对口型(Wan2.2-S2V)出片完成，分镜 {scene_id} 标记 COMPLETED（成片自带人声）。\n"
@@ -798,6 +802,9 @@ def _do_render_t2v(scene_id, scene, motion_prompt, params) -> str:
     except (GpuRunError, RuntimeError, OSError) as e:
         store.set_scene_state(scene_id, SceneState.FAILED, force=True)
         return f"文生视频出片失败: {e}"
+    if not _video_ok(final_local):
+        store.set_scene_state(scene_id, SceneState.FAILED, force=True)
+        return f"文生视频异常：产物缺失或为空（{final_local}）——已标 FAILED，请重出。"
     store.set_scene_video(scene_id, final_local)
     store.set_scene_state(scene_id, SceneState.COMPLETED)
     return (f"文生视频(Wan2.2-T2V)出片完成，分镜 {scene_id} 标记 COMPLETED。\n"
@@ -958,9 +965,21 @@ def render_continuation_one(project_id: str, scene_id: str, params: dict | None 
     except (GpuConfigError, GpuRunError, RuntimeError, OSError) as e:
         store.set_scene_state(sid, SceneState.FAILED, force=True)
         return f"镜{num} 单镜续接失败: {e}"
+    if not _video_ok(out):
+        store.set_scene_state(sid, SceneState.FAILED, force=True)
+        return f"镜{num} 续接异常：产物缺失或为空（{out}）——已标 FAILED，请重出。"
     store.set_scene_video(sid, out)
     store.set_scene_state(sid, SceneState.COMPLETED)
     return f"镜{num} 单镜续接完成（接镜{prev.get('scene_number')}尾帧）。\nVIDFILE::{sid}::{out}"
+
+
+def _video_ok(path: str) -> bool:
+    """出片产物有效性校验：存在且 >1KB。防 provider 报成功但实际没下到/写空文件就误标 COMPLETED
+    （否则合成期 assembler 静默丢这一镜，用户看到"成功"却少了画面）。"""
+    try:
+        return bool(path) and os.path.exists(path) and os.path.getsize(path) > 1000
+    except OSError:
+        return False
 
 
 def do_render_scene_video(
@@ -1132,6 +1151,9 @@ def do_render_scene_video(
         logger.warning("[render] 画质增强跳过(出错,保原片) scene=%s", scene_id)
     # 存本地最终成片路径 final_local；此前 SSH 单段误存远程 GPU 路径 out_remote，
     # 导致信任 scenes.video_path 的删除/状态逻辑拿到不存在的本地路径。
+    if not _video_ok(final_local):   # provider 报成功但实际没下到/空文件 → 别误标 COMPLETED
+        store.set_scene_state(scene_id, SceneState.FAILED, force=True)
+        return f"出片异常：产物缺失或为空（{final_local}）——已标 FAILED，请重出。"
     store.set_scene_video(scene_id, final_local)
     store.set_scene_state(scene_id, SceneState.COMPLETED)
     seg_note = f"（尾帧接续 {segments} 段连续镜头）" if segments > 1 else ""
@@ -1602,6 +1624,16 @@ def assemble_episode(project_id: str, voice: str = "", with_subtitles: bool = Tr
             logger.info("[assemble] 口型同步 %d 段", _ls["synced"])
     except Exception as _e:  # noqa: BLE001
         logger.info("[assemble] 口型后处理跳过: %s", _e)
+
+    # 音效后处理（门控休眠）：标了 sfx 的镜自动生成画面同步音效，挂 clip['sfx']（assembler 逐镜压在人声之下）。
+    # 引擎没配=no-op、零回归。这一步让「AI 自动配同步音效」并进一键合成，无需手点 🔊。
+    try:
+        from mirage.app.pipeline.foley_post import apply_sfx
+        _sx = apply_sfx(clips, clip_scenes)
+        if _sx.get("sfx"):
+            logger.info("[assemble] 自动音效 %d 段", _sx["sfx"])
+    except Exception as _e:  # noqa: BLE001
+        logger.info("[assemble] 音效后处理跳过: %s", _e)
 
     out = os.path.join(local, f"episode_{project_id}.mp4")
     try:

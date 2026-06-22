@@ -29,6 +29,10 @@ if os.path.isdir(REPO):
     os.chdir(REPO)
 
 import torch  # noqa: E402
+# 纯推理：关 autograd，避开 torch2.11 下 MMAudio 的 inference_mode 张量被 autograd 保存 backward 的 RuntimeError。
+# ★注意 grad 模式是【线程局部】的——这行只对主线程生效，真正的请求在 uvicorn 工作线程跑，
+#   所以必须在 foley() 处理函数里再包一层 with torch.no_grad()（见下），否则照样报错。
+torch.set_grad_enabled(False)
 import soundfile as sf  # noqa: E402
 from mmaudio.eval_utils import (all_model_cfg, generate, load_video,  # noqa: E402
                                 setup_eval_logging)
@@ -102,7 +106,8 @@ def foley(req: FoleyReq):
     if not (req.video and os.path.exists(req.video)):
         return {"status": "failed", "error": f"视频不存在: {req.video}"}
     try:
-        with _lock:
+        # ★no_grad 必须在请求线程内：grad 模式线程局部，模块级 set_grad_enabled 不覆盖 uvicorn 工作线程。
+        with _lock, torch.no_grad():
             dur = float(req.duration or 0) or _probe_duration(req.video) or 8.0
             dur = max(1.0, min(dur, DUR_CAP))
             # load_all_frames=False：只取 clip/sync 特征帧，不留整段原帧（省显存；不走 make_video）。

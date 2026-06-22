@@ -175,6 +175,11 @@ class JobManager:
                     await asyncio.to_thread(get_gpu_client().kill_inference)
                 except Exception:  # noqa: BLE001
                     logger.warning("[job] 超时后远程推理清理失败（不影响超时处理）")
+                try:   # ★ComfyUI 出片(默认链)：kill_inference 杀不到它 → 中断+卸显存，防僵尸占卡
+                    from mirage.app.pipeline.comfy_http import interrupt as _comfy_interrupt
+                    await asyncio.to_thread(_comfy_interrupt)
+                except Exception:  # noqa: BLE001
+                    pass
         except Exception as e:  # noqa: BLE001
             msg = f"{type(e).__name__}: {e}"
             await job._emit({"type": "error", "content": msg})
@@ -253,6 +258,13 @@ class JobManager:
         job.cancel_requested = True
         if job.task is not None:
             job.task.cancel()
+        # 已下发到 GPU 的 ComfyUI 渲染：本地取消协程不会停它 → 中断+卸显存，防僵尸占卡。
+        if job.kind in ("generate", "render", "batch_generate", "batch_finish", "one_click", "continuation"):
+            try:
+                from mirage.app.pipeline.comfy_http import interrupt as _comfy_interrupt
+                _comfy_interrupt()
+            except Exception:  # noqa: BLE001
+                pass
         return True
 
     def get(self, job_id: str) -> Optional[Job]:

@@ -46,6 +46,22 @@ def base_url(override: str = "") -> str:
     return base
 
 
+def interrupt(base: str = "") -> bool:
+    """中断 ComfyUI 当前正在执行的 prompt + 卸显存。用于任务取消/超时清理——
+    只停本地协程不够：ComfyUI 仍在 GPU 上跑那条 prompt（kill_inference 只杀 SSH 脚本，杀不到它）→
+    POST /interrupt 停它、/free 卸模型释放 VRAM，防僵尸占卡堆积。端点没配/不可达 → 返回 False，不抛。"""
+    try:
+        b = (base or settings.COMFYUI_BASE_URL or "").rstrip("/")
+        if not b:
+            return False
+        with httpx.Client(timeout=8) as c:
+            c.post(f"{b}/interrupt")
+            c.post(f"{b}/free", json={"unload_models": True, "free_memory": True})
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def available_loras(base: str) -> set[str] | None:
     """查 ComfyUI 实际可用的 LoRA 文件名集合（GET /object_info/LoraLoader）。
     取不到/解析失败返回 None —— 让调用方「无法核实就别拦」，避免把存在的 LoRA 误删/误判。"""

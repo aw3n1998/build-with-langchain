@@ -33,6 +33,11 @@ if settings.INDEXTTS2_ENABLED and settings.INDEXTTS2_BASE_URL:
     except Exception as e:  # noqa: BLE001
         logger.warning("[tts] IndexTTS2 注册失败: %s", e)
 
+# 没有任何配音引擎注册 → 成片会无声。大声告警（否则用户看到"成功"却没人声）。
+if not tts_registry.default_name:
+    logger.warning("[tts] ⚠ 没有可用配音引擎（COSYVOICE2_BASE_URL / INDEXTTS2 都没配）→ 成片将【无配音】！"
+                   "请配 CosyVoice2 端点（COSYVOICE2_BASE_URL）。")
+
 
 def _normalize(voice) -> dict:
     """把 voice(str|dict) 归一成 {engine, voice, ref_audio, voice_id, emotion}。

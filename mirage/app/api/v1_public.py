@@ -70,7 +70,9 @@ async def public_storyboard(project_id: str, req: PubStoryboard,
     created = []
     for i, sc in enumerate(scenes, 1):
         row = store.add_scene(project_id, i, narration=sc["narration"], image_prompt=sc["image_prompt"],
-                              motion_prompt=sc["motion_prompt"], title=sc["title"], subtitle=sc["subtitle"])
+                              motion_prompt=sc["motion_prompt"], title=sc["title"], subtitle=sc["subtitle"],
+                              seconds=sc.get("seconds") or 0, continue_prev=sc.get("continue_prev") or False,
+                              sfx=sc.get("sfx") or False)
         if sc.get("lipsync"):
             store.set_scene_lipsync(row["id"], True)
         created.append(row["id"])

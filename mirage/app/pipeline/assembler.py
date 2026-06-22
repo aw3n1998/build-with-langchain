@@ -418,17 +418,28 @@ def _assemble_in(work: str, clips: list[dict], out_path: str, ff: str,
             vf += f",tpad=stop_mode=clone:stop_duration={freeze:.3f}"
         part = os.path.join(work, f"part_{i}.mp4")
         args = [ff, "-y", "-hide_banner", "-i", clip]
+        n_in = 1   # input 0 = clip 视频
         if keep_audio:
             probe = _run([ff, "-hide_banner", "-i", clip])   # 探一下源片到底有没有音轨
             if "Audio:" in (probe.stderr or ""):
                 amap = "0:a"     # 源片自带音轨（S2V 人声），保留它
             else:                # 源片其实无音轨 → 补静音，保证每个 part 都有音轨(concat 一致)
-                args += ["-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100"]; amap = "1:a"
+                args += ["-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100"]; amap = f"{n_in}:a"; n_in += 1
         elif has_narr:
-            args += ["-i", mp3]; amap = "1:a"
+            args += ["-i", mp3]; amap = f"{n_in}:a"; n_in += 1
         else:
-            args += ["-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100"]; amap = "1:a"
-        args += ["-filter_complex", f"[0:v]{vf}[v]", "-map", "[v]", "-map", amap,
+            args += ["-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100"]; amap = f"{n_in}:a"; n_in += 1
+        # ★Foley 音效（门控休眠产物）：有 c["sfx"] → 逐镜把它压在人声/源音【之下】混音(amix)；没有则原样
+        _sfxp = c.get("sfx") if isinstance(c.get("sfx"), str) else ""
+        if _sfxp and os.path.isfile(_sfxp):
+            args += ["-i", _sfxp]
+            _g = float(c.get("sfx_gain") or 0.45)
+            fc = (f"[0:v]{vf}[v];[{amap}]volume=1.0[av];[{n_in}:a]volume={_g}[sv];"
+                  f"[av][sv]amix=inputs=2:duration=longest:normalize=0[aout]")
+            amap_out, n_in = "[aout]", n_in + 1
+        else:
+            fc, amap_out = f"[0:v]{vf}[v]", amap
+        args += ["-filter_complex", fc, "-map", "[v]", "-map", amap_out,
                  "-t", f"{out_dur:.3f}",
                  "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
                  "-pix_fmt", "yuv420p", "-c:a", "aac", "-ar", "44100", "-ac", "2", part]

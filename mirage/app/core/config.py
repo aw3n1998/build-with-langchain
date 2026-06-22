@@ -278,8 +278,8 @@ class Settings(BaseSettings):
     # 隐藏 Provider：不进用户模型下拉，由每镜「对口型」开关自动路由。端点门控同 COMFYUI_BASE_URL。
     COMFYUI_WORKFLOW_S2V: str = ""        # S2V workflow 模板路径；空=用仓库自带 comfyui_workflows/s2v_template.json
     COMFYUI_S2V_TTS_VOICE: str = "zh-CN-YunxiNeural"  # 对口型用的 TTS 音色（edge-tts；男声示例）
-    # 配音引擎（解耦：edge-tts 默认/保底，可插拔自托管克隆引擎；见 pipeline/tts_providers）。
-    TTS_PROVIDER_DEFAULT: str = "edge-tts"   # 默认配音引擎(edge-tts / indextts2)；裸音色 id 始终走 edge-tts
+    # 配音引擎（解耦：CosyVoice2 默认/保底，可插拔自托管克隆引擎；见 pipeline/tts_providers）。edge-tts 已弃用。
+    TTS_PROVIDER_DEFAULT: str = "cosyvoice2"  # 默认配音引擎(cosyvoice2 默认/保底；indextts2 可选)
     # IndexTTS2 自托管克隆+情感:配了 ENABLED+BASE_URL 才注册(没起 server 时整条链自动只用 edge-tts，不报错)。
     INDEXTTS2_ENABLED: bool = False
     INDEXTTS2_BASE_URL: str = ""             # 包装 server 端点(Colab 跑「§IndexTTS2」格写入，默认 http://127.0.0.1:8191)

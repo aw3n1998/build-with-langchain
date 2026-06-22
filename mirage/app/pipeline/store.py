@@ -79,6 +79,9 @@ CREATE TABLE IF NOT EXISTS scenes (
     dialogue      TEXT NOT NULL DEFAULT '',
     character     TEXT NOT NULL DEFAULT '',
     video_mode    TEXT NOT NULL DEFAULT 'i2v',
+    seconds       INTEGER NOT NULL DEFAULT 0,
+    continue_prev INTEGER NOT NULL DEFAULT 0,
+    sfx           INTEGER NOT NULL DEFAULT 0,
     state         TEXT NOT NULL DEFAULT 'DRAFT',
     selected_asset_id TEXT,
     video_path    TEXT,
@@ -198,6 +201,15 @@ class PipelineStore:
         if "video_mode" not in cols:  # 出片模式 i2v/t2v(t2v=文生视频，不出图不选图)：旧库补这一列
             conn.execute("ALTER TABLE scenes ADD COLUMN video_mode TEXT NOT NULL DEFAULT 'i2v'")
             logger.info("[PipelineStore] 迁移：scenes 补列 video_mode")
+        if "seconds" not in cols:    # 每镜 AI 自定时长(秒,0=回退全局帧数)：旧库补这一列
+            conn.execute("ALTER TABLE scenes ADD COLUMN seconds INTEGER NOT NULL DEFAULT 0")
+            logger.info("[PipelineStore] 迁移：scenes 补列 seconds")
+        if "continue_prev" not in cols:  # 是否续接上一镜尾帧(i2v续接,1=续接/0=新出)：旧库补这一列
+            conn.execute("ALTER TABLE scenes ADD COLUMN continue_prev INTEGER NOT NULL DEFAULT 0")
+            logger.info("[PipelineStore] 迁移：scenes 补列 continue_prev")
+        if "sfx" not in cols:        # 是否要环境/动作音效(Foley,1=要/0=不要)：旧库补这一列
+            conn.execute("ALTER TABLE scenes ADD COLUMN sfx INTEGER NOT NULL DEFAULT 0")
+            logger.info("[PipelineStore] 迁移：scenes 补列 sfx")
         # 项目级风格（每集一种风格）：旧库给 projects 补列
         pcols = {r[1] for r in conn.execute("PRAGMA table_info(projects)").fetchall()}
         for col in ("style_prompt", "trigger_word", "flux_lora", "negative_prompt", "default_size",
@@ -417,6 +429,9 @@ class PipelineStore:
         subtitle: str = "",
         dialogue: str = "",
         character: str = "",
+        seconds: int = 0,
+        continue_prev: bool = False,
+        sfx: bool = False,
     ) -> dict:
         if not self.get_project(project_id):
             raise ValueError(f"项目不存在: {project_id}")
@@ -425,10 +440,13 @@ class PipelineStore:
         with self._lock, self._conn() as conn:
             conn.execute(
                 """INSERT INTO scenes(id,project_id,scene_number,title,narration,subtitle,
-                   image_prompt,motion_prompt,dialogue,character,state,created_at,updated_at)
-                   VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                   image_prompt,motion_prompt,dialogue,character,seconds,continue_prev,sfx,
+                   state,created_at,updated_at)
+                   VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (sid, project_id, scene_number, title, narration, subtitle,
-                 image_prompt, motion_prompt, dialogue, character, SceneState.DRAFT.value, ts, ts),
+                 image_prompt, motion_prompt, dialogue, character,
+                 int(seconds or 0), 1 if continue_prev else 0, 1 if sfx else 0,
+                 SceneState.DRAFT.value, ts, ts),
             )
         return self.get_scene(sid)
 
@@ -556,10 +574,13 @@ class PipelineStore:
 
     def set_scene_video(self, scene_id: str, video_path: str) -> dict:
         with self._lock, self._conn() as conn:
-            conn.execute(
+            cur = conn.execute(
                 "UPDATE scenes SET video_path=?, updated_at=? WHERE id=?",
                 (video_path, _now(), scene_id),
             )
+            # 写回到不存在/已删的 scene_id 时 rowcount==0：出片结果会静默丢失 → 抛出来别吞。
+            if cur.rowcount == 0:
+                raise ValueError(f"set_scene_video 写回失败：分镜不存在 {scene_id}")
         return self.get_scene(scene_id)
 
     # ── 候选素材 ──────────────────────────────────────────────────

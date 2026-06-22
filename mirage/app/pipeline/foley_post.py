@@ -70,3 +70,34 @@ def generate_sfx(video_path: str, out_wav: str, prompt: str = "") -> dict:
         return {"applied": False, "note": f"音效生成失败: {(data or {}).get('error') or r.text[:200]}"}
     except Exception as e:  # noqa: BLE001
         return {"applied": False, "note": f"音效异常: {type(e).__name__}: {e}"}
+
+
+def apply_sfx(clips: list, scenes: list) -> dict:
+    """合成整集时自动配音效：对【标了 sfx 的镜】用 Foley 模型按画面生成同步音效，挂到 clip['sfx']
+    （assembler._assemble_in 会把它压在人声/旁白之下，逐镜混音）。与 [[apply_lipsync]] 同范式：
+    引擎未就绪 / 没标 sfx / 失败 → 该镜跳过，整体 no-op、零回归。"""
+    if not _engine_ready():
+        return {"sfx": 0, "skipped": len(clips or []), "note": "音效引擎未配置，全部跳过"}
+    done = skipped = 0
+    for clip, scene in zip(clips or [], scenes or []):
+        try:
+            if not bool(scene.get("sfx")):
+                skipped += 1
+                continue
+            src = clip.get("path") or ""
+            if not (src and os.path.exists(src)):
+                skipped += 1
+                continue
+            wav = os.path.splitext(src)[0] + "_sfx.wav"
+            prompt = (scene.get("motion_prompt") or scene.get("image_prompt") or "").strip()
+            r = generate_sfx(src, wav, prompt)
+            if r.get("applied"):
+                clip["sfx"] = r.get("output") or wav
+                done += 1
+            else:
+                logger.info("[sfx] 跳过 %s: %s", os.path.basename(src), r.get("note"))
+                skipped += 1
+        except Exception as e:  # noqa: BLE001
+            logger.info("[sfx] 异常跳过: %s", e)
+            skipped += 1
+    return {"sfx": done, "skipped": skipped}

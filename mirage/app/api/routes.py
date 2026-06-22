@@ -1304,14 +1304,32 @@ async def _batch_finish_events(req: BatchRequest):
         # ★t2v 不出图/不选图、从不写 selected_asset_id → 这里别要求它,否则 t2v 重渲指定镜恒空跑(点了没反应)。
         _t2v = (req.video_mode or "i2v") == "t2v"
         todo = [s for s in scenes if s["id"] in _ids and (_t2v or s.get("selected_asset_id"))]
+    from mirage.app.pipeline.pipeline_tools import render_continuation_one
+    from mirage.app.pipeline.auto_plan import _to_4kp1
+    from mirage.app.core.config import settings as _settings
+    _fps = int(_settings.COMFYUI_FPS or 16)
     for i, s in enumerate(todo, 1):
+        _cont = bool(s.get("continue_prev"))
         yield {"type": "batch_progress", "phase": "render",
                "scene_id": s["id"], "index": i, "total": len(todo),
-               "label": f"出片 {i}/{len(todo)}：#{s['scene_number']} {s.get('title') or ''}"}
+               "label": f"{'续接' if _cont else '出片'} {i}/{len(todo)}：#{s['scene_number']} {s.get('title') or ''}"}
         out = None
+        # ★每镜 AI 自定时长 → 帧数（Wan 要 4n+1）。AI 没给秒数则有台词按字数估、否则保持全局帧数。
+        sp = dict(params)
+        _sec = int(s.get("seconds") or 0)
+        if _sec <= 0:
+            _txt = ((s.get("narration") or "") + (s.get("dialogue") or "")).strip()
+            if _txt:
+                _sec = max(2, round(len(_txt) / 3.5) + 1)   # 中文 ~3.5 字/秒 + 1s 尾气口
+        if _sec > 0:
+            sp["frames"] = _to_4kp1(_sec * _fps)
+        # ★每镜续接：continue_prev=1 → i2v 接上一镜尾帧(render_continuation_one)；否则按原模式出片(t2v/i2v)
+        if _cont:
+            _render = lambda sid=s["id"], p=dict(sp): render_continuation_one(req.project_id, sid, p)
+        else:
+            _render = lambda sid=s["id"], p=dict(sp): do_render_scene_video(sid, "", req.model, p)
         try:
-            async for it in _run_with_logs(lambda sid=s["id"]: do_render_scene_video(
-                    sid, "", req.model, dict(params))):
+            async for it in _run_with_logs(_render):
                 if "_log" in it:
                     yield {"type": "log", "line": it["_log"]}
                 else:
@@ -1324,6 +1342,16 @@ async def _batch_finish_events(req: BatchRequest):
         for ev in events:
             yield ev
         yield {"type": "scene_ready", "scene_id": s["id"]}
+    # 全军覆没保护：一镜都没成功 → 别合成空集，直接报错（否则一键"成功"却出空片/缺画面）
+    try:
+        _done = [x for x in store.list_scenes(req.project_id)
+                 if x.get("state") == SceneState.COMPLETED.value]
+    except Exception:  # noqa: BLE001
+        _done = None
+    if _done is not None and not _done:
+        yield {"type": "tool_result", "name": "batch_finish",
+               "content": "出片全部失败：没有任何分镜成功出片，已中止合成。请检查出片后端（ComfyUI/显存）。"}
+        return
     # 合成整集
     yield {"type": "batch_progress", "phase": "assemble", "label": "合成整集（拼接 + 旁白 + 字幕）…"}
     try:
@@ -1549,7 +1577,9 @@ async def pipeline_auto_storyboard(req: AutoStoryboardRequest):
         row = store.add_scene(req.project_id, base + i, narration=sc["narration"],
                               image_prompt=sc["image_prompt"], motion_prompt=sc["motion_prompt"],
                               title=sc["title"], subtitle=sc["subtitle"], dialogue=sc.get("dialogue") or "",
-                              character=sc.get("character") or "")
+                              character=sc.get("character") or "",
+                              seconds=sc.get("seconds") or 0, continue_prev=sc.get("continue_prev") or False,
+                              sfx=sc.get("sfx") or False)
         if sc.get("lipsync"):
             store.set_scene_lipsync(row["id"], True)
         v = voice_of.get(sc.get("character"))
@@ -1639,7 +1669,9 @@ async def pipeline_auto_fill(req: AutoFillRequest):
         rrow = store.add_scene(pid, base + i, narration=sc["narration"],
                                image_prompt=sc["image_prompt"], motion_prompt=sc["motion_prompt"],
                                title=sc["title"], subtitle=sc["subtitle"], dialogue=sc.get("dialogue") or "",
-                               character=sc.get("character") or "")
+                               character=sc.get("character") or "",
+                               seconds=sc.get("seconds") or 0, continue_prev=sc.get("continue_prev") or False,
+                               sfx=sc.get("sfx") or False)
         if sc.get("lipsync"):
             store.set_scene_lipsync(rrow["id"], True)
         v = voice_of.get(sc.get("character"))
@@ -2165,6 +2197,16 @@ async def _scene_render_events(req: "SceneRenderRequest"):
         params["motion_prompts"] = seg_prompts
     if req.lipsync:
         params["lipsync"] = True
+    # 单镜重渲也吃 AI 自定的每镜时长（与批量出片一致；scene.seconds>0 才覆盖全局帧数）
+    try:
+        from mirage.app.pipeline.store import get_store as _gs
+        from mirage.app.pipeline.auto_plan import _to_4kp1
+        from mirage.app.core.config import settings as _settings
+        _sc = _gs().get_scene(req.scene_id) or {}
+        if int(_sc.get("seconds") or 0) > 0 and "frames" not in params:
+            params["frames"] = _to_4kp1(int(_sc["seconds"]) * int(_settings.COMFYUI_FPS or 16))
+    except Exception:  # noqa: BLE001
+        pass
     yield {"type": "batch_progress", "phase": "render", "scene_id": req.scene_id,
            "label": "对口型出片中…" if req.lipsync else "出片中…"}
     out = None
