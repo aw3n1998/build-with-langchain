@@ -1734,6 +1734,48 @@ def lipsync_scene_video(scene_id: str = "", voice: str = "") -> str:
             f"VIDFILE::{scene_id}::{r.get('output') or out}")
 
 
+def sfx_scene_video(scene_id: str = "") -> str:
+    """一键生成音效：把某分镜【已有成片】喂给视频→音频 Foley 模型，生成【与画面同步】的环境/动作音效
+    （如篮球真触地那帧才响），叠在【已有人声/旁白之下】(人声更响)，产物落独立新文件（不覆盖原片）。
+
+    音效引擎门控休眠：没配 FOLEY_ENGINE / server 没起 → 返回提示、不改片。画面提示词(motion/image_prompt)
+    会作为 text hint 引导音效类型。"""
+    from mirage.app.pipeline import foley_post, log_bus
+    from mirage.app.pipeline.assembler import mix_sfx_under_voice
+    if not foley_post._engine_ready():
+        return ("音效引擎未就绪：需在 .env 配 FOLEY_ENGINE=mmaudio + FOLEY_ENABLED + "
+                "FOLEY_BASE_URL，并起 Foley server(8194)。")
+    store = get_store()
+    scene = store.get_scene(scene_id)
+    if not scene:
+        return f"分镜不存在: {scene_id}"
+    src = (scene.get("video_path")
+           or os.path.join(video_dir(), f"{scene.get('scene_number', 0):02d}_{scene_id}.mp4"))
+    if not os.path.exists(src):
+        return f"音效失败：找不到成片 {src}（先出片/续接）。"
+    local_dir = video_dir()
+    sfx_wav = os.path.join(local_dir, f"{scene.get('scene_number', 0):02d}_{scene_id}_sfx.wav")
+    prompt = (scene.get("motion_prompt") or scene.get("image_prompt") or scene.get("narration") or "").strip()
+    log_bus.emit(f"[音效] {os.path.basename(src)} ← Foley 模型生成同步音效 …")
+    r = foley_post.generate_sfx(src, sfx_wav, prompt)
+    if not r.get("applied"):
+        return f"音效失败：{r.get('note')}"
+    out = os.path.splitext(src)[0] + "_sfx.mp4"
+    try:
+        mix_sfx_under_voice(src, r.get("output") or sfx_wav, out,
+                            sfx_gain=float(settings.FOLEY_SFX_GAIN or 0.45))
+    except Exception as e:  # noqa: BLE001
+        return f"音效失败：叠轨出错 {type(e).__name__}: {e}"
+    finally:
+        try:
+            os.remove(sfx_wav)
+        except OSError:
+            pass
+    store.set_scene_video(scene_id, out)
+    return (f"音效生成完成（Foley，叠在原人声之下，原片保留：{os.path.basename(src)}）。\n"
+            f"VIDFILE::{scene_id}::{out}")
+
+
 @tool
 def configure_character(trigger_word: str = "", flux_lora: str = "", negative_prompt: str = "") -> str:
     """配置本工作目录的角色/风格（写入 .agent/config.json），出图时自动注入，无需写死在提示词里。

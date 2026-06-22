@@ -2580,6 +2580,46 @@ async def pipeline_scene_lipsync(req: SceneLipsyncRequest):
         "render", lambda: _scene_lipsync_events(req), meta=meta)}
 
 
+class SceneSfxRequest(BaseModel):
+    scene_id: str
+    workspace: str | None = None
+    session_id: str | None = None
+
+
+async def _scene_sfx_events(req: "SceneSfxRequest"):
+    """单镜生成音效：把已有成片喂给视频→音频 Foley 模型，生成同步音效叠在人声之下。流式同出片。"""
+    from mirage.app.pipeline.runtime import set_workspace
+    from mirage.app.pipeline.pipeline_tools import sfx_scene_video
+    set_workspace(req.workspace)
+    yield {"type": "batch_progress", "phase": "render", "scene_id": req.scene_id,
+           "label": "生成音效中…"}
+    out = None
+    try:
+        async for it in _run_with_logs(lambda: sfx_scene_video(req.scene_id)):
+            if "_log" in it:
+                yield {"type": "log", "line": it["_log"]}
+            else:
+                out = it["_result"]
+    except Exception as e:  # noqa: BLE001
+        yield {"type": "tool_result", "name": "scene_sfx",
+               "content": f"音效失败: {type(e).__name__}: {e}"}
+        return
+    _clean, events = ai_service._extract_tool_markers(out or "")
+    for ev in events:
+        yield ev
+    yield {"type": "scene_ready", "scene_id": req.scene_id}
+
+
+@router.post("/pipeline/scene_sfx")
+async def pipeline_scene_sfx(req: SceneSfxRequest):
+    """单镜生成音效：后台任务，返回 job_id。"""
+    from mirage.app.services.job_manager import job_manager
+    meta = {"session_id": req.session_id, "scene_id": req.scene_id,
+            "project_id": _scene_project_id(req.scene_id, req.workspace)}
+    return {"job_id": job_manager.submit(
+        "render", lambda: _scene_sfx_events(req), meta=meta)}
+
+
 class SceneUploadContinueRequest(BaseModel):
     scene_id: str
     workspace: str | None = None

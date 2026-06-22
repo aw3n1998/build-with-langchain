@@ -226,6 +226,30 @@ def mux_audio_tracks(video_path: str, tracks: list, out_path: str) -> str:
     return out_path
 
 
+def mix_sfx_under_voice(video_path: str, sfx_path: str, out_path: str,
+                        *, sfx_gain: float = 0.45) -> str:
+    """把 Foley 生成的音效叠到视频【已有音轨之下】：原人声/旁白满音量，SFX 降到 sfx_gain 后 amix。
+    源片无音轨时直接挂 SFX。视频流 -c copy 不重编码。音效是按整段画面生成的(≈片长)，amix=longest+
+    -shortest 收到片长。给「生成音效」后处理用：人声更响、环境/动作音效垫底且与画面同步。"""
+    ff = _ffmpeg()
+    os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
+    has_voice = "Audio:" in (_run([ff, "-hide_banner", "-i", video_path]).stderr or "")
+    if has_voice:
+        fc = (f"[0:a]volume=1.0[v];[1:a]volume={float(sfx_gain)}[s];"
+              f"[v][s]amix=inputs=2:duration=longest:normalize=0[aout]")
+        args = [ff, "-y", "-hide_banner", "-i", video_path, "-i", sfx_path,
+                "-filter_complex", fc, "-map", "0:v", "-map", "[aout]",
+                "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-shortest", out_path]
+    else:
+        args = [ff, "-y", "-hide_banner", "-i", video_path, "-i", sfx_path,
+                "-map", "0:v", "-map", "1:a", "-c:v", "copy", "-c:a", "aac",
+                "-b:a", "192k", "-shortest", out_path]
+    res = _run(args, timeout=900)
+    if res.returncode != 0 or not os.path.exists(out_path) or os.path.getsize(out_path) == 0:
+        raise RuntimeError(f"音效叠轨失败: {(res.stderr or '')[-400:]}")
+    return out_path
+
+
 def extract_audio(video_path: str, out_wav: str) -> str:
     """抽取视频音轨为 wav（给口型 server 当驱动音）。无音轨返回 ""。"""
     probe = _run([_ffmpeg(), "-hide_banner", "-i", video_path])

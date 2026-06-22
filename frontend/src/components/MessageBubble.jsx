@@ -23,7 +23,7 @@ import { fileUrl, getVideoProviders, getImageProviders, getProject, batchGenerat
          deleteCandidate, deleteSceneVideo, sceneUndoAppend, deleteEpisode, suggestSegmentPrompts,
          autoStoryboard, autoFill, characters as charactersApi, templatesApi,
          loraCreate, loraAction, loraUploadImage, loraUploadRef, loraPreview,
-         suggestContinuation, sceneGenerate, sceneRender, sceneAppend, sceneLipsync,
+         suggestContinuation, sceneGenerate, sceneRender, sceneAppend, sceneLipsync, sceneSfx,
          cancelJob, listActiveJobs,
          projectStyle, sceneAdd, sceneDelete, listLoras,
          oneClick, autoSelect, uploadCharacterFace, uploadCharacterVoice, getLoadedLoras, getProviderHealth } from '../api'
@@ -372,7 +372,7 @@ export function ProductionPanel({ message, workspace, sessionId }) {
   const [appendCount, setAppendCount] = useState({})    // {sceneId: 本次追加几段}
   const [appendLang, setAppendLang] = useState({})      // {sceneId: 'zh'|'en'} 推荐语言
   const [appendSugBusy, setAppendSugBusy] = useState({})// {sceneId: AI 推荐请求中}
-  const [sceneLipsync, setSceneLipsync] = useState({})  // {sceneId: 对口型开关(本地态，叠加 scene.lipsync)}
+  const [sceneLipsyncOn, setSceneLipsyncOn] = useState({})  // {sceneId: 对口型开关(本地态，叠加 scene.lipsync)}（重命名避免遮蔽同名 API 导入 sceneLipsync）
   // 剧集级风格（每集一种风格）+ 自助新增分镜
   const [showStyle, setShowStyle] = useState(false)
   const [style, setStyle] = useState(null)              // {style_prompt,trigger_word,flux_lora,negative_prompt,default_size}
@@ -457,7 +457,7 @@ export function ProductionPanel({ message, workspace, sessionId }) {
     const segs = sceneSegments[sceneId] ?? segments   // 单镜段数优先，没设则用全局默认
     // 多段时带上每段独立运镜提示词（AI 生成/手改）；单段不带（用分镜自身的 motion_prompt）
     const mp = segs > 1 ? (sceneSegPrompts[sceneId] || []).slice(0, segs) : []
-    const ls = sceneLipsync[sceneId] ?? !!(proj?.scenes?.find(x => x.scene_id === sceneId)?.lipsync)
+    const ls = sceneLipsyncOn[sceneId] ?? !!(proj?.scenes?.find(x => x.scene_id === sceneId)?.lipsync)
     // 首镜可切 i2v 起头(firstFrameMode[sceneId]==='i2v'):后端 do_render_scene_video 走 i2v 分支、用该镜已选关键帧当首帧
     const ffMode = firstFrameMode[sceneId] === 'i2v' ? 'i2v' : 't2v'
     return { scene_id: sceneId, workspace, session_id: sessionId,
@@ -543,6 +543,20 @@ export function ProductionPanel({ message, workspace, sessionId }) {
     finally { delete sceneJob.current[sceneId]; setSceneBusy(p => { const n = { ...p }; delete n[sceneId]; return n }) }
   }
 
+  // 「生成音效」：把这镜【已有成片】喂给视频→音频 Foley 模型，生成与画面同步的环境/动作音效，叠在已有人声之下。需起 Foley server。
+  const runSfx = async (sceneId) => {
+    if (busy || sceneBusy[sceneId]) return
+    startAt.current[sceneId] = Date.now()
+    setLogs([]); setShowLogs(true)
+    setSceneBusy(p => ({ ...p, [sceneId]: 'sfx' }))
+    try {
+      const jobId = await sceneSfx({ scene_id: sceneId, workspace, session_id: sessionId })
+      sceneJob.current[sceneId] = jobId
+      await consume(jobId)
+    } catch (e) { setProgress('生成音效失败：' + String(e.message || e)) }
+    finally { delete sceneJob.current[sceneId]; setSceneBusy(p => { const n = { ...p }; delete n[sceneId]; return n }) }
+  }
+
   // 「上传关键帧」(首镜 i2v 起头用)：上传一张图当该镜首帧候选并自动选中 → 之后「出片(i2v·锁首帧)」从它 i2v 动起来。
   // 复用 upload_candidate(登记候选)+select(选中)两步，落到「该镜有一张 selected 候选图」这个 i2v 出片前提。
   const uploadKeyframe = async (sceneId, file) => {
@@ -594,7 +608,7 @@ export function ProductionPanel({ message, workspace, sessionId }) {
 
   // 对口型开关：本地立即生效 + 持久化到分镜（survives 刷新）
   const toggleLipsync = async (sceneId, val) => {
-    setSceneLipsync(p => ({ ...p, [sceneId]: val }))
+    setSceneLipsyncOn(p => ({ ...p, [sceneId]: val }))
     try { await updateScenePrompts(sceneId, { lipsync: val }, workspace) } catch { /* 本地态仍生效 */ }
   }
 
@@ -1824,6 +1838,13 @@ export function ProductionPanel({ message, workspace, sessionId }) {
                         background: sceneBusy[s.scene_id] === 'lipsync' ? 'rgba(34,197,94,0.4)' : 'rgba(34,197,94,0.14)',
                         color: '#86efac', fontSize: 11.5, cursor: (busy || !!sceneBusy[s.scene_id]) ? 'default' : 'pointer',
                       }}>{sceneBusy[s.scene_id] === 'lipsync' ? '缝嘴中…' : '👄 口型同步'}</button>
+                    <button onClick={() => runSfx(s.scene_id)} disabled={busy || !!sceneBusy[s.scene_id]}
+                      title="生成音效：把这镜成片喂给视频→音频模型(Foley/MMAudio)，生成与画面同步的环境/动作音效(如篮球真触地那帧才响)，叠在已有人声之下(人声更响)。产物为独立新文件、原片保留。需起 Foley server(8194)。"
+                      style={{
+                        height: 26, padding: '0 12px', borderRadius: 6, border: '1px solid rgba(245,158,11,0.5)',
+                        background: sceneBusy[s.scene_id] === 'sfx' ? 'rgba(245,158,11,0.4)' : 'rgba(245,158,11,0.14)',
+                        color: '#fcd34d', fontSize: 11.5, cursor: (busy || !!sceneBusy[s.scene_id]) ? 'default' : 'pointer',
+                      }}>{sceneBusy[s.scene_id] === 'sfx' ? '配音效中…' : '🔊 生成音效'}</button>
                   </div>
                 </div>
               ) : (

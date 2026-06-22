@@ -256,6 +256,8 @@ export async function sceneRender(params) { return submitJob('/pipeline/scene_re
 export async function sceneAppend(params) { return submitJob('/pipeline/scene_append', params) }
 // 单镜口型同步：把已有成片按音轨/旁白做 LatentSync 缝嘴（独立新文件，原片保留）
 export async function sceneLipsync(params) { return submitJob('/pipeline/scene_lipsync', params) }
+// 单镜生成音效：把已有成片喂给视频→音频 Foley 模型，生成与画面同步的音效，叠在人声之下（独立新文件，原片保留）
+export async function sceneSfx(params) { return submitJob('/pipeline/scene_sfx', params) }
 // 列出某项目在跑/排队的任务（刷新后面板重连用）
 export async function listActiveJobs(projectId) {
   const r = await fetch(`${getBase()}/pipeline/jobs?project_id=${encodeURIComponent(projectId)}`)

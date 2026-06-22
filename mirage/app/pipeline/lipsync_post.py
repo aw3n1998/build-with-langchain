@@ -49,6 +49,15 @@ def lipsync_video(video_path: str, audio_path: str, out_path: str) -> dict:
                 return {"applied": False, "note": f"片长超过 LIPSYNC_MAX_SECONDS={cap}s，跳过缝嘴"}
         except Exception:  # noqa: BLE001
             pass
+    # 缝嘴前先卸 ComfyUI 显存：LatentSync(~20G) 与出片(~20G) 抢同一张卡，
+    # 页面点缝嘴时 ComfyUI 模型还占着会 OOM → 先 POST /free 把它的模型卸了（下次出片自动重载）。
+    try:
+        _cb = (settings.COMFYUI_BASE_URL or "").strip().rstrip("/")
+        if _cb:
+            import httpx as _hx
+            _hx.post(f"{_cb}/free", json={"unload_models": True, "free_memory": True}, timeout=10)
+    except Exception:  # noqa: BLE001
+        pass
     try:
         import httpx
         payload = {"video": video_path, "audio": audio_path, "output": out_path,

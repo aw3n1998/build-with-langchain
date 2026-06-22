@@ -295,6 +295,14 @@ class Settings(BaseSettings):
     LATENTSYNC_STEPS: int = 20                # 采样步数 20~50
     LATENTSYNC_GUIDANCE: float = 1.5          # 引导强度 1.0~3.0
     LIPSYNC_MAX_SECONDS: float = 0.0          # >0 时跳过超长片(防 OOM)；0=不限
+    # 音效生成（视频→音频 Foley 模型，出片后处理，引擎无关可插拔；不做 VideoProvider）。
+    # 模型「看」画面生成与动作同步的音效（如篮球真触地那帧才响），叠在人声之下。没配/server 没起=自动跳过。
+    FOLEY_ENGINE: str = ""                     # ""=关 / "mmaudio"
+    FOLEY_ENABLED: bool = False               # 门控：配了 ENABLED+BASE_URL 才会尝试生成
+    FOLEY_BASE_URL: str = ""                  # 包装 server 端点，默认 http://127.0.0.1:8194
+    FOLEY_STEPS: int = 25                     # 采样步数
+    FOLEY_GUIDANCE: float = 4.5               # cfg 强度
+    FOLEY_SFX_GAIN: float = 0.45              # 音效相对人声的音量(0~1，<1=压在人声之下)
     # 本机产物落地目录
     NP2V_DB_PATH: Optional[str] = None
     NP2V_LOCAL_OUT: Optional[str] = None
