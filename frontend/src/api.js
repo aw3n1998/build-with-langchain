@@ -354,6 +354,19 @@ export async function uploadCharacterFace(charId, projectId, file, workspace = n
   return r.json()
 }
 
+// 音色克隆(锁声)：给某角色上传一段参考音 → 写 characters.ref_audio_path + voice_engine（配音时全程用这段克隆音色）
+export async function uploadCharacterVoice(charId, projectId, file, engine = 'indextts2', workspace = null) {
+  const form = new FormData()
+  form.append('char_id', charId)
+  form.append('project_id', projectId)
+  form.append('workspace', workspace || '')
+  form.append('engine', engine || 'indextts2')
+  form.append('file', file)
+  const r = await fetch(`${getBase()}/pipeline/character_voice`, { method: 'POST', body: form })
+  if (!r.ok) throw new Error(`status ${r.status}`)
+  return r.json()
+}
+
 // 列出本项目【已配置的角色 LoRA】(t2v/i2v)——前端核对挂没挂(ComfyUI 按 workflow 文件名加载,无 server config 可读)
 export async function getLoadedLoras(projectId = '', workspace = null) {
   const qs = new URLSearchParams()

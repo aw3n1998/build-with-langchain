@@ -26,7 +26,7 @@ import { fileUrl, getVideoProviders, getImageProviders, getProject, batchGenerat
          suggestContinuation, sceneGenerate, sceneRender, sceneAppend,
          cancelJob, listActiveJobs,
          projectStyle, sceneAdd, sceneDelete, listLoras,
-         oneClick, autoSelect, uploadCharacterFace, getLoadedLoras, getProviderHealth } from '../api'
+         oneClick, autoSelect, uploadCharacterFace, uploadCharacterVoice, getLoadedLoras, getProviderHealth } from '../api'
 
 /**
  * MessageBubble — 消息渲染
@@ -778,6 +778,14 @@ export function ProductionPanel({ message, workspace, sessionId }) {
     try { await uploadCharacterFace(charId, proj?.id || '', file, workspace); await load(); setProgress('参考脸已上传（出片勾「强锁脸(Stand-In)」即用它锁这张脸）') }
     catch (e) { setProgress('参考脸上传失败：' + String(e.message || e)) }
   }
+  // 音色克隆(锁声)：给某角色传一段参考音(几秒~30s 真人录音)→ 写 characters.ref_audio_path + voice_engine。
+  // 之后配音全程用这段克隆音色(对口型镜/旁白镜同源→音色一致)；没起克隆 server 时后端自动回退 edge-tts。
+  const charVoiceUpload = async (charId, file) => {
+    if (!file) return
+    setProgress('上传参考音中…')
+    try { await uploadCharacterVoice(charId, proj?.id || '', file, 'indextts2', workspace); await load(); setProgress('参考音已上传（该角色全程用这段克隆音色；想换回预置音选上面的音色下拉即可）') }
+    catch (e) { setProgress('参考音上传失败：' + String(e.message || e)) }
+  }
   // 查本项目已配置的角色 LoRA(t2v/i2v)——ComfyUI 按文件名加载,读项目级配置
   const checkLoadedLoras = async () => {
     setLoraStatusBusy(true)
@@ -1227,9 +1235,10 @@ export function ProductionPanel({ message, workspace, sessionId }) {
                 style={{ ...inputStyle, height: 28, width: '100%', boxSizing: 'border-box', marginBottom: 4 }} />
               <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                 <span style={{ fontSize: 11, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>音色</span>
-                <select defaultValue={c.voice || ''} onChange={e => charOp('update', { char_id: c.id, voice: e.target.value })}
-                  title="该角色的配音音色（声音圣经）；旁白/多角色对话出现该角色台词时，按此音色配音"
-                  style={{ ...inputStyle, height: 28, flex: 1 }}>
+                <select defaultValue={c.voice || ''}
+                  onChange={e => charOp('update', { char_id: c.id, voice: e.target.value, voice_engine: '' })}
+                  title="该角色的预置配音音色（声音圣经）；选它=用 edge-tts 预置音（会关掉克隆）。想要真人感克隆音色请点右边「传参考音」。"
+                  style={{ ...inputStyle, height: 28, flex: 1, opacity: c.voice_engine ? 0.5 : 1 }}>
                   {VOICES.map(v => <option key={v.v} value={v.v}>{v.label}</option>)}
                 </select>
                 <label title="传一张该角色清晰正脸 → 出片勾「强锁脸(Stand-In)」即用它跨镜锁定这张脸(免训练)。"
@@ -1237,6 +1246,12 @@ export function ProductionPanel({ message, workspace, sessionId }) {
                   {c.ref_image_path ? '换参考脸 ✓' : '传参考脸'}
                   <input type="file" accept="image/*" style={{ display: 'none' }}
                     onChange={e => { charFaceUpload(c.id, (e.target.files || [])[0]); e.target.value = '' }} />
+                </label>
+                <label title="传一段该角色参考音(几秒~30s 清晰真人录音) → 克隆专属音色，全程锁声(对口型镜/旁白镜同源、音色一致)。没起克隆 server 时自动回退预置音。"
+                  style={{ ...miniBtn2, cursor: 'pointer', color: c.ref_audio_path ? '#34d399' : undefined, whiteSpace: 'nowrap' }}>
+                  {c.ref_audio_path ? '换参考音 ✓' : '传参考音'}
+                  <input type="file" accept="audio/*" style={{ display: 'none' }}
+                    onChange={e => { charVoiceUpload(c.id, (e.target.files || [])[0]); e.target.value = '' }} />
                 </label>
                 <button onClick={() => charOp('delete', { char_id: c.id })} disabled={charsBusy}
                   style={{ ...miniBtn2, color: '#fca5a5', borderColor: 'rgba(239,68,68,0.4)' }}>删除</button>
