@@ -899,6 +899,42 @@ async def pipeline_character_face(
     return {"success": True, "char_id": char_id, "ref_image_path": face_path}
 
 
+@router.post("/pipeline/character_voice")
+async def pipeline_character_voice(
+    char_id: str = Form(...),
+    project_id: str = Form(default=""),
+    workspace: str = Form(default=""),
+    engine: str = Form(default="indextts2"),
+    file: UploadFile = File(...),
+):
+    """音色克隆(锁声)：给某角色上传一段参考音 → 存盘 + 写 characters.ref_audio_path + voice_engine。
+
+    之后配音时该角色全程用这段克隆音色（对口型镜/旁白镜同源 → 音色一致），与「脸锁身份」对称。
+    引擎可插拔(默认 indextts2，由 tts_providers 路由)；没起克隆 server 时自动回退 edge-tts。
+    合规红线：仅用你有权使用的声音（本人/配音演员/授权）。
+    """
+    import os as _os
+    import pathlib
+    from uuid import uuid4
+    from mirage.app.pipeline.runtime import set_workspace, video_dir
+    from mirage.app.pipeline.store import get_store
+    suffix = pathlib.Path(file.filename or "").suffix.lower()
+    if suffix not in {".wav", ".mp3", ".m4a", ".flac", ".ogg", ".aac"}:
+        raise HTTPException(status_code=400, detail=f"不支持的音频类型 {suffix}（支持 wav/mp3/m4a/flac/ogg/aac）")
+    set_workspace(workspace or None)
+    store = get_store()
+    if not store.get_character(char_id):
+        raise HTTPException(status_code=404, detail=f"角色不存在: {char_id}")
+    voice_dir = _os.path.join(video_dir(), "char_voices")
+    _os.makedirs(voice_dir, exist_ok=True)
+    ref_path = _os.path.join(voice_dir, f"char_{char_id[:8]}_{uuid4().hex[:6]}{suffix}")
+    with open(ref_path, "wb") as f:
+        f.write(await file.read())
+    eng = (engine or "indextts2").strip() or "indextts2"
+    store.update_character(char_id, ref_audio_path=ref_path, voice_engine=eng)
+    return {"success": True, "char_id": char_id, "ref_audio_path": ref_path, "voice_engine": eng}
+
+
 @router.get("/pipeline/loaded_loras")
 async def pipeline_loaded_loras(project_id: str = "", workspace: str = ""):
     """列出本项目【已配置的角色 LoRA】(t2v / i2v)，供前端核对挂没挂。
@@ -1645,6 +1681,9 @@ class CharacterRequest(BaseModel):
     ref_image_path: str | None = None   # 参考脸图路径(PuLID 单脸自举/展示)
     trained_lora_id: str | None = None  # 关联已训 LoRA(lora_trainings.id)
     trigger_word: str | None = None     # 多角色 LoRA 触发词(t2v 出片/打 caption 用;空回退角色名 slug)
+    voice_engine: str | None = None     # 配音引擎:''=edge-tts 预置音 / 'indextts2' 等克隆(锁声);可在此切换/关闭克隆
+    ref_audio_path: str | None = None   # 克隆参考音路径(一般由 /pipeline/character_voice 上传写入)
+    voice_id: str | None = None         # 克隆 speaker id(若引擎用音色库 id)
 
 
 @router.post("/pipeline/characters")
@@ -1655,11 +1694,14 @@ async def pipeline_characters(req: CharacterRequest):
         raise HTTPException(status_code=404, detail="项目不存在")
     act = (req.action or "list").lower()
     if act == "add":
-        store.add_character(req.project_id, req.name or "", req.appearance or "", req.voice or "")
+        store.add_character(req.project_id, req.name or "", req.appearance or "", req.voice or "",
+                            voice_engine=req.voice_engine or "", ref_audio_path=req.ref_audio_path or "",
+                            voice_id=req.voice_id or "")
     elif act == "update" and req.char_id:
         store.update_character(req.char_id, name=req.name, appearance=req.appearance, voice=req.voice,
                                ref_image_path=req.ref_image_path, trained_lora_id=req.trained_lora_id,
-                               trigger_word=req.trigger_word)
+                               trigger_word=req.trigger_word, voice_engine=req.voice_engine,
+                               ref_audio_path=req.ref_audio_path, voice_id=req.voice_id)
     elif act == "delete" and req.char_id:
         store.delete_character(req.char_id)
     return {"project_id": req.project_id, "characters": store.list_characters(req.project_id)}

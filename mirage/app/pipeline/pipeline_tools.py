@@ -1461,12 +1461,21 @@ def assemble_episode(project_id: str, voice: str = "", with_subtitles: bool = Tr
         return "项目下没有分镜。"
 
     local = video_dir()
-    # 角色音色表(声音圣经)：说话人名 → 该角色 TTS 音色，供多角色对话逐句配音
+    # 角色音色表(声音圣经)：说话人名 → 该角色 TTS 音色 spec，供多角色对话逐句 + 单镜旁白配音。
+    # 解耦:克隆引擎角色 → spec(dict,带 engine/ref_audio/voice_id);edge 预置音色 → 裸字符串(向后兼容)。
+    # 合成器(_tts/_tts_dialogue→synth_tts)按 spec 形态自动路由到对应 TTS 引擎,这里不认识任何引擎。
     char_voice = {}
     try:
         for _c in (store.list_characters(project_id) or []):
             _nm = (_c.get("name") or "").strip()
-            if _nm:
+            if not _nm:
+                continue
+            _eng = (_c.get("voice_engine") or "").strip()
+            if _eng:   # 克隆引擎(锁声):带参考音/voice_id → spec dict
+                char_voice[_nm] = {"engine": _eng, "voice": (_c.get("voice") or "").strip(),
+                                   "ref_audio": (_c.get("ref_audio_path") or "").strip(),
+                                   "voice_id": (_c.get("voice_id") or "").strip()}
+            else:      # edge-tts 预置音色 id(裸字符串)
                 char_voice[_nm] = (_c.get("voice") or "").strip()
     except Exception:  # noqa: BLE001
         pass
@@ -1476,9 +1485,13 @@ def assemble_episode(project_id: str, voice: str = "", with_subtitles: bool = Tr
         if not os.path.isfile(p):
             missing.append(f"#{s['scene_number']} {s['title'] or s['id']}（状态 {s['state']}）")
             continue
+        # 单镜旁白音色:该镜角色有克隆引擎→用克隆 spec(锁声);否则用每镜 scene.voice(edge 覆盖)或角色 edge 音色。
+        _scene_char = (s.get("character") or "").strip()
+        _cv = char_voice.get(_scene_char)
+        _clip_voice = _cv if isinstance(_cv, dict) else ((s.get("voice") or "").strip() or (_cv or ""))
         clip = {"path": p, "narration": s.get("narration") or "",
                 "subtitle": s.get("subtitle") or "", "title": s.get("title") or "",
-                "voice": s.get("voice") or "",   # 每镜音色(角色圣经)；空=用全集默认
+                "voice": _clip_voice,   # 每镜音色 spec(str=edge id / dict=克隆)；空=用全集默认
                 # 对口型(S2V)片自带人声→别重配音(否则口型错位)；但 t2v 片无音轨,必须走 TTS 配音 → 不 keep_audio
                 "keep_audio": bool(s.get("lipsync")) and (s.get("video_mode") or "i2v") != "t2v"}
         # 多角色对话「说话人：台词」逐行 → 各自匹配角色音色；字幕用对话原文。仅非对口型镜生效。

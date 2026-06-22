@@ -93,7 +93,10 @@ CREATE TABLE IF NOT EXISTS characters (
     project_id  TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
     name        TEXT NOT NULL DEFAULT '',
     appearance  TEXT NOT NULL DEFAULT '',
-    voice       TEXT NOT NULL DEFAULT '',
+    voice       TEXT NOT NULL DEFAULT '',       -- edge-tts 预置音色 id(向后兼容);克隆时仅作回退
+    voice_engine    TEXT NOT NULL DEFAULT '',   -- 配音引擎:''=edge-tts 预置音 / 'indextts2' 等克隆引擎
+    ref_audio_path  TEXT NOT NULL DEFAULT '',   -- 角色克隆参考音本地路径(与 ref_image_path 对称:脸锁身份/音锁音色)
+    voice_id        TEXT NOT NULL DEFAULT '',   -- 克隆 speaker id(若引擎用音色库 id 而非参考音)
     trigger_word    TEXT NOT NULL DEFAULT '',   -- 多角色 LoRA 触发词(空=回退角色名 slug)
     ref_image_path  TEXT NOT NULL DEFAULT '',   -- 参考脸图(PuLID 单脸自举/展示)
     trained_lora_id TEXT NOT NULL DEFAULT '',   -- 已训 LoRA → lora_trainings.id(反向链)
@@ -204,7 +207,8 @@ class PipelineStore:
                 logger.info("[PipelineStore] 迁移：projects 补列 %s", col)
         # 角色参考脸 + 已训 LoRA 反向链 + 多角色 LoRA 触发词：旧库给 characters 补列
         ccols = {r[1] for r in conn.execute("PRAGMA table_info(characters)").fetchall()}
-        for col in ("ref_image_path", "trained_lora_id", "trigger_word"):
+        for col in ("ref_image_path", "trained_lora_id", "trigger_word",
+                    "voice_engine", "ref_audio_path", "voice_id"):   # 克隆音色:旧库补列(锁声)
             if col not in ccols:
                 conn.execute(f"ALTER TABLE characters ADD COLUMN {col} TEXT NOT NULL DEFAULT ''")
                 logger.info("[PipelineStore] 迁移：characters 补列 %s", col)
@@ -282,15 +286,17 @@ class PipelineStore:
         return [dict(r) for r in rows]
 
     def add_character(self, project_id: str, name: str, appearance: str = "", voice: str = "",
-                      ref_image_path: str = "", trained_lora_id: str = "") -> dict:
+                      ref_image_path: str = "", trained_lora_id: str = "",
+                      voice_engine: str = "", ref_audio_path: str = "", voice_id: str = "") -> dict:
         if not self.get_project(project_id):
             raise ValueError(f"项目不存在: {project_id}")
         cid = _uid()
         with self._lock, self._conn() as conn:
             conn.execute(
-                "INSERT INTO characters(id,project_id,name,appearance,voice,ref_image_path,trained_lora_id,created_at) "
-                "VALUES(?,?,?,?,?,?,?,?)",
+                "INSERT INTO characters(id,project_id,name,appearance,voice,voice_engine,ref_audio_path,voice_id,"
+                "ref_image_path,trained_lora_id,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
                 (cid, project_id, name or "", appearance or "", voice or "",
+                 voice_engine or "", ref_audio_path or "", voice_id or "",
                  ref_image_path or "", trained_lora_id or "", _now()),
             )
         return self.get_character(cid)
@@ -303,11 +309,13 @@ class PipelineStore:
     def update_character(self, char_id: str, *, name: str | None = None,
                          appearance: str | None = None, voice: str | None = None,
                          ref_image_path: str | None = None, trained_lora_id: str | None = None,
-                         trigger_word: str | None = None) -> dict:
+                         trigger_word: str | None = None, voice_engine: str | None = None,
+                         ref_audio_path: str | None = None, voice_id: str | None = None) -> dict:
         sets, params = [], []
         for col, val in (("name", name), ("appearance", appearance), ("voice", voice),
                          ("ref_image_path", ref_image_path), ("trained_lora_id", trained_lora_id),
-                         ("trigger_word", trigger_word)):
+                         ("trigger_word", trigger_word), ("voice_engine", voice_engine),
+                         ("ref_audio_path", ref_audio_path), ("voice_id", voice_id)):
             if val is not None:
                 sets.append(f"{col}=?"); params.append(val)
         if sets:

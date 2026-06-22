@@ -54,20 +54,14 @@ def _duration(path: str) -> float:
     return h * 3600 + mi * 60 + s
 
 
-def _tts(text: str, out_mp3: str, voice: str = DEFAULT_VOICE) -> bool:
-    """edge-tts 文本转旁白 mp3。失败（断网/未安装）返回 False，由调用方退化处理。"""
-    try:
-        import asyncio
-        import edge_tts
-
-        async def gen():
-            await edge_tts.Communicate(text, voice).save(out_mp3)
-
-        asyncio.run(gen())
-        return os.path.exists(out_mp3) and os.path.getsize(out_mp3) > 1000
-    except Exception as e:  # noqa: BLE001
-        logger.warning("[assembler] TTS 失败（退化为无旁白）: %s", e)
-        return False
+def _tts(text: str, out_mp3: str, voice="") -> bool:
+    """文本转配音(mp3/wav)。voice = edge-tts 音色 id(str) 或克隆音色 spec(dict)。
+    引擎解耦到 tts_providers 注册表(edge-tts 默认，IndexTTS2 等可插拔)；引擎失败自动回退 edge-tts，
+    再不行返回 False 由调用方退化为无旁白。换/加引擎不用动这里。"""
+    from mirage.app.pipeline.tts_providers import synth_tts
+    if isinstance(voice, str) and not voice.strip():
+        voice = DEFAULT_VOICE
+    return synth_tts(text or "", out_mp3, voice or DEFAULT_VOICE)
 
 
 def _video_size(path: str) -> tuple[int, int]:
@@ -293,7 +287,8 @@ def _tts_dialogue(lines: list[dict], out_mp3: str, ff: str, default_voice: str) 
         txt = (ln.get("text") or "").strip()
         if not txt:
             continue
-        v = (ln.get("voice") or "").strip() or default_voice
+        _lv = ln.get("voice")   # dict=克隆 spec / str=edge id;dict 不能 .strip()
+        v = _lv if isinstance(_lv, dict) else ((_lv or "").strip() or default_voice)
         p = os.path.join(base, f"_dlg_{idx}.mp3")
         if _tts(txt, p, v) and os.path.isfile(p) and os.path.getsize(p) > 0:
             parts.append(p)
@@ -335,7 +330,8 @@ def _assemble_in(work: str, clips: list[dict], out_path: str, ff: str,
             out_dur, freeze = vd, 0.0     # 用片子自带音轨，时长以视频为准，不冻结
         else:
             mp3 = os.path.join(work, f"narr_{i}.mp3")
-            v = (c.get("voice") or "").strip() or voice   # 每镜音色(角色圣经)优先，否则全集默认
+            _v = c.get("voice")   # 每镜音色:dict=克隆 spec / str=edge id;dict 不能 .strip()
+            v = _v if isinstance(_v, dict) else ((_v or "").strip() or voice)
             _dlg = c.get("dialogue") or []                 # 多角色对话：逐句各自音色拼一条；否则走单段旁白
             has_narr = _tts_dialogue(_dlg, mp3, ff, v) if _dlg else (bool(narration) and _tts(narration, mp3, v))
             ad = _duration(mp3) if has_narr else 0.0
