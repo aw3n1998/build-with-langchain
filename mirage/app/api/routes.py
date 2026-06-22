@@ -1158,7 +1158,9 @@ async def pipeline_project(project_id: str, workspace: str | None = None):
     scenes = []
     for s in sorted(st["scenes"], key=lambda x: x["scene_number"]):
         cands = _scene_candidates(store, s["id"])
-        vlocal = os.path.join(vdir, f"{s['scene_number']:02d}_{s['id']}.mp4")
+        # 以 DB video_path 为准：缝嘴/换脸/转规格/续接会落到独立文件名，约定路径 {num}_{id}.mp4 取不到 → 显示旧片。
+        _vp = (s.get("video_path") or "").strip()
+        vlocal = _vp if (_vp and os.path.exists(_vp)) else os.path.join(vdir, f"{s['scene_number']:02d}_{s['id']}.mp4")
         scenes.append({
             "scene_id": s["id"], "scene_number": s["scene_number"],
             "title": s.get("title") or "", "state": s["state"],
