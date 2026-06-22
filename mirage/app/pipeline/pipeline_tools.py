@@ -651,6 +651,29 @@ def _do_render_lipsync_s2v(scene_id, scene, asset, prompt, params) -> str:
             f"已下载到本机: {final_local}\nVIDFILE::{scene_id}::{final_local}")
 
 
+def _scene_voice_spec(store, scene, emotion: str = ""):
+    """该镜配音音色 spec：角色配了克隆引擎→克隆 spec(dict,带 emotion)；否则 scene.voice / S2V 默认 edge 音色。
+    复刻 assemble_episode 的角色音色解析（声音圣经），供续接段配音复用（续接不经过 assemble_episode）。"""
+    name = (scene.get("character") or "").strip()
+    pid = (scene.get("project_id") or "").strip()
+    if name and pid:
+        try:
+            for c in (store.list_characters(pid) or []):
+                if (c.get("name") or "").strip() != name:
+                    continue
+                eng = (c.get("voice_engine") or "").strip()
+                if eng:   # 克隆引擎(锁声)→ spec dict，带本段情感
+                    return {"engine": eng, "voice": (c.get("voice") or "").strip(),
+                            "ref_audio": (c.get("ref_audio_path") or "").strip(),
+                            "voice_id": (c.get("voice_id") or "").strip(),
+                            "emotion": (emotion or "").strip()}
+                return ((c.get("voice") or "").strip() or (scene.get("voice") or "").strip()
+                        or settings.COMFYUI_S2V_TTS_VOICE)
+        except Exception:  # noqa: BLE001
+            pass
+    return (scene.get("voice") or "").strip() or settings.COMFYUI_S2V_TTS_VOICE
+
+
 # 串脸防护用：本镜≥2 人的信号词 + 多人镜自动加的负向(压低"他人也被画成主角脸"的概率)
 _ANTI_BLEED_NEG = ("same face on everyone, identical faces, face cloning, "
                    "all characters look the same, 所有人长一张脸")
@@ -1226,11 +1249,16 @@ def undo_last_append_segment(scene_id: str) -> str:
 
 
 def append_scene_segment(scene_id: str, motion_prompt: str = "", model: str = "",
-                         params: dict | None = None, count: int = 1) -> str:
+                         params: dict | None = None, count: int = 1,
+                         narration: str = "", emotion: str = "",
+                         seg_narrations: list | None = None) -> str:
     """在分镜**已生成**的成片末尾，按尾帧接续再追加 count 段，就地变长（看效果再决定加多少）。
 
     与 do_render_scene_video 的区别：不重出整条，而是取「现有成片的末帧」作为起点生成新段，
     拼到现有成片后面。可反复调用，每次加几段都行——段数不写死。
+
+    narration/seg_narrations：可给续接段配台词（角色克隆+情感 TTS），台词时长反推该段帧数（音频多长片多长），
+    拼好后按各段起始位置叠回声轨 → 续接段自带情感语音。emotion：本次续接的情感（happy/angry/sad…）。
     """
     import time as _time
     params = params or {}
@@ -1265,22 +1293,56 @@ def append_scene_segment(scene_id: str, motion_prompt: str = "", model: str = ""
         except GpuConfigError as e:
             return f"GPU 未配置: {e}"
 
-    from mirage.app.pipeline.assembler import extract_last_frame, concat_videos
+    from mirage.app.pipeline.assembler import (extract_last_frame, concat_videos,
+                                               _tts as _tts_seg, _duration as _dur_seg, mux_audio_tracks)
     # 续段前给现有成片打快照 → 「撤销上一段」可回退到本次续接之前（可多次）
     import shutil as _shutil
     try:
         _shutil.copy2(final_local, _next_undo_path(final_local))
     except OSError:
         pass
+    # 续接段配音(可选)：逐段台词 → 克隆/情感 TTS；音频定段长；拼好后按起始位置叠回声轨
+    seg_lines = [s for s in (seg_narrations or []) if isinstance(s, str)]
+    voice_spec = _scene_voice_spec(store, scene, emotion) if (narration or seg_lines) else ""
+    voice_tracks = []   # [(offset_sec, audio_path)]
     done = 0
     try:
         for i in range(count):
             tag = f"{int(_time.time())}_{i + 1}"
             prompt_i = seg_prompts[i] if i < len(seg_prompts) and seg_prompts[i] else prompt_default
+            # 本段台词：逐段表优先，否则单条 narration 用在第 1 段
+            line_i = (seg_lines[i] if i < len(seg_lines) else (narration if i == 0 else "")).strip()
+            merged_i = dict(merged)
+            seg_audio = ""
+            if line_i and voice_spec:
+                seg_audio = os.path.join(local_dir,
+                                         f"{scene['scene_number']:02d}_{scene_id}_app{tag}_voice.mp3")
+                ok_v = _tts_seg(line_i, seg_audio, voice_spec)
+                if not ok_v:
+                    _time.sleep(1.0); ok_v = _tts_seg(line_i, seg_audio, voice_spec)
+                if ok_v and not merged_i.get("frames"):   # 音频定段长：帧数跟着台词走(4n+1)
+                    try:
+                        fps = int(merged_i.get("fps") or settings.COMFYUI_FPS)
+                        fr = _s2v_frames_for_audio(float(_dur_seg(seg_audio)), fps,
+                                                   cap=int(settings.COMFYUI_S2V_MAX_FRAMES or 0))
+                        if fr:
+                            merged_i["frames"] = fr
+                    except Exception:  # noqa: BLE001
+                        pass
+                if not ok_v:
+                    seg_audio = ""
             frame_local = os.path.join(local_dir, f"{scene['scene_number']:02d}_{scene_id}_applast.png")
             extract_last_frame(final_local, frame_local)   # 取「现有成片」的末帧作起点
+            off_sec = 0.0
+            if seg_audio:
+                try:
+                    off_sec = float(_dur_seg(final_local))   # 该段在成片里的起始位置≈现有成片时长
+                except Exception:  # noqa: BLE001
+                    off_sec = 0.0
             new_seg = _render_one_continuation(scene_id, scene, provider, is_http, gpu,
-                                               frame_local, prompt_i, merged, tag)
+                                               frame_local, prompt_i, merged_i, tag)
+            if seg_audio:
+                voice_tracks.append((off_sec, seg_audio))
             tmp_final = final_local + ".tmp.mp4"
             # 去重边界帧：新段首帧=现有成片末帧(拿它当起点生成的) → 不去重会卡一帧
             concat_videos([final_local, new_seg], tmp_final, dedup_boundary=True)
@@ -1308,9 +1370,26 @@ def append_scene_segment(scene_id: str, motion_prompt: str = "", model: str = ""
         hint = f"（已成功追加 {done}/{count} 段）" if done else ""
         return f"追加视频段失败{hint}: {e}"
 
+    # 各续接段的情感配音按起始位置叠回成片（concat 丢了音轨，这里统一加回）
+    voiced_n = 0
+    if voice_tracks:
+        try:
+            voiced = final_local + ".voiced.mp4"
+            mux_audio_tracks(final_local, voice_tracks, voiced)
+            os.replace(voiced, final_local)
+            voiced_n = len(voice_tracks)
+        except Exception as _e:  # noqa: BLE001
+            logger.info("[append] 配音叠加跳过: %s", _e)
+        for _o, _a in voice_tracks:
+            try:
+                os.remove(_a)
+            except OSError:
+                pass
+
     store.set_scene_video(scene_id, final_local)
     store.set_scene_state(scene_id, SceneState.COMPLETED)
-    msg = (f"已在分镜 {scene_id} 的成片末尾追加 {done} 段（尾帧接续），视频已变长。\n成片: {final_local}")
+    _vm = f"，其中 {voiced_n} 段带情感配音" if voiced_n else ""
+    msg = (f"已在分镜 {scene_id} 的成片末尾追加 {done} 段（尾帧接续）{_vm}，视频已变长。\n成片: {final_local}")
     return msg + f"\nVIDFILE::{scene_id}::{final_local}"
 
 
@@ -1479,7 +1558,7 @@ def assemble_episode(project_id: str, voice: str = "", with_subtitles: bool = Tr
                 char_voice[_nm] = (_c.get("voice") or "").strip()
     except Exception:  # noqa: BLE001
         pass
-    clips, missing = [], []
+    clips, clip_scenes, missing = [], [], []
     for s in scenes:
         p = os.path.join(local, f"{s['scene_number']:02d}_{s['id']}.mp4")
         if not os.path.isfile(p):
@@ -1511,8 +1590,18 @@ def assemble_episode(project_id: str, voice: str = "", with_subtitles: bool = Tr
             clip["dialogue"] = _dlg
             clip["subtitle"] = "\n".join((d["speaker"] + "：" + d["text"]) if d["speaker"] else d["text"] for d in _dlg)
         clips.append(clip)
+        clip_scenes.append(s)
     if not clips:
         return "没有任何分镜已出片，请先对各分镜出图→选图→出视频。"
+
+    # 口型后处理（门控休眠）：正脸说话镜用配音重缝嘴；引擎没配=no-op、零回归
+    try:
+        from mirage.app.pipeline.lipsync_post import apply_lipsync
+        _ls = apply_lipsync(clips, clip_scenes, voice_default=(voice or DEFAULT_VOICE))
+        if _ls.get("synced"):
+            logger.info("[assemble] 口型同步 %d 段", _ls["synced"])
+    except Exception as _e:  # noqa: BLE001
+        logger.info("[assemble] 口型后处理跳过: %s", _e)
 
     out = os.path.join(local, f"episode_{project_id}.mp4")
     try:
@@ -1598,6 +1687,51 @@ def faceswap_scene_video(scene_id: str = "", face_path: str = "", project_id: st
         return f"换脸失败：{r.get('note')}"
     return (f"换脸完成（产物为独立新文件，原片保留：{os.path.basename(src)}）。\n"
             f"VIDFILE::{tag}::{out}")
+
+
+def lipsync_scene_video(scene_id: str = "", voice: str = "") -> str:
+    """一键口型同步：把某分镜【已有成片】按其音轨（或旁白配音）做 LatentSync 缝嘴，产物落独立新文件（不覆盖原片）。
+
+    驱动音优先用成片已有音轨（如续接段已配的情感语音）；没有音轨则用该镜旁白现配。口型引擎门控休眠：
+    没配 LIPSYNC_ENGINE / server 没起 → 返回提示、不改片。
+    """
+    from mirage.app.pipeline import lipsync_post, log_bus
+    from mirage.app.pipeline.assembler import extract_audio, _tts
+    if not lipsync_post._engine_ready():
+        return ("口型引擎未就绪：需在 .env 配 LIPSYNC_ENGINE=latentsync + LATENTSYNC_ENABLED + "
+                "LATENTSYNC_BASE_URL，并起 LatentSync server(8192)。")
+    store = get_store()
+    scene = store.get_scene(scene_id)
+    if not scene:
+        return f"分镜不存在: {scene_id}"
+    src = (scene.get("video_path")
+           or os.path.join(video_dir(), f"{scene.get('scene_number', 0):02d}_{scene_id}.mp4"))
+    if not os.path.exists(src):
+        return f"口型失败：找不到成片 {src}（先出片/续接）。"
+    local_dir = video_dir()
+    # 驱动音：先用成片自带音轨（续接段配的情感语音）；没有再用旁白现配
+    audio = os.path.join(local_dir, f"{scene.get('scene_number', 0):02d}_{scene_id}_lsdrive.wav")
+    drive = extract_audio(src, audio)
+    if not drive:
+        line = (scene.get("narration") or "").strip()
+        if not line:
+            return "口型失败：成片无音轨且该镜没旁白台词——先给这镜配音（续接带语音）或写旁白。"
+        spec = voice or _scene_voice_spec(store, scene, "")
+        if not _tts(line, audio, spec):
+            return "口型失败：旁白转语音(TTS)没成功。"
+        drive = audio
+    out = os.path.splitext(src)[0] + "_lipsync.mp4"
+    log_bus.emit(f"[口型] {os.path.basename(src)} ← 驱动音缝嘴 …")
+    r = lipsync_post.lipsync_video(src, drive, out)
+    try:
+        os.remove(audio)
+    except OSError:
+        pass
+    if not r.get("applied"):
+        return f"口型失败：{r.get('note')}"
+    store.set_scene_video(scene_id, r.get("output") or out)
+    return (f"口型同步完成（LatentSync，原片保留：{os.path.basename(src)}）。\n"
+            f"VIDFILE::{scene_id}::{r.get('output') or out}")
 
 
 @tool

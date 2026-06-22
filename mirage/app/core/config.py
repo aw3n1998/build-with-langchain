@@ -284,6 +284,13 @@ class Settings(BaseSettings):
     INDEXTTS2_ENABLED: bool = False
     INDEXTTS2_BASE_URL: str = ""             # 包装 server 端点(Colab 跑「§IndexTTS2」格写入，默认 http://127.0.0.1:8191)
     INDEXTTS2_DEFAULT_EMOTION: str = ""      # 缺省情感(空=中性)；每镜可由 scene.emotion 覆盖
+    # 口型对齐（出片后处理，引擎无关可插拔；不做 VideoProvider）。没配/server 没起=自动跳过，不报错。
+    LIPSYNC_ENGINE: str = ""                  # ""=关(只配音不缝嘴) / "latentsync" / "wav2lip"
+    LATENTSYNC_ENABLED: bool = False          # 门控：配了 ENABLED+BASE_URL 才会尝试缝嘴
+    LATENTSYNC_BASE_URL: str = ""             # 包装 server 端点，默认 http://127.0.0.1:8192
+    LATENTSYNC_STEPS: int = 20                # 采样步数 20~50
+    LATENTSYNC_GUIDANCE: float = 1.5          # 引导强度 1.0~3.0
+    LIPSYNC_MAX_SECONDS: float = 0.0          # >0 时跳过超长片(防 OOM)；0=不限
     # 本机产物落地目录
     NP2V_DB_PATH: Optional[str] = None
     NP2V_LOCAL_OUT: Optional[str] = None

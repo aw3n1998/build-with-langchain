@@ -194,6 +194,51 @@ def concat_videos(paths: list[str], out_path: str, dedup_boundary: bool = False,
         shutil.rmtree(work, ignore_errors=True)
 
 
+def mux_audio_tracks(video_path: str, tracks: list, out_path: str) -> str:
+    """把若干配音轨按各自起始秒数(offset)叠到视频上，输出带声成片(视频流 -c copy 不重编码)。
+
+    tracks=[(offset_sec, audio_path), ...]。给「续接段带情感语音」用：每段人声 adelay 到它在
+    成片里的起始位置，多段 amix。concat 会丢音轨，故配音统一在拼好后这里叠回去。空 tracks 原样返回。
+    """
+    tracks = [(o, a) for (o, a) in (tracks or []) if a and os.path.exists(a)]
+    if not tracks:
+        return video_path
+    ff = _ffmpeg()
+    os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
+    inputs = ["-i", video_path]
+    for _off, ap in tracks:
+        inputs += ["-i", ap]
+    fc, labels = [], []
+    for i, (off, _ap) in enumerate(tracks):
+        delay = int(max(0.0, float(off)) * 1000)
+        fc.append(f"[{i + 1}:a]adelay={delay}|{delay}[a{i}]")
+        labels.append(f"[a{i}]")
+    if len(tracks) > 1:
+        fc.append("".join(labels) + f"amix=inputs={len(tracks)}:normalize=0[aout]")
+        amap = "[aout]"
+    else:
+        amap = labels[0]
+    args = [ff, "-y", "-hide_banner", *inputs, "-filter_complex", ";".join(fc),
+            "-map", "0:v", "-map", amap, "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", out_path]
+    res = _run(args, timeout=900)
+    if res.returncode != 0 or not os.path.exists(out_path) or os.path.getsize(out_path) == 0:
+        raise RuntimeError(f"配音叠加失败: {(res.stderr or '')[-400:]}")
+    return out_path
+
+
+def extract_audio(video_path: str, out_wav: str) -> str:
+    """抽取视频音轨为 wav（给口型 server 当驱动音）。无音轨返回 ""。"""
+    probe = _run([_ffmpeg(), "-hide_banner", "-i", video_path])
+    if "Audio:" not in (probe.stderr or ""):
+        return ""
+    os.makedirs(os.path.dirname(os.path.abspath(out_wav)), exist_ok=True)
+    res = _run([_ffmpeg(), "-y", "-hide_banner", "-i", video_path,
+                "-vn", "-ac", "1", "-ar", "16000", out_wav])
+    if res.returncode != 0 or not os.path.exists(out_wav) or os.path.getsize(out_wav) == 0:
+        return ""
+    return out_wav
+
+
 def _srt_ts(t: float) -> str:
     h = int(t // 3600); m = int(t % 3600 // 60); s = t % 60
     return f"{h:02d}:{m:02d}:{s:06.3f}".replace(".", ",")

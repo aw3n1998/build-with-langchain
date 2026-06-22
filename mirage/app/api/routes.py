@@ -2345,6 +2345,9 @@ class SceneAppendRequest(BaseModel):
     size: str = ""
     video_params: dict = {}
     motion_prompts: list[str] = []   # 可选：逐段不同提示词
+    seg_narration: str = ""          # 续接段台词（角色克隆+情感 TTS；用在第 1 段）
+    emotion: str = ""                # 本次续接情感（happy/angry/sad/… 或中文；空=中性）
+    seg_narrations: list[str] = []   # 可选：逐段台词（count>1 时，与 motion_prompts 平行）
 
 
 class LoraPreviewRequest(BaseModel):
@@ -2507,7 +2510,9 @@ async def _scene_append_events(req: "SceneAppendRequest"):
     out = None
     try:
         async for it in _run_with_logs(lambda: append_scene_segment(
-                req.scene_id, req.motion_prompt, req.model, params, req.count)):
+                req.scene_id, req.motion_prompt, req.model, params, req.count,
+                narration=req.seg_narration, emotion=req.emotion,
+                seg_narrations=[p for p in (req.seg_narrations or []) if isinstance(p, str)])):
             if "_log" in it:
                 yield {"type": "log", "line": it["_log"]}
             else:
@@ -2530,6 +2535,47 @@ async def pipeline_scene_append(req: SceneAppendRequest):
             "project_id": _scene_project_id(req.scene_id, req.workspace)}
     return {"job_id": job_manager.submit(
         "render", lambda: _scene_append_events(req), meta=meta)}
+
+
+class SceneLipsyncRequest(BaseModel):
+    scene_id: str
+    workspace: str | None = None
+    session_id: str | None = None
+    voice: str = ""   # 可选：覆盖驱动音音色(裸 edge id)；空=用成片音轨或角色配音
+
+
+async def _scene_lipsync_events(req: "SceneLipsyncRequest"):
+    """单镜口型同步：把已有成片按音轨/旁白做 LatentSync 缝嘴。流式同出片。"""
+    from mirage.app.pipeline.runtime import set_workspace
+    from mirage.app.pipeline.pipeline_tools import lipsync_scene_video
+    set_workspace(req.workspace)
+    yield {"type": "batch_progress", "phase": "render", "scene_id": req.scene_id,
+           "label": "口型同步中…"}
+    out = None
+    try:
+        async for it in _run_with_logs(lambda: lipsync_scene_video(req.scene_id, req.voice)):
+            if "_log" in it:
+                yield {"type": "log", "line": it["_log"]}
+            else:
+                out = it["_result"]
+    except Exception as e:  # noqa: BLE001
+        yield {"type": "tool_result", "name": "scene_lipsync",
+               "content": f"口型失败: {type(e).__name__}: {e}"}
+        return
+    _clean, events = ai_service._extract_tool_markers(out or "")
+    for ev in events:
+        yield ev
+    yield {"type": "scene_ready", "scene_id": req.scene_id}
+
+
+@router.post("/pipeline/scene_lipsync")
+async def pipeline_scene_lipsync(req: SceneLipsyncRequest):
+    """单镜口型同步：后台任务，返回 job_id。"""
+    from mirage.app.services.job_manager import job_manager
+    meta = {"session_id": req.session_id, "scene_id": req.scene_id,
+            "project_id": _scene_project_id(req.scene_id, req.workspace)}
+    return {"job_id": job_manager.submit(
+        "render", lambda: _scene_lipsync_events(req), meta=meta)}
 
 
 class SceneUploadContinueRequest(BaseModel):
