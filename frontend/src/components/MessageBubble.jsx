@@ -1186,63 +1186,71 @@ export function ProductionPanel({ message, workspace, sessionId }) {
 
       {tab === 'script' && (
         <div style={subBox}>
-          <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 8 }}>
-            粘一段小说/剧情，AI 当导演自动拆成整套分镜（标题/画面词/运镜/旁白台词），自动套本集风格 + 角色外貌。
+          <div style={{ fontSize: 11.5, color: 'var(--text-dim)', marginBottom: 10, lineHeight: 1.6 }}>
+            粘一段小说 / 剧情，AI 当导演自动拆成整套分镜（标题 / 画面词 / 运镜 / 旁白台词），自动套本集风格 + 角色外貌。
           </div>
-          <textarea value={novel} onChange={e => setNovel(e.target.value)} rows={5}
-            placeholder="把这一集的小说/剧情粘进来…" style={{ ...inputStyle, width: '100%', resize: 'vertical', minHeight: 90 }} />
-          <div style={{ display: 'flex', gap: 10, alignItems: 'center', margin: '8px 0' }}>
-            <label style={{ fontSize: 12, color: 'var(--text-muted)' }}>拆成
-              <input type="number" min={1} max={40} value={sbN} onChange={e => setSbN(e.target.value)}
-                style={{ ...inputStyle, width: 56, height: 28, margin: '0 4px' }} />镜</label>
-            <label style={{ fontSize: 12, display: 'inline-flex', gap: 4, alignItems: 'center' }}>
-              <input type="checkbox" checked={sbReplace} onChange={e => setSbReplace(e.target.checked)} />替换现有分镜
-            </label>
-          </div>
-          {/* 主推：一键 AI 分析，把角色/风格/LoRA/分镜 全套填好 */}
-          <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 6 }}>
-            <button onClick={doAutoFill} disabled={afBusy || sbBusy}
-              style={{ height: 36, padding: '0 16px', borderRadius: 8, border: 'none',
-                       background: (afBusy || sbBusy) ? 'rgba(255,255,255,0.06)' : (afBusy ? '#5254cc' : '#6366f1'),
-                       color: (afBusy || sbBusy) ? 'var(--text-muted)' : '#fff', fontSize: 13, fontWeight: 600,
-                       cursor: (afBusy || sbBusy) ? 'default' : 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-              {afBusy ? 'AI 分析中…' : '🪄 一键 AI 分析填充'}
-            </button>
-            <label style={{ fontSize: 12, display: 'inline-flex', gap: 4, alignItems: 'center', color: 'var(--text-muted)' }}>
-              <input type="checkbox" checked={afReplace} onChange={e => setAfReplace(e.target.checked)} />替换现有
-            </label>
-            <span style={{ fontSize: 11, color: 'var(--text-dim)' }}>角色 + 风格 + LoRA + 分镜入库（<b>只生成分镜表、不出片</b>；想先审阅/改提示词再出片用它）</span>
-          </div>
-          {/* 终极一键：小说 → 按秒数自算镜数 → 逐镜文生视频(t2v) → 合成整集，全自动到底 */}
-          <div style={{ border: '1px solid rgba(0,189,176,0.35)', background: 'rgba(0,189,176,0.07)',
-                        borderRadius: 8, padding: 10, marginBottom: 8 }}>
-            <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+          <textarea value={novel} onChange={e => setNovel(e.target.value)} rows={6}
+            placeholder="把这一集的小说 / 剧情粘进来…"
+            style={{ ...inputStyle, width: '100%', resize: 'vertical', minHeight: 120, fontSize: 13.5, lineHeight: 1.6, padding: '12px 14px' }} />
+
+          {/* 主操作（最醒目）：一键全自动出片 —— 小说→按秒数拆镜→逐镜文生→合成整集，一路到底 */}
+          <div style={{ marginTop: 14, border: '1px solid rgba(0,189,176,0.32)', background: 'rgba(0,189,176,0.06)',
+                        borderRadius: 12, padding: 14 }}>
+            <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
               <button onClick={doOneClick} disabled={!!busy || afBusy || sbBusy}
-                style={{ height: 38, padding: '0 18px', borderRadius: 8, border: 'none',
+                style={{ height: 42, padding: '0 22px', borderRadius: 10, border: 'none',
                          background: (busy || afBusy || sbBusy) ? 'rgba(255,255,255,0.06)' : '#00bdb0',
-                         color: (busy || afBusy || sbBusy) ? 'var(--text-muted)' : '#04201e', fontSize: 13.5, fontWeight: 700,
-                         cursor: (busy || afBusy || sbBusy) ? 'default' : 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                         color: (busy || afBusy || sbBusy) ? 'var(--text-muted)' : '#04201e', fontSize: 14.5, fontWeight: 700,
+                         cursor: (busy || afBusy || sbBusy) ? 'default' : 'pointer', display: 'inline-flex', alignItems: 'center', gap: 7,
+                         boxShadow: (busy || afBusy || sbBusy) ? 'none' : '0 6px 18px rgba(0,189,176,0.28)' }}>
                 {busy === 'oneclick' ? '全自动制作中…' : '✨ 一键全自动出片'}
               </button>
-              <label style={{ fontSize: 12, color: 'var(--text-muted)' }}>目标
+              <label style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>目标
                 <input type="number" min={5} max={300} value={ocSec} onChange={e => setOcSec(e.target.value)}
-                  style={{ ...inputStyle, width: 60, height: 28, margin: '0 4px' }} />秒</label>
-              <label style={{ fontSize: 12, display: 'inline-flex', gap: 4, alignItems: 'center', color: 'var(--text-muted)' }}
+                  style={{ ...inputStyle, width: 62, height: 30, margin: '0 5px' }} />秒</label>
+              <label style={{ fontSize: 12.5, display: 'inline-flex', gap: 5, alignItems: 'center', color: 'var(--text-muted)' }}
                 title="少而长的连续长镜头，切换点少 → 更连贯；关掉=多而短的快切">
                 <input type="checkbox" checked={ocCoh} onChange={e => setOcCoh(e.target.checked)} />连贯优先
               </label>
             </div>
-            <div style={{ fontSize: 10.5, color: 'var(--text-dim)', marginTop: 6 }}>
-              <b>含上面的 AI 分析</b>（角色/风格/分镜）→ 按秒数拆镜 → 逐镜文生 → 合成整集，一路到底（<b>不必先点「AI 分析填充」</b>）。
+            <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 8, lineHeight: 1.6 }}>
+              <b>含 AI 分析</b>（角色 / 风格 / 分镜）→ 按秒数拆镜 → 逐镜文生 → 合成整集，一路到底（不必先点下面的「AI 分析填充」）。
               身份靠训好的 Wan-T2V 角色 LoRA（在「角色 &amp; LoRA」训）。
             </div>
           </div>
-          {/* 次要：角色/风格已设好、只想补分镜 */}
-          <div style={{ fontSize: 10.5, color: 'var(--text-dim)', marginBottom: 6 }}>或只想补分镜（角色/风格已弄好时）：</div>
-          <button onClick={doStoryboard} disabled={sbBusy || afBusy}
-            style={{ ...miniBtn2, height: 30, padding: '0 12px' }}>
-            {sbBusy ? 'AI 拆分镜中…' : <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Icon.Wand size={13} />只拆分镜</span>}
-          </button>
+
+          {/* 次要（手动档）：想先审阅 / 改提示词再出片；或角色风格已弄好只补分镜 */}
+          <div style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 8 }}>
+              <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>手动档（先审阅 / 改提示词再出片）—</span>
+              <label style={{ fontSize: 12, color: 'var(--text-muted)' }}>拆成
+                <input type="number" min={1} max={40} value={sbN} onChange={e => setSbN(e.target.value)}
+                  style={{ ...inputStyle, width: 54, height: 28, margin: '0 4px' }} />镜</label>
+            </div>
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+              <button onClick={doAutoFill} disabled={afBusy || sbBusy}
+                style={{ height: 34, padding: '0 14px', borderRadius: 8, border: 'none',
+                         background: (afBusy || sbBusy) ? 'rgba(255,255,255,0.06)' : '#6366f1',
+                         color: (afBusy || sbBusy) ? 'var(--text-muted)' : '#fff', fontSize: 12.5, fontWeight: 600,
+                         cursor: (afBusy || sbBusy) ? 'default' : 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                {afBusy ? 'AI 分析中…' : '🪄 一键 AI 分析填充'}
+              </button>
+              <label style={{ fontSize: 12, display: 'inline-flex', gap: 4, alignItems: 'center', color: 'var(--text-muted)' }}>
+                <input type="checkbox" checked={afReplace} onChange={e => setAfReplace(e.target.checked)} />替换现有
+              </label>
+              <span style={{ fontSize: 11, color: 'var(--text-dim)' }}>角色+风格+LoRA+分镜入库（<b>只生成、不出片</b>）</span>
+            </div>
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginTop: 8 }}>
+              <button onClick={doStoryboard} disabled={sbBusy || afBusy}
+                style={{ ...miniBtn2, height: 30, padding: '0 12px' }}>
+                {sbBusy ? 'AI 拆分镜中…' : <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Icon.Wand size={13} />只拆分镜</span>}
+              </button>
+              <label style={{ fontSize: 12, display: 'inline-flex', gap: 4, alignItems: 'center', color: 'var(--text-muted)' }}>
+                <input type="checkbox" checked={sbReplace} onChange={e => setSbReplace(e.target.checked)} />替换现有分镜
+              </label>
+              <span style={{ fontSize: 11, color: 'var(--text-dim)' }}>角色 / 风格已弄好时，只补分镜表</span>
+            </div>
+          </div>
         </div>
       )}
 
