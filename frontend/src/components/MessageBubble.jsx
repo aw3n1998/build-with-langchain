@@ -19,7 +19,7 @@ function usePersistedState(key, initial) {
 }
 import ReactMarkdown from 'react-markdown'
 import { fileUrl, getVideoProviders, getImageProviders, getProject, batchGenerate, batchFinish, continuation, continuationOne, assembleEpisode,
-         pipelineSelect, streamJobEvents, pipelineUpscale, pipelineFaceswap, uploadCandidate, uploadContinueVideo, updateScenePrompts,
+         pipelineSelect, streamJobEvents, pipelineUpscale, pipelineExport, pipelineFaceswap, uploadCandidate, uploadContinueVideo, updateScenePrompts,
          deleteCandidate, deleteSceneVideo, sceneUndoAppend, deleteEpisode, suggestSegmentPrompts,
          autoStoryboard, autoFill, characters as charactersApi, templatesApi,
          loraCreate, loraAction, loraUploadImage, loraUploadRef, loraPreview,
@@ -1077,6 +1077,32 @@ export function ProductionPanel({ message, workspace, sessionId }) {
     } catch (e) { setProgress('转规格失败：' + String(e.message || e)) }
     finally { setUpBusy(b => { const n = { ...b }; delete n[tag]; return n }) }
   }
+
+  // ── 平台导出预设：把整集成片重编码成平台规格 mp4（独立新文件，不覆盖原片；后端 ffmpeg）──
+  const EXPORT_PRESETS = [
+    ['douyin', '抖音', 1080, 1920], ['kuaishou', '快手', 1080, 1920], ['shipinhao', '视频号', 1080, 1920],
+    ['reelshort', 'ReelShort', 1080, 1920], ['dramabox', 'DramaBox', 1080, 1920], ['douyin4k', '抖音·4K竖屏', 2160, 3840],
+  ]
+  const [expPreset, setExpPreset] = usePersistedState('exportPreset', 'douyin')   // 持久化：上次选的平台
+  const [expBusy, setExpBusy] = useState(false)
+  const [expUrl, setExpUrl] = useState('')
+  const doExport = async () => {
+    if (!proj?.episode) { setProgress('还没有整集成片，先在「分镜制作」合成整集'); return }
+    const p = EXPORT_PRESETS.find(x => x[0] === expPreset) || EXPORT_PRESETS[0]
+    setExpBusy(true); setShowLogs(true); setExpUrl('')
+    setProgress(`导出 ${p[1]}（${p[2]}×${p[3]}）…`)
+    try {
+      const jobId = await pipelineExport({ kind: 'episode', project_id: pid, preset: expPreset, workspace, session_id: sessionId })
+      for await (const ev of streamJobEvents(jobId)) {
+        if (ev.type === 'log') setLogs(prev => [...prev, ev.line].slice(-300))
+        else if (ev.type === 'video' && ev.url) setExpUrl(fileUrl(ev.url) + '&v=' + Date.now())
+        else if (ev.type === 'tool_result' && ev.content) { setProgress(ev.content); setLogs(prev => [...prev, '» ' + ev.content].slice(-300)) }
+        else if (ev.type === 'error') setProgress(ev.content || '导出已停止')
+      }
+    } catch (e) { setProgress('导出失败：' + String(e.message || e)) }
+    finally { setExpBusy(false) }
+  }
+
   const upscaleRow = (tag, kind, sceneId, projectId) => {
     const spec = upSpec[tag] || '4K竖屏'; const bz = !!upBusy[tag]
     return (
@@ -1982,12 +2008,29 @@ export function ProductionPanel({ message, workspace, sessionId }) {
           ) : (
             <div style={{ fontSize: 12, color: 'var(--text-muted)', padding: '22px 0', textAlign: 'center' }}>还没有整集成片。去「分镜制作」点「批量出片并合成（t2v）」。</div>
           )}
-          {/* TODO(排版优先·功能后做)：平台导出预设 —— 给用户看的「未做」记号 */}
-          <div style={{ marginTop: 12, padding: '9px 11px', borderRadius: 8, border: '1px dashed rgba(245,158,11,0.4)',
-                        background: 'rgba(245,158,11,0.06)', fontSize: 11, color: '#ffb454', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-            <span style={{ fontSize: 10, fontWeight: 700, padding: '1px 7px', borderRadius: 5, background: 'rgba(245,158,11,0.2)', color: '#fbbf24' }}>待开发</span>
-            平台导出预设（抖音 / 快手 / ReelShort · 1080×1920 等）—— 功能后做
-          </div>
+          {/* 平台导出预设：把整集成片重编码成竖屏平台规格（独立新文件，不覆盖原片）。无整集成片时不显示。*/}
+          {proj?.episode && (
+            <div style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8 }}>平台导出 —— 重编码成竖屏规格（H.264 high · moov 前置秒开 · 原片保留）</div>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                <select value={expPreset} disabled={expBusy} onChange={e => setExpPreset(e.target.value)}
+                  style={{ ...inputStyle, width: 'auto', height: 32 }}>
+                  {EXPORT_PRESETS.map(p => <option key={p[0]} value={p[0]}>{p[1]} · {p[2]}×{p[3]}</option>)}
+                </select>
+                <button onClick={doExport} disabled={expBusy}
+                  style={{ ...panelBtn(expBusy), display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                  <Icon.Download size={14} />{expBusy ? '导出中…' : '导出'}
+                </button>
+              </div>
+              {expUrl && (
+                <div style={{ marginTop: 10 }}>
+                  <span style={{ fontSize: 11.5, color: 'rgba(134,239,172,1)' }}>✓ 已导出（原片保留，可对比）</span>
+                  <video key={expUrl} src={expUrl} controls style={{ width: '100%', borderRadius: 10, margin: '8px 0' }} />
+                  <a href={expUrl} download style={{ ...panelBtn(false), textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 6 }}><Icon.Download size={14} />下载导出版 mp4</a>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 

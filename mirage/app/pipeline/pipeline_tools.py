@@ -1687,6 +1687,52 @@ def upscale_video(scene_id: str = "", project_id: str = "", kind: str = "scene",
             f"VIDFILE::{tag}::{out}")
 
 
+# 平台导出预设（竖屏短剧通规：9:16 H.264 high + AAC + faststart；码率按各平台稳妥档，非官方公开数值，可按审片反馈上调）
+PLATFORM_PRESETS = {
+    "douyin":    {"key": "douyin",    "label": "抖音",        "w": 1080, "h": 1920, "fps": 30, "vbitrate": "10M", "vmax": "12M", "vbuf": "16M"},
+    "kuaishou":  {"key": "kuaishou",  "label": "快手",        "w": 1080, "h": 1920, "fps": 30, "vbitrate": "8M",  "vmax": "10M", "vbuf": "14M"},
+    "shipinhao": {"key": "shipinhao", "label": "视频号",      "w": 1080, "h": 1920, "fps": 30, "vbitrate": "8M",  "vmax": "10M", "vbuf": "14M"},
+    "reelshort": {"key": "reelshort", "label": "ReelShort",  "w": 1080, "h": 1920, "fps": 30, "vbitrate": "12M", "vmax": "14M", "vbuf": "20M"},
+    "dramabox":  {"key": "dramabox",  "label": "DramaBox",   "w": 1080, "h": 1920, "fps": 30, "vbitrate": "12M", "vmax": "14M", "vbuf": "20M"},
+    "douyin4k":  {"key": "douyin4k",  "label": "抖音·4K竖屏", "w": 2160, "h": 3840, "fps": 30, "vbitrate": "35M", "vmax": "45M", "vbuf": "60M", "level": "5.1"},
+}
+
+
+def export_video(project_id: str = "", preset_key: str = "douyin", kind: str = "episode",
+                 scene_id: str = "") -> str:
+    """平台导出：把整集成片(或某分镜成片)按平台预设 ffmpeg 重编码为**独立新文件**（不覆盖原片）。
+
+    kind='episode' → 整集；kind='scene' → 某分镜成片。预设见 PLATFORM_PRESETS（抖音/快手/视频号/ReelShort/DramaBox/4K）。
+    """
+    from mirage.app.pipeline import postprocess
+    from mirage.app.pipeline import log_bus
+    preset = PLATFORM_PRESETS.get(preset_key)
+    if not preset:
+        return f"导出失败：未知平台预设 {preset_key}。"
+    if kind == "episode":
+        if not project_id:
+            return "导出失败：缺 project_id。"
+        src = os.path.join(video_dir(), f"episode_{project_id}.mp4")
+        tag = "episode"
+    else:
+        st = get_store()
+        scene = st.get_scene(scene_id)
+        if not scene:
+            return f"分镜不存在: {scene_id}"
+        src = (scene.get("video_path")
+               or os.path.join(video_dir(), f"{scene.get('scene_number', 0):02d}_{scene_id}.mp4"))
+        tag = scene_id
+    if not os.path.exists(src):
+        return f"导出失败：找不到成片 {src}（先出片/合成整集）。"
+    out = os.path.splitext(src)[0] + f"_{preset_key}.mp4"
+    log_bus.emit(f"[导出] {os.path.basename(src)} → {preset['label']}（{preset['w']}×{preset['h']}）…")
+    r = postprocess.export_to(src, out, preset=preset)
+    if not r.get("applied"):
+        return f"导出失败：{r.get('note')}"
+    return (f"已导出 {preset['label']}（{r.get('note')}）。原片保留：{os.path.basename(src)}\n"
+            f"VIDFILE::{tag}::{out}")
+
+
 def faceswap_scene_video(scene_id: str = "", face_path: str = "", project_id: str = "",
                          kind: str = "scene") -> str:
     """一键换脸：把 face_path 的源脸换到某分镜/整集【已有成片】里的人物上，产物落独立新文件(不覆盖原片)。

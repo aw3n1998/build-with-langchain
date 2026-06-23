@@ -497,6 +497,15 @@ class UpscaleRequest(BaseModel):
     session_id: str | None = None
 
 
+class ExportRequest(BaseModel):
+    kind: str = "episode"        # episode / scene
+    project_id: str = ""
+    scene_id: str = ""
+    preset: str = "douyin"       # 平台预设 key：douyin/kuaishou/shipinhao/reelshort/dramabox/douyin4k
+    workspace: str | None = None
+    session_id: str | None = None
+
+
 class FaceSwapRequest(BaseModel):
     kind: str = "scene"          # scene / episode
     scene_id: str = ""
@@ -806,6 +815,35 @@ async def pipeline_upscale(req: UpscaleRequest):
     """一键转规格（4K/2K/1080p/自定义）：提交后台任务，立即返回 job_id（单飞队列）。"""
     from mirage.app.services.job_manager import job_manager
     job_id = job_manager.submit("upscale", lambda: _upscale_events(req))
+    return {"job_id": job_id}
+
+
+async def _export_events(req: "ExportRequest"):
+    """平台导出任务事件流：把整集成片按平台预设重编码为独立新文件（不动原片）。"""
+    import asyncio
+    from mirage.app.pipeline.runtime import set_workspace
+    from mirage.app.pipeline.pipeline_tools import export_video
+
+    set_workspace(req.workspace)
+    yield {"type": "tool_call", "name": "export_video",
+           "args": {"kind": req.kind, "project_id": req.project_id, "scene_id": req.scene_id, "preset": req.preset}}
+    try:
+        out = await asyncio.to_thread(export_video, req.project_id, req.preset, req.kind, req.scene_id)
+    except Exception as e:  # noqa: BLE001
+        yield {"type": "tool_result", "name": "export_video",
+               "content": f"导出失败: {type(e).__name__}: {e}"}
+        return
+    clean, events = ai_service._extract_tool_markers(out)
+    yield {"type": "tool_result", "name": "export_video", "content": clean[:600]}
+    for ev in events:
+        yield ev
+
+
+@router.post("/pipeline/export")
+async def pipeline_export(req: ExportRequest):
+    """平台导出（抖音/快手/视频号/ReelShort/DramaBox · 1080×1920 竖屏）：提交后台任务，立即返回 job_id（单飞队列）。"""
+    from mirage.app.services.job_manager import job_manager
+    job_id = job_manager.submit("export", lambda: _export_events(req))
     return {"job_id": job_id}
 
 

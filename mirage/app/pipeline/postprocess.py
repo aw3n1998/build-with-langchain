@@ -197,3 +197,48 @@ def upscale_to(in_path: str, out_path: str, *, width: int, height: int,
     note = "AI超分+精确缩放" if (m == "comfyui" and src != in_path) else "ffmpeg 缩放"
     logger.info("[upscale] %s → %dx%d (%s) → %s", os.path.basename(in_path), width, height, note, out_path)
     return {"applied": True, "note": note, "out": out_path, "method": m}
+
+
+def _ffmpeg_export(src: str, dst: str, *, width: int, height: int, fps: int,
+                   vbitrate: str, vmax: str, vbuf: str, level: str = "4.2") -> bool:
+    """ffmpeg 把成片重编码成平台规格：缩放+黑边补齐到精确 width×height、强制 fps、
+    H.264 high(yuv420p) + 码率上限 + 2s GOP + AAC 48k + moov 前置(faststart=秒开)。成功 True。"""
+    try:
+        from mirage.app.pipeline.assembler import _ffmpeg as _resolve_ffmpeg
+        ff = _resolve_ffmpeg()   # 优先 imageio-ffmpeg 自带二进制（合成整集就用它、必在），回退系统 ffmpeg
+    except Exception:  # noqa: BLE001
+        ff = _shutil.which("ffmpeg") or "ffmpeg"
+    vf = (f"scale={width}:{height}:force_original_aspect_ratio=decrease:flags=lanczos,"
+          f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:black,setsar=1,fps={fps}")
+    base = [ff, "-y", "-hide_banner", "-i", src, "-vf", vf,
+            "-c:v", "libx264", "-profile:v", "high", "-level", level, "-pix_fmt", "yuv420p",
+            "-preset", "medium", "-r", str(fps), "-g", str(int(fps) * 2),
+            "-b:v", vbitrate, "-maxrate", vmax, "-bufsize", vbuf]
+    audio = ["-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2"]
+    tail = ["-movflags", "+faststart", dst]
+    r = _sp.run(base + audio + tail, capture_output=True, text=True)
+    if r.returncode != 0 or not (os.path.exists(dst) and os.path.getsize(dst) > 0):
+        # 源无音轨/音频编码不兼容 → 去音轨重试（视频参数不变）
+        r = _sp.run(base + ["-an"] + tail, capture_output=True, text=True)
+        if r.returncode != 0 or not (os.path.exists(dst) and os.path.getsize(dst) > 0):
+            logger.warning("[export] ffmpeg 导出失败: %s", (r.stderr or "")[-400:])
+            return False
+    return True
+
+
+def export_to(in_path: str, out_path: str, *, preset: dict) -> dict:
+    """按平台预设 preset 把 in_path 重编码为 out_path（独立新文件，不动原片）。
+    preset 字段：w/h/fps/vbitrate/vmax/vbuf(+可选 level/label/key)。返回 {applied,note,out,preset}。"""
+    if not (in_path and os.path.exists(in_path)):
+        return {"applied": False, "note": "源视频不存在"}
+    w, h = int(preset.get("w", 0)), int(preset.get("h", 0))
+    if w <= 0 or h <= 0:
+        return {"applied": False, "note": "预设宽高无效"}
+    ok = _ffmpeg_export(in_path, out_path, width=w, height=h, fps=int(preset.get("fps", 30)),
+                        vbitrate=str(preset.get("vbitrate", "10M")), vmax=str(preset.get("vmax", "12M")),
+                        vbuf=str(preset.get("vbuf", "16M")), level=str(preset.get("level", "4.2")))
+    if not ok:
+        return {"applied": False, "note": "ffmpeg 导出失败（检查是否已安装 ffmpeg）"}
+    note = f"{w}×{h} · {int(preset.get('fps', 30))}fps · H.264 high · faststart"
+    logger.info("[export] %s → %s (%s) → %s", os.path.basename(in_path), preset.get("label", ""), note, out_path)
+    return {"applied": True, "note": note, "out": out_path, "preset": preset.get("key", "")}

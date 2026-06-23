@@ -297,6 +297,11 @@ export async function pipelineUpscale(params) {
   return submitJob('/pipeline/upscale', params)
 }
 
+// ── 平台导出预设（抖音/快手/视频号/ReelShort/DramaBox · 1080×1920 竖屏）：提交后台任务，返回 job_id；事件里 type==='video' 的 url 即导出版 ──
+export async function pipelineExport(params) {
+  return submitJob('/pipeline/export', params)
+}
+
 // ── 视频一键换脸：上传一张源脸 → 换到该成片里(产物独立新文件)。返回 job_id，用 streamJobEvents 跟随。
 // ⚠️ 合规红线：仅用于你有权使用的脸(原创/AI 生成/本人授权);换可识别真人=deepfake,平台 ToS 与法律禁止。
 export async function pipelineFaceswap(faceFile, { sceneId = '', kind = 'scene', projectId = '', workspace = null, sessionId = '' } = {}) {
