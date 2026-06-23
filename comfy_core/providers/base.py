@@ -20,10 +20,10 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Optional
 
-from mirage.app.core.logger import get_logger
+from comfy_core.logger import get_logger
 
 if TYPE_CHECKING:
-    from mirage.app.pipeline.gpu_client import GpuClient
+    from comfy_core.gpu_client import GpuClient
 
 logger = get_logger("pipeline.providers")
 

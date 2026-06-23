@@ -1,9 +1,10 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from comfy_core.config import ProviderSettings
 from typing import Optional
 from dotenv import load_dotenv
 import os
 
-class Settings(BaseSettings):
+class Settings(ProviderSettings):
     # 项目元数据
     PROJECT_NAME: str = "AI Agent Build Lab"
     VERSION: str = "0.1.0"
@@ -44,31 +45,14 @@ class Settings(BaseSettings):
 
     # ── 小说转视频流水线 / 远程 GPU 配置 ──────────────────────────
     # 远程 GPU 服务器（跑 FLUX 出图 + Wan2.2 图生视频）。SSH 凭据走 .env，不入库。
-    GPU_SSH_HOST: Optional[str] = None
-    GPU_SSH_PORT: int = 22
-    GPU_SSH_USER: str = "root"
-    GPU_SSH_KEY_PATH: Optional[str] = None          # 私钥路径（优先于密码）
-    GPU_SSH_PASSWORD: Optional[str] = None
     # 服务器端路径
-    GPU_PYTHON: str = "/root/autodl-tmp/miniconda3/bin/python"
-    GPU_WAN_REPO: str = "/root/autodl-tmp/Wan2.2"
-    GPU_WAN_CKPT: str = "/root/autodl-tmp/models/Wan-AI/Wan2.2-I2V-A14B"   # A14B 双专家(5B 已彻底弃用)
     GPU_OUTPUT_DIR: str = "/root/autodl-tmp/pipeline_out"
     GPU_SCENES_DIR: str = "/root/autodl-tmp/cael_scenes"
     # FLUX 多候选出图（单次加载、多种子；本地源会自动上传，无需手动部署）
-    GPU_FLUX_CANDIDATES_SCRIPT: str = "/root/autodl-tmp/flux_candidates.py"
     # 出图底模检查点。NSFW 直接把这个指向无审查模型即可（单一底模，无需另设 NSFW 选项）。
     # A100 推荐 lodestones/Chroma（开放无审查 FLUX 系，画质/自由度最佳）；注意 Chroma 架构异于
     # FLUX-dev，人物 LoRA 需按 Chroma 重训。要 FLUX-dev 人物 LoRA 直接生效则用 FLUX-dev 系无审查合并。
-    GPU_FLUX_BASE: str = "/root/autodl-tmp/models/flux-dev"
-    GPU_FLUX_LORA: str = "/root/autodl-tmp/output/cael_flux_lora_v1/cael_flux_lora_v1.safetensors"
     GPU_FLUX_OUT_ROOT: str = "/root/autodl-tmp/flux_candidates_out"
-    FLUX_N: int = 4
-    FLUX_STEPS: int = 28
-    FLUX_GUIDANCE: float = 3.5
-    FLUX_WIDTH: int = 768
-    FLUX_HEIGHT: int = 1024
-    FLUX_OFFLOAD: str = "model"                      # model=快(压线24G)；sequential=慢但最稳
     # 出图模型解耦：默认用哪个出图 Provider（注册名：flux / comfyui-img）
     IMAGE_PROVIDER_DEFAULT: str = "flux"
     # 人物 LoRA 训练：训练执行器。LORA_TRAIN_ENDPOINT 空=Colab 单机本地跑 ai-toolkit 子进程(默认)；
@@ -124,141 +108,66 @@ class Settings(BaseSettings):
     VISION_API_KEY: str = ""
     VISION_TIMEOUT: int = 60
     # Wan2.2-I2V-A14B 原生最强出片（A100；5B 已彻底弃用）。守住原生 720p 级分辨率，别盲目超分。
-    WAN_SIZE: str = "704*1280"
-    WAN_FRAME_NUM: int = 81           # A14B/A100 单段更长更连贯、少接续缝（旧 24G 的 25 帧上限已取消）
-    WAN_SAMPLE_STEPS: int = 30        # 原生最强：步数提到 30（可上探 40，更慢更稳）
     # ── Wan2.2 出片画质关键（官方 wan/configs/wan_i2v_A14B.py + shared_config.py）──
     # 缺 ModelSamplingSD3 shift → 运动僵硬/发糊/塌；CFG 官方=3.5(非5)；负向词用官方长串压崩坏。
-    WAN_SHIFT: float = 5.0            # ModelSamplingSD3 sigma_shift（720p=5；480p 可降到 3）
     # 官方负向词原文（全角逗号别改半角，影响 umt5 分词）。压住 静止/过曝/morphing/畸形/JPEG伪影 等。
-    WAN_VIDEO_NEGATIVE: str = (
-        "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，"
-        "最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，"
-        "画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，"
-        "杂乱的背景，三条腿，背景人很多，倒着走"
-    )
     # 接续段拼接处接缝平滑:相邻段交叉淡化秒数(只在 segments≥2 时生效;单段无缝隙不受影响)。
     # 0=关(硬拼,会有尾帧续接的运动跳/色闪);0.2≈3帧淡化,通常净改善。运动跳变极大若起叠影可调小或设 0。
     VIDEO_SEAM_CROSSFADE: float = 0.2
     # ── Wan2.2-Lightning 极速档(4步蒸馏 LoRA;可逐镜切，关=A14B 满档精修)──
     # 默认关(精修档)；出片时传 lightning=true(面板「极速档」开关/更多参数)或这里设 true 走极速档。
-    WAN_LIGHTNING: bool = False
-    COMFYUI_WORKFLOW_I2V_LIGHTNING: str = "comfyui_workflows/i2v_fp8_lightning_template.json"
     # 出片精度(由 colab cell-1 按 GPU 探测写入环境变量;空=未探测)。极速档据此选模板:
     # 原生 fp8 卡(Blackwell/H100)=fp8;无原生 fp8 卡(A100/V100,探测为 fp16)→自动改用 bf16 极速档模板
     # ——A100(sm_80)无 FP8 张量核,跑 fp8 是软件模拟纯亏,bf16 更快且画质更高。
-    I2V_PRECISION: str = ""
     # 极速档步数(可调):蒸馏 LoRA 按 4 步训,4=最快(贴训练点)、6=通常更干净、8=再稳更慢。
     # 模板用 %STEPS%/%BOUNDARY% 占位;切换步(高噪→低噪)取步数一半(高噪 0→BOUNDARY、低噪 BOUNDARY→end)。
-    WAN_LIGHTNING_STEPS: int = 6
     # 蒸馏档专属 shift(别用满档的 5):社区蒸馏档常用 ~8,运动/清晰度更稳。可在面板 shift 覆盖。
-    WAN_LIGHTNING_SHIFT: float = 8.0
     # i2v 高/低噪各自的 Lightning LoRA 文件名(放 ComfyUI/models/loras/;★高噪用 high、低噪用 low，别混)。
-    WAN_LIGHTNING_LORA_HIGH: str = "wan2.2_i2v_A14b_high_noise_lora_rank64_lightx2v_4step_1022.safetensors"
-    WAN_LIGHTNING_LORA_LOW: str = "wan2.2_i2v_A14b_low_noise_lora_rank64_lightx2v_4step_1022.safetensors"
     # LoRA 强度:i2v 官方基准 1.0/1.0；★实测 1.0/1.0 常运动太弱/慢动作 → HIGH 默认调到 1.5(low 保持 1.0)。
     # 别降高噪(社区"0.65-0.8"是 T2V 防过曝的，照搬到 i2v 会更不动)。
-    WAN_LIGHTNING_STR_HIGH: float = 1.5
-    WAN_LIGHTNING_STR_LOW: float = 1.0
     # ── 文生视频 t2v 档(Wan2.2-T2V-A14B；与 i2v 并存，由「出片模式=t2v」路由，不进用户下拉)──
     # t2v 不经 FLUX、不出图不选图，文本直接→视频；角色身份靠训好的 Wan-T2V 角色 LoRA(空=纯提示词)。
-    COMFYUI_WORKFLOW_T2V: str = ""                                       # 满档 t2v 模板;空=用仓库自带 t2v_fp8_template.json
-    COMFYUI_WORKFLOW_T2V_LIGHTNING: str = "comfyui_workflows/t2v_fp8_lightning_template.json"
-    T2V_PRECISION: str = ""                                             # 同 I2V_PRECISION;空=未探测(cell1 写入)
     # t2v 角色 LoRA(训好后填;高/低噪各一)。空=不挂(provider 摘除 LoRA 节点)。强度 t2v 基准 ~0.8-1.0。
-    WAN_T2V_LORA_HIGH: str = ""
-    WAN_T2V_LORA_LOW: str = ""
-    WAN_T2V_LORA_STR_HIGH: float = 1.0
-    WAN_T2V_LORA_STR_LOW: float = 1.0
     # i2v 角色 LoRA(i2v 原生训的;用于尾帧续接锁脸)。高/低噪各一,空=不挂。训练「模式=i2v」产物自动写进项目级
     # wan_i2v_lora_* (见 lora_train._link_after_train);也可在 .env 设全局默认。强度可 0.8-1.0(i2v 原生不必压 0.5)。
-    WAN_I2V_LORA_HIGH: str = ""
-    WAN_I2V_LORA_LOW: str = ""
-    WAN_I2V_LORA_STR_HIGH: float = 0.9
-    WAN_I2V_LORA_STR_LOW: float = 0.9
     # t2v 极速档蒸馏 LoRA(★与 i2v 的不同文件!)。文件名以 HF lightx2v/Wan2.2-Distill-Loras 实际为准,可在 .env 覆盖。
-    WAN_T2V_LIGHTNING_LORA_HIGH: str = "wan2.2_t2v_A14b_high_noise_lora_rank64_lightx2v_4step.safetensors"
-    WAN_T2V_LIGHTNING_LORA_LOW: str = "wan2.2_t2v_A14b_low_noise_lora_rank64_lightx2v_4step.safetensors"
     # ── t2v 出片后端 ──────────────────────────────────────────────
     # t2v 走 ComfyUI(comfyui-t2v provider，配 COMFYUI_BASE_URL 才注册)。保留此键以便将来并存其它 t2v 后端。
-    T2V_PROVIDER: str = "comfyui-t2v"
     # Stand-In 强锁脸(WeChatCV/Stand-In)文生视频后端:给一张参考脸跨镜硬锁身份,免训练。另起包装 server(默认 8190),
     # 不走 lightx2v(它自带 DiffSynth 引擎)。由「出片模式=t2v + 前端强锁脸开关 + 该角色有参考脸」路由(见 _do_render_t2v)。
-    STANDIN_ENABLED: bool = False           # 配了端点 + 跑了 Colab §Stand-In 起 server 才注册;默认关
-    STANDIN_BASE_URL: str = ""              # 如 http://127.0.0.1:8190(与 lightx2v 8189 错开)
-    STANDIN_STEPS: int = 20                 # 锁脸无蒸馏采样步数(20 起细;Stand-In 不挂蒸馏 LoRA,身份来自参考脸)
     # 注:i2v 尾帧续接(镜N 用镜N-1 尾帧当首帧续生成)现走 ComfyUI i2v provider(wan2.2),
     # 复用 WAN_LIGHTNING_LORA_*(极速)+ WAN_T2V_LORA_*/项目级 i2v 角色 LoRA(锁脸);不再起独立 lightx2v i2v server。
     # ── 视频模型解耦：默认 Provider + LTX-Video 配置 ──────────────
     # 默认用哪个视频模型（对应 providers 注册名：wan2.2 / ltx）
-    VIDEO_PROVIDER_DEFAULT: str = "wan2.2"
     # LTX-Video（部署后填 GPU_LTX_MODEL 即可启用；脚本自动上传）
-    GPU_LTX_MODEL: str = ""                          # LTX diffusers 目录（如 /root/autodl-tmp/models/LTX-Video）或 HF id
-    GPU_LTX_SCRIPT: str = "/root/autodl-tmp/ltx_i2v.py"
     # 复用 FLUX 的 T5-XXL text_encoder，省 ~19G 盘（留空则用 LTX 自带 text_encoder）
-    GPU_LTX_T5_DIR: str = "/root/autodl-tmp/models/flux-dev/text_encoder_2"
-    LTX_SIZE: str = "480*832"          # 默认竖屏快档：省显存(~10G)、更快，不会被卡上残留一点点占用就 OOM
-    LTX_NUM_FRAMES: int = 121
-    LTX_FPS: int = 24
-    LTX_STEPS: int = 30                 # LTX 30 步已够；比 40 快约 1/4
-    LTX_GUIDANCE: float = 3.0
     # ── LTX-Video 2.3（ComfyUI HTTP provider，与 Wan2.2 并列、用户在下拉里手选）──────────
     # 定位：LTX=快/音视频一体/走量；Wan=运动真实感/电影级控制/NSFW 生态成熟。走 ComfyUI 原生 LTXAV
     # 节点(需 ComfyUI v0.16+/torch≥2.4，与本仓默认钉的 v0.3.75 不能同实例共存——见
     # comfyui_workflows/README.md 的「LTX 2.3 接入」说明)。以下全部可在 .env/面板覆盖(不写死)。
     # 装好 LTX(节点+权重)后把 LTX2_ENABLED 设 true，它才并列进用户模型下拉(免没装时选了跑不了)。
-    LTX2_ENABLED: bool = False
     # LTX 专属 ComfyUI 端点（双实例用）：非空=LTX 走这个地址(如另一端口/另一台跑 v0.16+ 的 ComfyUI，
     # 与 Wan 的 v0.3.75 实例隔离)；空=回落到 COMFYUI_BASE_URL(单实例，Wan/LTX 共用)。
-    COMFYUI_LTX_BASE_URL: str = ""
-    COMFYUI_WORKFLOW_LTX: str = ""        # LTX i2v workflow 模板路径；空=用仓库自带 ltx_i2v_template.json(脚手架，首跑前按官方模板核对)
-    LTX2_SIZE: str = "704*1280"           # 默认竖屏(宽*高，须 32 的倍数)；2.3 可上 1088*1920(1080p)
-    LTX2_FRAMES: int = 121                # 帧数须 8 的倍数+1(如 121≈5s@24fps)
-    LTX2_FPS: int = 24                    # LTX 原生帧率较高，常用 24
-    LTX2_STEPS: int = 30                  # dev 全量精修约 30；distilled 蒸馏档约 8
-    LTX2_GUIDANCE: float = 3.0
-    LTX2_DISTILLED: bool = False          # True=8步蒸馏极速档(类比 Wan Lightning)；False=dev 全量精修
-    LTX2_KEEP_AUDIO: bool = False         # 默认丢 LTX 自带音(交角色声音圣经 TTS 统一音色)；True=保留 LTX 原生音轨
     # ── Sulphur 2（LTX-2.3 无审查 fine-tune，NSFW 生产）：可选的第二个视频后端，与 Wan 并存、门控注册(同 LTX2 范式)──
     # 装好 Sulphur(ComfyUI v0.16+ 节点 ComfyUI-GGUF/LTXVideo/VHS + GGUF 权重)后 SULPHUR2_ENABLED=true 才进
     # 用户模型下拉、逐镜可选；.env 设 VIDEO_PROVIDER_DEFAULT=sulphur2 + T2V_PROVIDER=sulphur2 即把默认出片整体换它。
     # 模型下载见 colab/download_sulphur2.sh。一个仓 .env 一行切 Wan/Sulphur，无需分叉。
-    SULPHUR2_ENABLED: bool = False
-    SULPHUR2_BASE_URL: str = ""            # Sulphur 专属 ComfyUI 端点；空=回落 COMFYUI_BASE_URL
-    COMFYUI_WORKFLOW_SULPHUR_T2V: str = "" # 空=用仓库自带 comfyui_workflows/sulphur_t2v_template.json
-    COMFYUI_WORKFLOW_SULPHUR_I2V: str = ""
-    SULPHUR2_SIZE: str = "704*1280"        # 竖屏~720p；宽高须 32 倍数
-    SULPHUR2_FRAMES: int = 121             # 须 8n+1(121≈5s@24fps)
-    SULPHUR2_FPS: int = 24
-    SULPHUR2_STEPS: int = 30               # dev 档 25-35；distilled 蒸馏档约 8
-    SULPHUR2_GUIDANCE: float = 4.0         # Sulphur/LTX 常用 3.5-5
-    SULPHUR2_DISTILLED: bool = False       # True=8步蒸馏极速档；False=dev 全量精修
-    SULPHUR2_KEEP_AUDIO: bool = False      # 默认丢 LTX 自带音(交 TTS 统一音色)；True=保留原生音轨
-    SULPHUR_LORA_STRENGTH: float = 1.0     # 出片挂角色 LoRA 强度(Sulphur/LTX 单 LoRA)
     # ── ComfyUI 后端（HTTP，可配置；对用户完全隐形）──────────────
     # 在 GPU 或任意机器上跑 ComfyUI，本框架通过它的 HTTP API 提交 workflow。
     # 关键：ComfyUI 不作为「用户可见的模型」出现。它**透明顶替**现有公开模型名的执行后端——
     #   用户面板里选的还是 Wan2.2 / FLUX，配了端点后这些就悄悄走 ComfyUI（白嫖 GGUF/SageAttention/
     #   调好不崩的图），下拉/日志/文案里不出现「ComfyUI」字样。换机器只改 COMFYUI_BASE_URL。
-    COMFYUI_BASE_URL: str = ""            # 如 http://127.0.0.1:8188（空=完全不启用 ComfyUI）
     # 顶替哪个公开模型名的执行后端。取值："auto"=跟随当前默认模型；具体名（如 ltx/wan2.2/flux）=只顶替该模型；""=该环节不走 ComfyUI。
-    COMFYUI_VIDEO_AS: str = "auto"        # 出片：默认 auto=配端点就让“你的默认出片模型”透明走 ComfyUI（本仓默认是 ltx）
     COMFYUI_IMAGE_AS: str = ""            # 出图：默认 ""=仍走 FLUX-SSH；设 "auto"/"flux" 才让出图透明走 ComfyUI
-    COMFYUI_WORKFLOW_I2V: str = ""        # i2v workflow 模板(API格式 JSON)路径；空=用仓库自带 comfyui_workflows/i2v_template.json
-    COMFYUI_TIMEOUT: int = 1800           # 单段出片超时（秒）
-    COMFYUI_FRAMES: int = 81              # 默认帧数（i2v 用；对口型 S2V 改为按音频时长动态算）
-    COMFYUI_FPS: int = 16                 # 默认帧率（Wan 系常用 16）
     # 对口型(S2V)单段一口气帧数上限：防 24G OOM/超长。0=不限，帧数完全跟音频走；
     # 若长台词 OOM，可设为如 113（≈7s@16fps），超长会告警并建议拆句/分镜。
     COMFYUI_S2V_MAX_FRAMES: int = 0
-    COMFYUI_STEPS: int = 30               # 默认采样步数（原生最强；A14B GGUF 模板内步数已同步为 30）
     # ── 合成连贯性 ──
     # 镜间交叉叠化(秒)：0=硬切；0.4 左右让镜头切换更顺、减少"散"。失败自动回退硬切。
     ASSEMBLE_CROSSFADE: float = 0.4
     # 背景音乐文件(本地路径)：设了就在整片下垫一条低音量 BGM(贯穿全集=最便宜的连贯感)；空=不加。
     BGM_PATH: str = ""
     BGM_VOLUME: float = 0.18              # BGM 相对音量(垫在旁白下，别盖过人声)
-    COMFYUI_SIZE: str = "720*1280"        # 默认分辨率（宽*高）：原生最强守住 720p 竖屏（旧 480*832 是快出档）
     # ComfyUI 文生图（t2i）：把出图也接到 ComfyUI（GGUF Flux / 更好采样器 / LoRA 叠加）
     # t2i workflow 模板路径。空=用仓库自带 flux t2i_template.json(FLUX-dev 系底模都用这个，含 LoraLoader)。
     COMFYUI_WORKFLOW_T2I: str = ""
@@ -295,7 +204,6 @@ class Settings(BaseSettings):
     FACESWAP_DET_MODEL: str = "retinaface_resnet50"        # 人脸检测器(retinaface_resnet50 质量最好)
     # Wan2.2-S2V 对口型（语音驱动）：人物开口说话的镜头用。图+音频→口型同步视频，走 ComfyUI。
     # 隐藏 Provider：不进用户模型下拉，由每镜「对口型」开关自动路由。端点门控同 COMFYUI_BASE_URL。
-    COMFYUI_WORKFLOW_S2V: str = ""        # S2V workflow 模板路径；空=用仓库自带 comfyui_workflows/s2v_template.json
     COMFYUI_S2V_TTS_VOICE: str = "zh-CN-YunxiNeural"  # 对口型用的 TTS 音色（edge-tts；男声示例）
     # 配音引擎（解耦：CosyVoice2 默认/保底，可插拔自托管克隆引擎；见 pipeline/tts_providers）。edge-tts 已弃用。
     TTS_PROVIDER_DEFAULT: str = "cosyvoice2"  # 默认配音引擎(cosyvoice2 默认/保底；indextts2 可选)

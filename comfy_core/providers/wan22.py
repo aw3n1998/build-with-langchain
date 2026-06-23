@@ -15,13 +15,13 @@ import shlex
 import time
 from typing import TYPE_CHECKING
 
-from mirage.app.core.config import settings
-from mirage.app.core.logger import get_logger
-from mirage.app.pipeline.gpu_client import GpuRunError, coerce_num, parse_size
-from mirage.app.pipeline.providers.base import VideoProvider
+from comfy_core.config import settings
+from comfy_core.logger import get_logger
+from comfy_core.gpu_client import GpuRunError, coerce_num, parse_size
+from comfy_core.providers.base import VideoProvider
 
 if TYPE_CHECKING:
-    from mirage.app.pipeline.gpu_client import GpuClient
+    from comfy_core.gpu_client import GpuClient
 
 logger = get_logger("pipeline.providers.wan22")
 

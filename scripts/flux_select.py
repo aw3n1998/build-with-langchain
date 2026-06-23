@@ -70,10 +70,11 @@ CORE_STYLE = (
     "moody low-key lighting, photorealistic, 35mm film grain, 4K, 9:16. "
 )
 
-# 服务器出图脚本（随脚本内联，首次运行自动上传，无需手动部署）
+# 服务器出图脚本（随仓库携带，首次运行自动上传，无需手动部署）。
+# 已随 gpu_client 迁入解耦核心 comfy_core/remote_scripts/（单一真源）。
 _REMOTE_SOURCE = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)),
-    "mirage", "app", "pipeline", "remote_scripts", "flux_candidates.py",
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "comfy_core", "remote_scripts", "flux_candidates.py",
 )
 
 

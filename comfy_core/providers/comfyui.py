@@ -23,12 +23,12 @@ import time
 
 import httpx
 
-from mirage.app.core.config import settings
-from mirage.app.core.logger import get_logger
-from mirage.app.pipeline import comfy_http as ch
-from mirage.app.pipeline import log_bus
-from mirage.app.pipeline.gpu_client import GpuConfigError, GpuRunError, parse_size  # noqa: F401 (re-export 供测试/外部引用)
-from mirage.app.pipeline.providers.base import VideoProvider
+from comfy_core.config import settings
+from comfy_core.logger import get_logger
+from comfy_core import comfy_http as ch
+from comfy_core import log_bus
+from comfy_core.gpu_client import GpuConfigError, GpuRunError, parse_size  # noqa: F401 (re-export 供测试/外部引用)
+from comfy_core.providers.base import VideoProvider
 
 logger = get_logger("pipeline.providers.comfyui")
 
@@ -129,7 +129,7 @@ class ComfyUIProvider(VideoProvider):
         # 角色 LoRA(i2v 原生训的 wan_i2v_lora_*,续接锁脸):i2v 模板的 69/70 节点(仿 t2v)——有 LoRA 就填、
         # 空则摘节点(_strip_lora_node,避免空 lora_name 触发 ComfyUI node_errors)。对没加 69/70 的模板:strip 是
         # no-op、填进 mapping 的占位也会被 fill_template 忽略,故两类模板都安全。
-        from mirage.app.pipeline.providers.comfyui_t2v import _strip_lora_node
+        from comfy_core.providers.comfyui_t2v import _strip_lora_node
         _chi = (params.get("wan_i2v_lora_high") or settings.WAN_I2V_LORA_HIGH or "").strip()
         _clo = (params.get("wan_i2v_lora_low") or settings.WAN_I2V_LORA_LOW or "").strip()
         if _chi:

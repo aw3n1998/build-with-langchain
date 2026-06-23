@@ -23,11 +23,11 @@ import time
 
 import httpx
 
-from mirage.app.core.config import settings
-from mirage.app.core.logger import get_logger
-from mirage.app.pipeline import log_bus
-from mirage.app.pipeline.gpu_client import GpuConfigError, GpuRunError, parse_size  # noqa: F401
-from mirage.app.pipeline.providers.base import VideoProvider
+from comfy_core.config import settings
+from comfy_core.logger import get_logger
+from comfy_core import log_bus
+from comfy_core.gpu_client import GpuConfigError, GpuRunError, parse_size  # noqa: F401
+from comfy_core.providers.base import VideoProvider
 
 logger = get_logger("pipeline.providers.standin")
 

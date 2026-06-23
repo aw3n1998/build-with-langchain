@@ -1,56 +1,51 @@
 """
-视频模型 Provider 包。导入即把内置模型注册到 video_provider_registry。
+re-export shim —— 视频 Provider 实体已整包迁到 comfy_core/providers/（解耦核心，单一真源）。
 
-新增一个视频模型 = 在本包加一个 provider 文件 + 在这里 register 一行，
-工具层 / 路由 / 前端参数卡都不用改（参数卡由 provider.param_schema() 驱动）。
+注册逻辑现位于 comfy_core/providers/__init__.py：导入 `comfy_core.providers` 即触发用
+`comfy_core.config.settings` 的内置 provider 注册（Wan2.2 / LTX / ComfyUI 透明顶替 / LTX2 /
+Sulphur2 / S2V / T2V / Stand-In，全部门控不变）。本 shim 只做两件事：
+
+1. 触发并复用 comfy_core 的注册表（导入它即注册）；把 `video_provider_registry` 与
+   `VideoProvider` 以历史路径 `mirage.app.pipeline.providers` 暴露给后端（~78 处调用点不改）。
+2. 把每个 provider 子模块别名进 sys.modules，使后端历史的**直接子模块导入**
+   （如 `from mirage.app.pipeline.providers.comfyui_t2v import ComfyUIT2VProvider`、
+   `...providers.base import VideoProvider`、`.comfyui/.comfyui_ltx/.comfyui_s2v/.sulphur2/
+   .standin/.wan22/.ltx`）透明解析到 comfy_core 下的同名实体（同一对象、同一注册表）。
+
+新代码请直接 `from comfy_core.providers import video_provider_registry`。
 """
+import sys
 
-from mirage.app.core.config import settings
-from mirage.app.pipeline.providers.base import (
-    VideoProvider,
-    video_provider_registry,
-)
-from mirage.app.pipeline.providers.wan22 import Wan22Provider
-from mirage.app.pipeline.providers.ltx import LtxProvider
+# 导入即注册（comfy_core/providers/__init__.py 用 comfy_core.config.settings 完成全部注册）。
+from comfy_core.providers import VideoProvider, video_provider_registry  # noqa: F401
 
-# 注册内置模型。默认模型由 .env 的 VIDEO_PROVIDER_DEFAULT 决定（缺省 wan2.2）。
-video_provider_registry.register(Wan22Provider())
-video_provider_registry.register(LtxProvider())
-# ComfyUI 出片后端：对用户完全隐形。不新增「ComfyUI」条目，而是**顶替** COMFYUI_VIDEO_AS 指定的
-# 公开模型名（默认 wan2.2）的执行后端——用户选到的还是 Wan2.2，配了端点后它透明地走 ComfyUI。
-if settings.COMFYUI_BASE_URL and settings.COMFYUI_VIDEO_AS:
-    _as = settings.COMFYUI_VIDEO_AS
-    if _as == "auto":   # 跟随默认出片模型（用户用哪个，就透明把哪个换成 ComfyUI 后端）
-        _as = settings.VIDEO_PROVIDER_DEFAULT or video_provider_registry.default_name
-    if _as:
-        _disp = video_provider_registry.get(_as).display_name if video_provider_registry.has(_as) else _as
-        from mirage.app.pipeline.providers.comfyui import ComfyUIProvider
-        video_provider_registry.register(ComfyUIProvider(name=_as, display_name=_disp))  # 同名覆盖 SSH 版
-# LTX-Video 2.3：ComfyUI HTTP 后端，**独立注册**(不走上面的透明顶替)——和 Wan2.2 并列出现在
-# 用户模型下拉里、逐镜可手选。双门控：配了端点 + LTX2_ENABLED 才注册，避免没装/没下 LTX 时
-# 下拉里冒出个选了跑不了的项。参数卡由它自己的 param_schema() 驱动(LTX 专属字段，与 Wan 不混)。
-if settings.LTX2_ENABLED and (settings.COMFYUI_LTX_BASE_URL or settings.COMFYUI_BASE_URL):
-    from mirage.app.pipeline.providers.comfyui_ltx import ComfyUILtxProvider
-    video_provider_registry.register(ComfyUILtxProvider())
-# Sulphur 2（LTX-2.3 无审查 fine-tune，NSFW 生产）：与 LTX2 同范式的门控注册——SULPHUR2_ENABLED + 端点才注册，
-# 并列进用户模型下拉、逐镜可手选。与 Wan 并存；.env 设 VIDEO_PROVIDER_DEFAULT=sulphur2 即把默认出片换成它
-# （一个仓 .env 一行切 Wan/Sulphur，无需分叉）。参数卡由它自己的 param_schema() 驱动。
-if settings.SULPHUR2_ENABLED and (settings.SULPHUR2_BASE_URL or settings.COMFYUI_BASE_URL):
-    from mirage.app.pipeline.providers.sulphur2 import Sulphur2Provider
-    video_provider_registry.register(Sulphur2Provider())
-if settings.VIDEO_PROVIDER_DEFAULT and video_provider_registry.has(settings.VIDEO_PROVIDER_DEFAULT):
-    video_provider_registry.set_default(settings.VIDEO_PROVIDER_DEFAULT)
-# Wan2.2-S2V 对口型：隐藏 Provider，不进用户下拉，由「对口型」开关路由。配了端点才注册。
-if settings.COMFYUI_BASE_URL:
-    from mirage.app.pipeline.providers.comfyui_s2v import ComfyUIS2VProvider
-    video_provider_registry.register(ComfyUIS2VProvider())
-# Wan2.2-T2V 文生视频：隐藏 Provider，不进用户下拉，由「出片模式=t2v」路由。配了端点才注册。
-if settings.COMFYUI_BASE_URL:
-    from mirage.app.pipeline.providers.comfyui_t2v import ComfyUIT2VProvider
-    video_provider_registry.register(ComfyUIT2VProvider())
-# Stand-In 强锁脸文生视频后端(WeChatCV/Stand-In,另起包装 server,不走 lightx2v):配了 STANDIN_ENABLED + 端点才注册。
-# 隐藏 Provider,由「出片模式=t2v + 强锁脸开关 + 该角色有参考脸」路由(见 pipeline_tools._do_render_t2v)。
-if settings.STANDIN_ENABLED and settings.STANDIN_BASE_URL:
-    from mirage.app.pipeline.providers.standin import StandInT2VProvider
-    video_provider_registry.register(StandInT2VProvider())
+# 把 comfy_core 下的 provider 子模块以历史 mirage 路径别名进 sys.modules，
+# 让 `from mirage.app.pipeline.providers.<sub> import ...` 解析到同一实体模块对象。
+# 显式枚举内置子模块（与 comfy_core/providers/ 下文件一一对应），避免误吸 __init__ 自身。
+for _sub in (
+    "base",
+    "wan22",
+    "ltx",
+    "comfyui",
+    "comfyui_ltx",
+    "comfyui_s2v",
+    "comfyui_t2v",
+    "sulphur2",
+    "standin",
+):
+    try:
+        _mod = __import__(f"comfy_core.providers.{_sub}", fromlist=["_"])
+    except ImportError:
+        # 某 provider 可选依赖缺失时跳过（与历史「按需 import 才报错」行为一致，不影响其余）。
+        continue
+    sys.modules[f"{__name__}.{_sub}"] = _mod
+    # 同时把子模块挂为本包属性，支持 `import mirage.app.pipeline.providers.<sub>` 后的属性访问。
+    setattr(sys.modules[__name__], _sub, _mod)
+
+del sys, _sub
+try:
+    del _mod
+except NameError:
+    pass
+
 __all__ = ["VideoProvider", "video_provider_registry"]

@@ -1,0 +1,10 @@
+# GPU worker 独立部署依赖 —— worker 已和 Web 后端解耦：出片执行核心全在 comfy_core/，
+# worker 只依赖它，不需要 FastAPI/store/langchain/账号那一大坨。
+# 纯 ComfyUI/Sulphur HTTP worker（跑 comfyui-t2v / sulphur2 等，走本机 ComfyUI HTTP）只要下面三个：
+httpx>=0.24            # 拉任务/上传成片 + ComfyUI HTTP 调用
+pydantic-settings>=2  # comfy_core 的 ProviderSettings 从 .env / 环境变量读出片配置
+websockets>=11        # 算力面板实时状态推送（可选；缺了 worker 自动降级 HTTP-only）
+
+# ── 仅在本 worker 要跑【SSH 出片 provider】(wan2.2 / ltx 那套远程 GPU)时才装 ──
+# gpu_client 里 paramiko 是函数内惰性 import，纯 HTTP worker 不会触发，无需安装。
+# paramiko>=3

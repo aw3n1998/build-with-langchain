@@ -16,7 +16,7 @@ def render_t2v(cfg, task: dict, on_progress) -> str:
     # 用注册表按名取 provider（import 这个包即注册所有内置 provider）；取不到回退 comfyui-t2v；
     # 注册表彻底没有(异常)再兜底直接 import ComfyUIT2VProvider，保证老任务一定能跑。
     try:
-        from mirage.app.pipeline.providers import video_provider_registry as R  # noqa: E402
+        from comfy_core.providers import video_provider_registry as R  # noqa: E402
         has = R.has(pname)
     except Exception:  # noqa: BLE001  注册表整体导入异常(极少)
         R, has = None, False
@@ -31,7 +31,7 @@ def render_t2v(cfg, task: dict, on_progress) -> str:
             f"(WORKER_MODELS 显式声明本机真能跑的模型、别留空通配)。")
     else:
         # 注册表整体异常才兜底直跑 comfyui-t2v，保证老任务不全挂。
-        from mirage.app.pipeline.providers.comfyui_t2v import ComfyUIT2VProvider  # noqa: E402
+        from comfy_core.providers.comfyui_t2v import ComfyUIT2VProvider  # noqa: E402
         prov = ComfyUIT2VProvider()
 
     out = os.path.join(os.environ.get("TMPDIR", "/tmp"), f"{task['id']}.mp4")
