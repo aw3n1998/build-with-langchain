@@ -21,6 +21,13 @@ function getAgentConfigs() {
   }
 }
 
+// ── 账号令牌（用户系统开启时附带；门控关时后端按 dev 用户放行，无需登录）──
+const TOKEN_KEY = 'mirage_token'
+export function getToken() { return localStorage.getItem(TOKEN_KEY) || '' }
+export function setToken(t) { if (t) localStorage.setItem(TOKEN_KEY, t); else localStorage.removeItem(TOKEN_KEY) }
+function authHeaders() { const t = getToken(); return t ? { Authorization: `Bearer ${t}` } : {} }
+async function _err(r) { let d = ''; try { d = (await r.json()).detail } catch { /* noop */ } return new Error(d || `HTTP ${r.status}`) }
+
 // ── 应用状态（当前模型 / 模式）────────────────────────────────
 
 export async function getStatus() {
@@ -153,11 +160,49 @@ export async function fsList(path = '') {
 async function submitJob(path, params) {
   const r = await fetch(`${getBase()}${path}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify(params),
   })
-  if (!r.ok) throw new Error(`HTTP ${r.status}`)
+  if (!r.ok) throw await _err(r)   // 401=未登录 / 402=积分不足 的 detail 会带出来
   return (await r.json()).job_id
+}
+
+// ── 用户系统 + 充值/计费（解耦模块 /api/auth /api/billing；门控关=无需登录、免费）──
+export async function authRegister(email, password, display_name = '') {
+  const r = await fetch(`${getBase()}/auth/register`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password, display_name }) })
+  if (!r.ok) throw await _err(r)
+  const d = await r.json(); if (d.token) setToken(d.token); return d
+}
+export async function authLogin(email, password) {
+  const r = await fetch(`${getBase()}/auth/login`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password }) })
+  if (!r.ok) throw await _err(r)
+  const d = await r.json(); if (d.token) setToken(d.token); return d
+}
+export function authLogout() { setToken('') }
+export async function authMe() {
+  const r = await fetch(`${getBase()}/auth/me`, { headers: { ...authHeaders() } })
+  if (!r.ok) throw await _err(r); return r.json()
+}
+export async function billingConfig() {
+  const r = await fetch(`${getBase()}/billing/config`); if (!r.ok) throw await _err(r); return r.json()
+}
+export async function billingBalance() {
+  const r = await fetch(`${getBase()}/billing/balance`, { headers: { ...authHeaders() } })
+  if (!r.ok) throw await _err(r); return r.json()
+}
+export async function billingTransactions(limit = 50) {
+  const r = await fetch(`${getBase()}/billing/transactions?limit=${limit}`, { headers: { ...authHeaders() } })
+  if (!r.ok) throw await _err(r); return r.json()
+}
+export async function billingRecharge(credits, provider = '') {
+  const r = await fetch(`${getBase()}/billing/recharge`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify({ credits, provider }) })
+  if (!r.ok) throw await _err(r); return r.json()
 }
 
 // params 需带 workspace（由调用方按当前会话传入）；返回 job_id

@@ -307,6 +307,25 @@ class Settings(BaseSettings):
     NP2V_DB_PATH: Optional[str] = None
     NP2V_LOCAL_OUT: Optional[str] = None
 
+    # ── 用户系统（解耦·门控；见 app/accounts）──
+    AUTH_ENABLED: bool = False                # 关=开放(单用户开发态);开=受保护接口要带 Bearer 令牌
+    AUTH_SECRET: str = ""                     # 令牌签名密钥(开 AUTH 必设强随机;空=开发占位,勿用于生产)
+    AUTH_TOKEN_TTL: int = 604800              # 令牌有效期(秒,默认7天)
+    AUTH_ALLOW_REGISTER: bool = True          # 是否开放自助注册
+    ACCOUNTS_DB_PATH: str = ""                # 账号库 SQLite(空=放 pipeline.db 同目录 accounts.db)
+    # ── 充值/计费（解耦·门控；见 app/accounts/billing）──
+    BILLING_ENABLED: bool = False             # 关=免费不扣费;开=按操作扣积分
+    BILLING_PROVIDER: str = "mock"            # 默认支付渠道(mock/stripe/...);加渠道见 billing.PaymentProvider
+    BILLING_COST_ONECLICK: int = 100          # 一键全自动出片每次扣的积分
+    BILLING_COST_RENDER_SHOT: int = 20        # 单镜出片扣的积分
+    BILLING_COST_BATCH_FINISH: int = 0        # 批量出片(0=按镜数×单镜)
+    BILLING_SIGNUP_BONUS: int = 100           # 注册赠送积分
+    BILLING_CURRENCY: str = "usd"             # 计价货币(Stripe)
+    STRIPE_SECRET_KEY: str = ""               # 配了才注册 stripe 渠道
+    STRIPE_WEBHOOK_SECRET: str = ""           # webhook 验签密钥(生产必配)
+    STRIPE_PRICE_PER_CREDIT: float = 0.01     # 1 积分单价(货币单位,如 0.01 美元)
+    FRONTEND_BASE_URL: str = ""               # 前端站点根(Stripe 支付成功/取消跳转用)
+
     model_config = SettingsConfigDict(
         # 自动加载当前目录或上级目录的 .env 文件
         env_file = ".env",

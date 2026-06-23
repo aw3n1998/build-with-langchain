@@ -21,12 +21,13 @@ from typing import AsyncGenerator
 
 from mirage.app.core.config import settings
 
-from fastapi import APIRouter, HTTPException, UploadFile, File, Form, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from mirage.app.services.ai_service import ai_service
 from mirage.app.core.logger import get_logger
+from mirage.app.accounts import deps as _acct   # 鉴权+计费守卫（门控关=全放行，零回归）
 
 logger = get_logger("api.routes")
 
@@ -767,10 +768,12 @@ async def _render_events(req: RenderRequest):
 
 
 @router.post("/pipeline/render")
-async def pipeline_render(req: RenderRequest):
-    """出视频参数卡确认后出片：提交为后台任务，立即返回 job_id（单飞队列）。"""
+async def pipeline_render(req: RenderRequest, user: dict = Depends(_acct.current_user)):
+    """出视频参数卡确认后出片：提交为后台任务，立即返回 job_id（单飞队列）。计费门控关=免费。"""
     from mirage.app.services.job_manager import job_manager
+    _acct.ensure_credits(user, "render_shot")
     job_id = job_manager.submit("render", lambda: _render_events(req))
+    _acct.charge_quietly(user, "render_shot", ref=job_id)
     return {"job_id": job_id}
 
 
@@ -2429,13 +2432,15 @@ async def pipeline_scene_generate(req: SceneGenRequest):
 
 
 @router.post("/pipeline/scene_render")
-async def pipeline_scene_render(req: SceneRenderRequest):
-    """单镜出片：后台任务，返回 job_id。"""
+async def pipeline_scene_render(req: SceneRenderRequest, user: dict = Depends(_acct.current_user)):
+    """单镜出片：后台任务，返回 job_id。计费门控关=免费。"""
     from mirage.app.services.job_manager import job_manager
+    _acct.ensure_credits(user, "render_shot")
     meta = {"session_id": req.session_id, "scene_id": req.scene_id,
             "project_id": _scene_project_id(req.scene_id, req.workspace)}
-    return {"job_id": job_manager.submit(
-        "render", lambda: _scene_render_events(req), meta=meta)}
+    jid = job_manager.submit("render", lambda: _scene_render_events(req), meta=meta)
+    _acct.charge_quietly(user, "render_shot", ref=jid)
+    return {"job_id": jid}
 
 
 def _do_lora_preview(req: "LoraPreviewRequest") -> str:
@@ -2753,10 +2758,13 @@ async def pipeline_batch_generate(req: BatchRequest):
 
 
 @router.post("/pipeline/batch_finish")
-async def pipeline_batch_finish(req: BatchRequest):
-    """一键全部出片并合成整集：后台单飞任务，返回 job_id。"""
+async def pipeline_batch_finish(req: BatchRequest, user: dict = Depends(_acct.current_user)):
+    """一键全部出片并合成整集：后台单飞任务，返回 job_id。计费门控关=免费。"""
     from mirage.app.services.job_manager import job_manager
-    return {"job_id": job_manager.submit("batch_finish", lambda: _batch_finish_events(req), meta={"session_id": req.session_id, "project_id": req.project_id})}
+    _acct.ensure_credits(user, "batch_finish")
+    jid = job_manager.submit("batch_finish", lambda: _batch_finish_events(req), meta={"session_id": req.session_id, "project_id": req.project_id})
+    _acct.charge_quietly(user, "batch_finish", ref=jid)
+    return {"job_id": jid}
 
 
 class OneClickRequest(BaseModel):
@@ -2841,11 +2849,14 @@ async def _one_click_events(req: OneClickRequest):
 
 
 @router.post("/pipeline/one_click")
-async def pipeline_one_click(req: OneClickRequest):
+async def pipeline_one_click(req: OneClickRequest, user: dict = Depends(_acct.current_user)):
     """一键全自动出片：小说 → ~目标时长成片，全程后台单飞任务，返回 job_id。
 
-    进度走 /pipeline/jobs/{job_id}/events SSE（与 batch_* 同一套）。
+    进度走 /pipeline/jobs/{job_id}/events SSE（与 batch_* 同一套）。计费门控关=免费。
     """
     from mirage.app.services.job_manager import job_manager
-    return {"job_id": job_manager.submit("one_click", lambda: _one_click_events(req),
-            meta={"session_id": req.session_id, "project_id": req.project_id})}
+    _acct.ensure_credits(user, "one_click")      # 余额不足→402（下发任务前）
+    jid = job_manager.submit("one_click", lambda: _one_click_events(req),
+                             meta={"session_id": req.session_id, "project_id": req.project_id})
+    _acct.charge_quietly(user, "one_click", ref=jid)
+    return {"job_id": jid}

@@ -96,6 +96,14 @@ app.add_middleware(
 # ── 注册路由 ─────────────────────────────────────────────────────
 app.include_router(router, prefix="/api")
 
+# ── 用户系统 + 充值/计费（解耦模块 app/accounts；门控关时全放行、零回归）──
+try:
+    from mirage.app.accounts.routes import router as accounts_router
+    app.include_router(accounts_router, prefix="/api")
+except Exception as _e:  # noqa: BLE001 - 账号模块出问题不应拖垮主面板
+    import logging
+    logging.getLogger("mirage").warning("账号/计费模块(/api/auth,/api/billing) 未加载: %s", _e)
+
 # ── 对外开放 API(/api/v1)：独立 router + APIKey 鉴权（预留口子，默认放行）──
 try:
     from mirage.app.api.v1_public import router as public_router
