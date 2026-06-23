@@ -15,6 +15,7 @@ import json
 import os
 import sqlite3
 import threading
+import time
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -144,6 +145,29 @@ CREATE TABLE IF NOT EXISTS templates (
     created_at  TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_templates_kind ON templates(kind);
+
+-- 拉取式 GPU 任务队列（DISPATCH_MODE=worker 时用；local 模式此表恒空、零回归）。
+-- 状态机 pending→leased→done/failed；epoch 秒做租约/心跳便于数值比较。
+CREATE TABLE IF NOT EXISTS tasks (
+    id            TEXT PRIMARY KEY,
+    type          TEXT NOT NULL,                       -- render_t2v / render_i2v / continuation_one / upscale / export
+    state         TEXT NOT NULL DEFAULT 'pending',     -- pending|leased|done|failed
+    priority      INTEGER NOT NULL DEFAULT 0,
+    payload       TEXT NOT NULL DEFAULT '{}',          -- JSON：worker 自包含跑这活所需的一切
+    result        TEXT NOT NULL DEFAULT '{}',          -- JSON：{video_filename,sha256,duration_ms,...}
+    worker_id     TEXT NOT NULL DEFAULT '',
+    lease_expires REAL NOT NULL DEFAULT 0,             -- epoch 秒；< now 即租约过期可回收
+    heartbeat     REAL NOT NULL DEFAULT 0,
+    attempts      INTEGER NOT NULL DEFAULT 0,
+    max_attempts  INTEGER NOT NULL DEFAULT 3,
+    error         TEXT NOT NULL DEFAULT '',
+    project_id    TEXT NOT NULL DEFAULT '',
+    scene_id      TEXT NOT NULL DEFAULT '',
+    created_at    REAL NOT NULL DEFAULT 0,
+    updated_at    REAL NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_tasks_claimable ON tasks(state, priority DESC, created_at);
+CREATE INDEX IF NOT EXISTS idx_tasks_project ON tasks(project_id);
 """
 
 
@@ -173,6 +197,11 @@ class PipelineStore:
         conn = sqlite3.connect(self._db_path, check_same_thread=False, timeout=15)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys = ON")
+        # WAL + busy_timeout：并发读写不互相阻塞。worker 拉取式队列要高频 claim/heartbeat，
+        # 没 WAL 会和 FastAPI 线程池的读互锁成 'database is locked'。WAL 是 per-db、设一次即持久。
+        conn.execute("PRAGMA journal_mode = WAL")
+        conn.execute("PRAGMA busy_timeout = 15000")
+        conn.execute("PRAGMA synchronous = NORMAL")
         return conn
 
     def _init_db(self) -> None:
@@ -461,6 +490,145 @@ class PipelineStore:
                 "SELECT * FROM scenes WHERE project_id=? ORDER BY scene_number", (project_id,)
             ).fetchall()
         return [dict(r) for r in rows]
+
+    # ───────────────── 拉取式 GPU 任务队列（worker 模式；DISPATCH_MODE=worker 才用）─────────────────
+    # GPU 活入队成 task，GPU worker 轮询 claim→本机跑→上传结果→complete。状态机 pending→leased→done/failed。
+    # ★这些新方法显式 try/finally 关连接（高频 claim/heartbeat 不能漏连接），与旧方法的 with-conn 习惯并存。
+    def enqueue_task(self, task_type: str, payload: dict, *, task_id: str = "",
+                     project_id: str = "", scene_id: str = "", priority: int = 0,
+                     max_attempts: int = 3) -> str:
+        tid = task_id or _uid()
+        now = time.time()
+        conn = self._conn()
+        try:
+            with self._lock:
+                conn.execute(
+                    "INSERT INTO tasks(id,type,state,priority,payload,project_id,scene_id,"
+                    "max_attempts,created_at,updated_at) VALUES(?,?,'pending',?,?,?,?,?,?,?)",
+                    (tid, task_type, int(priority), json.dumps(payload or {}, ensure_ascii=False),
+                     project_id, scene_id, int(max_attempts), now, now),
+                )
+                conn.commit()
+        finally:
+            conn.close()
+        return tid
+
+    def claim_one(self, worker_id: str, types: list[str], lease_secs: float) -> Optional[dict]:
+        """原子领取下一个可领任务（priority desc, created_at）。无 → None。
+        单条 UPDATE...(SELECT LIMIT 1)...RETURNING 天然原子（SQLite 3.35+ RETURNING；本机 3.45），不会双领。"""
+        if not types:
+            return None
+        now = time.time()
+        exp = now + max(60.0, float(lease_secs))
+        ph = ",".join("?" for _ in types)
+        conn = self._conn()
+        try:
+            with self._lock:
+                row = conn.execute(
+                    f"UPDATE tasks SET state='leased', worker_id=?, attempts=attempts+1, "
+                    f"lease_expires=?, heartbeat=?, updated_at=? "
+                    f"WHERE id=(SELECT id FROM tasks WHERE state='pending' AND type IN ({ph}) "
+                    f"ORDER BY priority DESC, created_at LIMIT 1) "
+                    f"RETURNING id, type, payload, lease_expires, attempts, max_attempts",
+                    (worker_id, exp, now, now, *types),
+                ).fetchone()
+                conn.commit()
+            if not row:
+                return None
+            d = dict(row)
+            d["payload"] = json.loads(d.get("payload") or "{}")
+            return d
+        finally:
+            conn.close()
+
+    def heartbeat_task(self, task_id: str, worker_id: str, lease_secs: float) -> bool:
+        """续租。(task_id,worker_id) 不匹配或任务已不在 leased（被重领/完成）→ False（worker 该自我中止）。"""
+        now = time.time()
+        exp = now + max(60.0, float(lease_secs))
+        conn = self._conn()
+        try:
+            with self._lock:
+                cur = conn.execute(
+                    "UPDATE tasks SET heartbeat=?, lease_expires=?, updated_at=? "
+                    "WHERE id=? AND worker_id=? AND state='leased'",
+                    (now, exp, now, task_id, worker_id),
+                )
+                conn.commit()
+                return cur.rowcount > 0
+        finally:
+            conn.close()
+
+    def complete_task(self, task_id: str, worker_id: str, result: dict) -> Optional[dict]:
+        """标记完成。幂等：已 done → 回当前行。(task_id,worker_id) 不匹配且非已完成 → None（拒绝过期 worker）。"""
+        now = time.time()
+        conn = self._conn()
+        try:
+            with self._lock:
+                cur = conn.execute(
+                    "UPDATE tasks SET state='done', result=?, updated_at=? "
+                    "WHERE id=? AND worker_id=? AND state='leased'",
+                    (json.dumps(result or {}, ensure_ascii=False), now, task_id, worker_id),
+                )
+                conn.commit()
+                row = conn.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone()
+            if cur.rowcount == 0:
+                return dict(row) if (row and row["state"] == "done") else None
+            return dict(row) if row else None
+        finally:
+            conn.close()
+
+    def fail_task(self, task_id: str, worker_id: str, error: str, retryable: bool = True) -> Optional[dict]:
+        """报失败。retryable 且 attempts<max → 回 pending 重派；否则 failed。"""
+        now = time.time()
+        conn = self._conn()
+        try:
+            with self._lock:
+                row = conn.execute(
+                    "SELECT * FROM tasks WHERE id=? AND worker_id=? AND state='leased'",
+                    (task_id, worker_id)).fetchone()
+                if not row:
+                    return None
+                requeue = bool(retryable) and int(row["attempts"]) < int(row["max_attempts"])
+                new_state = "pending" if requeue else "failed"
+                conn.execute(
+                    "UPDATE tasks SET state=?, error=?, worker_id='', updated_at=? WHERE id=?",
+                    (new_state, str(error or "")[:1000], now, task_id))
+                conn.commit()
+                d = dict(row); d["state"] = new_state; d["error"] = str(error or "")[:1000]
+                return d
+        finally:
+            conn.close()
+
+    def reclaim_expired(self, now: Optional[float] = None) -> list[dict]:
+        """回收租约过期的 leased 任务（worker 挂了/断网）：attempts<max → 回 pending 重派；否则 failed。
+        返回被回收任务（含最终 state），供调用方给 failed 的镜标 FAILED。"""
+        now = now if now is not None else time.time()
+        conn = self._conn()
+        try:
+            with self._lock:
+                rows = conn.execute(
+                    "SELECT * FROM tasks WHERE state='leased' AND lease_expires>0 AND lease_expires<?",
+                    (now,)).fetchall()
+                out = []
+                for r in rows:
+                    failed = int(r["attempts"]) >= int(r["max_attempts"])
+                    conn.execute(
+                        "UPDATE tasks SET state=?, worker_id='', updated_at=?, error=? WHERE id=?",
+                        ("failed" if failed else "pending", now,
+                         "租约过期回收：超过最大重试" if failed else r["error"], r["id"]))
+                    d = dict(r); d["state"] = "failed" if failed else "pending"; out.append(d)
+                conn.commit()
+                return out
+        finally:
+            conn.close()
+
+    def get_task(self, task_id: str) -> Optional[dict]:
+        conn = self._conn()
+        try:
+            row = conn.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone()
+            return dict(row) if row else None
+        finally:
+            conn.close()
 
     def set_scene_state(self, scene_id: str, new_state: SceneState, *, force: bool = False) -> dict:
         new_state = SceneState(new_state)

@@ -329,6 +329,12 @@ class Settings(BaseSettings):
     STRIPE_WEBHOOK_SECRET: str = ""           # webhook 验签密钥(生产必配)
     STRIPE_PRICE_PER_CREDIT: float = 0.01     # 1 积分单价(货币单位,如 0.01 美元)
     FRONTEND_BASE_URL: str = ""               # 前端站点根(Stripe 支付成功/取消跳转用)
+    # ── 拉取式 GPU worker（解耦·门控；见 app/pipeline/dispatch + api/worker_routes + colab/worker.py）──
+    DISPATCH_MODE: str = "local"              # local=后端直推 GPU(现状,零回归) / worker=入队由 GPU worker 拉取
+    WORKER_TOKEN: str = ""                    # worker 端点共享密钥(空=worker 路由拒绝所有请求)
+    WORKER_LEASE_SECS: int = 1200             # 任务租约(秒)；要 > 单次出片耗时(t2v/续接留足余量)
+    WORKER_MAX_ATTEMPTS: int = 3              # 任务最大重试次数(每次 claim 计一次)
+    WORKER_KINDS: str = "render_t2v"          # worker 模式下走拉取的任务类型(逗号分隔)；其余仍 local，渐进迁移
 
     model_config = SettingsConfigDict(
         # 自动加载当前目录或上级目录的 .env 文件
