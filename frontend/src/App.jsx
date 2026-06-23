@@ -9,6 +9,7 @@ import { getStatus, chatSubmit, resumeSubmit, cancelJob, getHistory, getSessionH
 import { ProductionPanel } from './components/MessageBubble'
 import { Icon } from './components/icons'
 import ProjectSidebar from './components/ProjectSidebar'
+import Account from './components/Account'
 import { useDialog } from './components/Dialog'
 import useIsMobile from './components/mobile/useIsMobile'
 import MobileShell from './components/mobile/MobileShell'
@@ -60,6 +61,12 @@ const studioHdrBtn = {
 }
 // 仅图标的方形按钮（重命名/删除）：与 studioHdrBtn 等高，正方形留白
 const studioHdrIcon = { ...studioHdrBtn, width: 32, padding: 0, justifyContent: 'center' }
+// 全局顶栏（OpenArt 风格 studio chrome）
+const topBar = { display: 'flex', alignItems: 'center', gap: 18, height: 52, padding: '0 18px', flexShrink: 0,
+  borderBottom: '1px solid rgba(255,255,255,0.07)', background: 'var(--bg)' }
+const brandStyle = { fontSize: 16, fontWeight: 700, letterSpacing: '0.02em',
+  background: 'linear-gradient(135deg,#a5b4fc,#818cf8)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }
+const navItem = (active) => ({ fontSize: 13.5, fontWeight: 500, cursor: 'pointer', color: active ? 'var(--text)' : 'var(--text-muted)' })
 
 export default function App() {
   const dialog = useDialog()
@@ -625,10 +632,19 @@ export default function App() {
 
   return (
     <div style={{
-      height: '100%', display: 'flex', flexDirection: 'row',
+      height: '100%', display: 'flex', flexDirection: 'column',
       background: 'var(--bg)', position: 'relative', overflow: 'hidden',
       width: '100%'
     }}>
+      {/* 全局顶栏（OpenArt 风格 studio chrome）：品牌 + 导航 + 账号/积分（Account 在开发态自动隐藏）*/}
+      <div style={topBar}>
+        <span style={brandStyle}>蜃景 Mirage</span>
+        <span style={navItem(true)}>创作</span>
+        <span style={navItem(false)} onClick={() => setAssistantOpen(true)} title="AI 助手">助手</span>
+        <div style={{ marginLeft: 'auto' }}><Account /></div>
+      </div>
+      {/* 主体：左栏剧集 + 主区 */}
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'row', minHeight: 0, width: '100%', overflow: 'hidden' }}>
       {/* 左栏：剧集列表（短剧工作台是唯一主视图；AI 助手退为右下角浮动小助手）*/}
       <ProjectSidebar
         projects={allProjects}
@@ -721,6 +737,7 @@ export default function App() {
           sessionId={sessionId}
           onSelectSession={handleSelectSession}
         />
+      </div>
       </div>
     </div>
   )
