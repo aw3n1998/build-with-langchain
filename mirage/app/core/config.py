@@ -313,6 +313,10 @@ class Settings(BaseSettings):
     AUTH_TOKEN_TTL: int = 604800              # 令牌有效期(秒,默认7天)
     AUTH_ALLOW_REGISTER: bool = True          # 是否开放自助注册
     ACCOUNTS_DB_PATH: str = ""                # 账号库 SQLite(空=放 pipeline.db 同目录 accounts.db)
+    # Google OAuth（可选；配了 CLIENT_ID/SECRET 才启用 Google 登录）
+    GOOGLE_CLIENT_ID: str = ""
+    GOOGLE_CLIENT_SECRET: str = ""
+    GOOGLE_REDIRECT_URI: str = ""             # 空=用 FRONTEND_BASE_URL + /api/auth/google/callback
     # ── 充值/计费（解耦·门控；见 app/accounts/billing）──
     BILLING_ENABLED: bool = False             # 关=免费不扣费;开=按操作扣积分
     BILLING_PROVIDER: str = "mock"            # 默认支付渠道(mock/stripe/...);加渠道见 billing.PaymentProvider

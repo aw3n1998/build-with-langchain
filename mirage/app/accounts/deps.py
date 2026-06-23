@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from fastapi import Depends, HTTPException, Request
+from fastapi import Depends, Header, HTTPException, Request
 
 from mirage.app.accounts import auth as auth_mod
 from mirage.app.accounts import billing
@@ -75,3 +75,26 @@ def charge_quietly(user: dict, op: str, ref: str = "", **ctx) -> None:
         billing.charge(user["id"], op=op, ref=ref, **ctx)
     except Exception as e:  # noqa: BLE001
         logger.warning("[billing] 扣费失败 user=%s op=%s: %s", (user or {}).get("id"), op, e)
+
+
+# ── 第三方 API 鉴权（X-API-Key）——填实 core.auth 的 key→user TODO ──
+def api_key_user(x_api_key: str = Header(default=None)) -> dict:
+    """X-API-Key → 绑定的用户 dict。优先查【用户绑定 key】(accounts.api_keys)；
+    回退兼容 env 白名单 PUBLIC_API_KEYS（命中/未配=放行 dev 用户），否则 401。"""
+    raw = (x_api_key or "").strip()
+    if raw:
+        from mirage.app.accounts.store import get_accounts_store
+        u = get_accounts_store().get_user_by_api_key(raw)
+        if u:
+            return u
+    keys = {k.strip() for k in (settings.PUBLIC_API_KEYS or "").split(",") if k.strip()}
+    if not keys:                       # 未配任何 key → 放行（向后兼容单用户）
+        return _DEV_USER
+    if raw and raw in keys:
+        return _DEV_USER
+    raise HTTPException(status_code=401, detail="无效或缺失的 X-API-Key")
+
+
+def api_key_user_id(user: dict = Depends(api_key_user)) -> str:
+    """只取 user_id（兼容 v1_public 旧签名 `user_id: str = Depends(require_api_key)`）。"""
+    return user.get("id") or "default"

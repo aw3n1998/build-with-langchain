@@ -6,11 +6,13 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 
 from mirage.app.accounts import auth as auth_mod
 from mirage.app.accounts import billing
 from mirage.app.accounts import deps
+from mirage.app.accounts import oauth as oauth_mod
 from mirage.app.accounts.store import get_accounts_store
 from mirage.app.core.config import settings
 
@@ -48,6 +50,58 @@ async def auth_login(req: LoginRequest):
 async def auth_me(user: dict = Depends(deps.current_user)):
     return {"user": auth_mod.public_user(user), "auth_enabled": settings.AUTH_ENABLED,
             "billing_enabled": settings.BILLING_ENABLED}
+
+
+@router.get("/auth/providers")
+async def auth_providers():
+    """前端用：可用登录方式 + 是否开放注册。无需登录。"""
+    return {"local": True, "google": oauth_mod.google_enabled(),
+            "register_open": settings.AUTH_ALLOW_REGISTER, "auth_enabled": settings.AUTH_ENABLED}
+
+
+@router.get("/auth/google/login")
+async def auth_google_login(state: str = ""):
+    """返回 Google 授权跳转 URL（前端 window.location 跳过去）。"""
+    try:
+        return {"url": oauth_mod.google_authorize_url(state)}
+    except oauth_mod.OAuthError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/auth/google/callback")
+async def auth_google_callback(code: str = "", state: str = ""):
+    """Google 回调：换 token → 发我们自己的令牌 → 重定向回前端（URL 带 oauth_token）。"""
+    if not code:
+        raise HTTPException(status_code=400, detail="缺少 code")
+    try:
+        res = oauth_mod.google_exchange_login(code)
+    except oauth_mod.OAuthError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    base = (settings.FRONTEND_BASE_URL or "").rstrip("/")
+    return RedirectResponse(url=f"{base}/?oauth_token={res['token']}")
+
+
+# ── API Key（第三方对接；需登录管理）────────────────────
+class ApiKeyCreate(BaseModel):
+    name: str = ""
+
+
+@router.get("/account/keys")
+async def list_keys(user: dict = Depends(deps.current_user)):
+    return {"keys": get_accounts_store().list_api_keys(user["id"])}
+
+
+@router.post("/account/keys")
+async def create_key(req: ApiKeyCreate, user: dict = Depends(deps.current_user)):
+    """新建 API Key；明文 key 只在此返回一次，请妥善保存。"""
+    return get_accounts_store().create_api_key(user["id"], req.name)
+
+
+@router.delete("/account/keys/{key_id}")
+async def revoke_key(key_id: str, user: dict = Depends(deps.current_user)):
+    if not get_accounts_store().revoke_api_key(user["id"], key_id):
+        raise HTTPException(status_code=404, detail="key 不存在或非本人")
+    return {"ok": True}
 
 
 # ── 计费 ─────────────────────────────────────────────────

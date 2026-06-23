@@ -14,7 +14,8 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from mirage.app.core.auth import require_api_key
+# ★key→真实 user：用账号体系的 API Key 鉴权（绑用户/可计费），回退兼容 env PUBLIC_API_KEYS 白名单。
+from mirage.app.accounts.deps import api_key_user_id as require_api_key
 
 router = APIRouter(prefix="/api/v1", tags=["public-api-v1"])
 

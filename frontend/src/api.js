@@ -205,6 +205,38 @@ export async function billingRecharge(credits, provider = '') {
   if (!r.ok) throw await _err(r); return r.json()
 }
 
+// ── 登录方式 / Google OAuth / API Key（第三方对接）──
+export async function authProviders() {
+  const r = await fetch(`${getBase()}/auth/providers`); if (!r.ok) throw await _err(r); return r.json()
+}
+export async function googleAuthUrl(state = '') {
+  const r = await fetch(`${getBase()}/auth/google/login?state=${encodeURIComponent(state)}`)
+  if (!r.ok) throw await _err(r); return (await r.json()).url
+}
+export async function listApiKeys() {
+  const r = await fetch(`${getBase()}/account/keys`, { headers: { ...authHeaders() } })
+  if (!r.ok) throw await _err(r); return (await r.json()).keys
+}
+export async function createApiKey(name = '') {
+  const r = await fetch(`${getBase()}/account/keys`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify({ name }) })
+  if (!r.ok) throw await _err(r); return r.json()
+}
+export async function revokeApiKey(id) {
+  const r = await fetch(`${getBase()}/account/keys/${id}`, { method: 'DELETE', headers: { ...authHeaders() } })
+  if (!r.ok) throw await _err(r); return r.json()
+}
+// OAuth 回调落地：从 URL 取 oauth_token 存起来再清理（app 启动调一次）
+export function applyOAuthRedirect() {
+  try {
+    const u = new URL(window.location.href)
+    const t = u.searchParams.get('oauth_token')
+    if (t) { setToken(t); u.searchParams.delete('oauth_token'); window.history.replaceState({}, '', u.toString()); return true }
+  } catch { /* noop */ }
+  return false
+}
+
 // params 需带 workspace（由调用方按当前会话传入）；返回 job_id
 export async function pipelineGenerate(params) {
   return submitJob('/pipeline/generate', params)
