@@ -379,6 +379,7 @@ export function ProductionPanel({ message, workspace, sessionId }) {
   const [styleBusy, setStyleBusy] = useState(false)
   const [loras, setLoras] = useState({ loras: [], model: {} })   // ComfyUI 可用 LoRA + 对话/全局出图配置
   const [showAddScene, setShowAddScene] = useState(false)
+  const [sceneView, setSceneView] = useState('list')   // 分镜区视图：list=编辑卡 / wall=成片结果墙（已出片缩略图网格）
   const [newScene, setNewScene] = useState({ title: '', narration: '', image_prompt: '', motion_prompt: '', subtitle: '', lipsync: false })
   const [addBusy, setAddBusy] = useState(false)
   // 小说→自动拆分镜
@@ -1692,14 +1693,42 @@ export function ProductionPanel({ message, workspace, sessionId }) {
         </div>
       )}
 
-      {/* 区段标题：分镜（OpenArt 式带强调竖条的小标题；有分镜才显示）*/}
+      {/* 区段标题：分镜 + 视图切换（列表编辑 / 成片结果墙）*/}
       {(proj?.scenes || []).length > 0 && (
-        <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text-secondary)', margin: '6px 0 10px', display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ width: 3, height: 13, borderRadius: 2, background: '#6366f1' }} />分镜
-          <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 400 }}>（{(proj?.scenes || []).length} 镜）</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '6px 0 10px', flexWrap: 'wrap' }}>
+          <span style={{ width: 3, height: 13, borderRadius: 2, background: '#6366f1' }} />
+          <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text-secondary)' }}>分镜</span>
+          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>（{(proj?.scenes || []).length} 镜 · {(proj?.scenes || []).filter(s => s.video).length} 已出片）</span>
+          <div style={{ marginLeft: 'auto', display: 'inline-flex', background: 'rgba(255,255,255,0.05)', borderRadius: 8, padding: 2, gap: 2 }}>
+            {[['list', '列表'], ['wall', '成片墙']].map(([k, lb]) => (
+              <button key={k} onClick={() => setSceneView(k)} style={{
+                height: 26, padding: '0 13px', borderRadius: 6, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600, fontFamily: 'inherit',
+                background: sceneView === k ? '#6366f1' : 'transparent', color: sceneView === k ? '#fff' : 'var(--text-muted)', transition: 'all .14s' }}>{lb}</button>
+            ))}
+          </div>
         </div>
       )}
-      {/* 分镜列表 */}
+      {/* 成片结果墙：已出片分镜的 OpenArt 式竖屏缩略图网格（内联播放）；与编辑卡并存 */}
+      {sceneView === 'wall' && (proj?.scenes || []).length > 0 && (() => {
+        const done = (proj?.scenes || []).filter(s => s.video)
+        if (!done.length) return <div style={{ fontSize: 12, color: 'var(--text-muted)', padding: '26px 0', textAlign: 'center' }}>还没有已出片的分镜——出片后，这里是成片结果墙。</div>
+        return (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 12, marginBottom: 4 }}>
+            {done.map(s => (
+              <div key={s.scene_id} style={{ borderRadius: 12, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.08)' }}>
+                <div style={{ position: 'relative', background: '#000' }}>
+                  <video src={fileUrl(s.video.url)} muted preload="metadata" controls playsInline
+                    style={{ width: '100%', aspectRatio: '9 / 16', objectFit: 'cover', display: 'block', background: '#000' }} />
+                  <div style={{ position: 'absolute', left: 8, top: 8, fontSize: 11, fontWeight: 700, color: '#fff', padding: '2px 7px', borderRadius: 6, background: 'rgba(0,0,0,0.55)' }}>#{s.scene_number}</div>
+                </div>
+                <div style={{ padding: '6px 9px', fontSize: 11, color: 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', background: 'rgba(255,255,255,0.02)' }}>{s.title || '无题'}</div>
+              </div>
+            ))}
+          </div>
+        )
+      })()}
+      {/* 分镜列表（编辑卡）：列表视图，或还没分镜时也走这（空列表，含「新增分镜」提示）*/}
+      {(sceneView === 'list' || (proj?.scenes || []).length === 0) && (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         {(proj?.scenes || []).map(s => {
           const sl = STATE_LABEL[s.state] || { t: s.state, c: 'var(--text-muted)' }
@@ -1917,6 +1946,7 @@ export function ProductionPanel({ message, workspace, sessionId }) {
           )
         })}
       </div>
+      )}
       </>)}
 
       {tab === 'export' && (
