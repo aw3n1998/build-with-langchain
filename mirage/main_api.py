@@ -112,6 +112,28 @@ except Exception as _e:  # noqa: BLE001 - 公开 API 出问题不应拖垮内部
     import logging
     logging.getLogger("mirage").warning("公开 API(/api/v1) 未加载: %s", _e)
 
+# ── 拉取式 GPU worker 接口 + 状态注册（解耦；门控 DISPATCH_MODE；状态/仪表盘端点恒可用）──
+try:
+    from mirage.app.api.worker_routes import router as worker_router
+    app.include_router(worker_router, prefix="/api")
+except Exception as _e:  # noqa: BLE001 - worker 模块出问题不应拖垮主面板
+    import logging
+    logging.getLogger("mirage").warning("worker 接口(/api/worker,/api/workers) 未加载: %s", _e)
+
+
+@app.on_event("startup")
+async def _start_worker_sweeper():
+    """worker 模式才起：后台回收过期租约的任务（worker 挂了→重派/失败）。"""
+    from mirage.app.core.config import settings as _ws
+    if (_ws.DISPATCH_MODE or "local").lower() == "worker":
+        try:
+            import asyncio
+            from mirage.app.api.worker_routes import reclaim_sweeper_loop
+            asyncio.create_task(reclaim_sweeper_loop())
+        except Exception as _e:  # noqa: BLE001
+            import logging
+            logging.getLogger("mirage").warning("worker reclaim sweeper 未启动: %s", _e)
+
 # ── serve 前端静态产物（预留口子）：让单端口能跑整套 UI（生产/toC）。──
 # 必须在 include_router 之后挂，确保 /api、/api/v1 优先匹配；目录不存在则自动跳过(开发态用 vite dev)。
 try:

@@ -168,6 +168,23 @@ CREATE TABLE IF NOT EXISTS tasks (
 );
 CREATE INDEX IF NOT EXISTS idx_tasks_claimable ON tasks(state, priority DESC, created_at);
 CREATE INDEX IF NOT EXISTS idx_tasks_project ON tasks(project_id);
+
+-- GPU/worker 在线状态注册：worker 周期 push 自己的 GPU/状态/当前任务/显存，仪表盘 GET /api/workers 读。
+CREATE TABLE IF NOT EXISTS workers (
+    id           TEXT PRIMARY KEY,
+    gpu          TEXT NOT NULL DEFAULT '',
+    hostname     TEXT NOT NULL DEFAULT '',
+    state        TEXT NOT NULL DEFAULT 'idle',     -- idle|busy|error（离线由 last_seen 过期算出）
+    current_task TEXT NOT NULL DEFAULT '',
+    progress     TEXT NOT NULL DEFAULT '',
+    vram         TEXT NOT NULL DEFAULT '',
+    types        TEXT NOT NULL DEFAULT '',
+    done_count   INTEGER NOT NULL DEFAULT 0,
+    fail_count   INTEGER NOT NULL DEFAULT 0,
+    meta         TEXT NOT NULL DEFAULT '{}',
+    first_seen   REAL NOT NULL DEFAULT 0,
+    last_seen    REAL NOT NULL DEFAULT 0
+);
 """
 
 
@@ -627,6 +644,47 @@ class PipelineStore:
         try:
             row = conn.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone()
             return dict(row) if row else None
+        finally:
+            conn.close()
+
+    def list_pending_tasks(self, limit: int = 200) -> list[dict]:
+        conn = self._conn()
+        try:
+            rows = conn.execute(
+                "SELECT * FROM tasks WHERE state IN ('pending','leased') ORDER BY created_at DESC LIMIT ?",
+                (int(limit),)).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    # ───────────────── GPU/worker 在线状态注册（仪表盘用；worker 周期 push）─────────────────
+    def upsert_worker(self, worker_id: str, *, gpu: str = "", hostname: str = "", state: str = "idle",
+                      current_task: str = "", progress: str = "", vram: str = "", types: str = "",
+                      done_count: int = 0, fail_count: int = 0, meta: Optional[dict] = None) -> None:
+        now = time.time()
+        conn = self._conn()
+        try:
+            with self._lock:
+                row = conn.execute("SELECT first_seen FROM workers WHERE id=?", (worker_id,)).fetchone()
+                first_seen = row["first_seen"] if row else now
+                conn.execute(
+                    "INSERT INTO workers(id,gpu,hostname,state,current_task,progress,vram,types,"
+                    "done_count,fail_count,meta,first_seen,last_seen) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?) "
+                    "ON CONFLICT(id) DO UPDATE SET gpu=excluded.gpu,hostname=excluded.hostname,state=excluded.state,"
+                    "current_task=excluded.current_task,progress=excluded.progress,vram=excluded.vram,"
+                    "types=excluded.types,done_count=excluded.done_count,fail_count=excluded.fail_count,"
+                    "meta=excluded.meta,last_seen=excluded.last_seen",
+                    (worker_id, gpu, hostname, state, current_task, progress, vram, types,
+                     int(done_count), int(fail_count), json.dumps(meta or {}, ensure_ascii=False), first_seen, now))
+                conn.commit()
+        finally:
+            conn.close()
+
+    def list_workers(self) -> list[dict]:
+        conn = self._conn()
+        try:
+            rows = conn.execute("SELECT * FROM workers ORDER BY last_seen DESC").fetchall()
+            return [dict(r) for r in rows]
         finally:
             conn.close()
 
