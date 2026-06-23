@@ -302,6 +302,13 @@ export async function pipelineExport(params) {
   return submitJob('/pipeline/export', params)
 }
 
+// ── GPU/worker 算力仪表盘：所有 worker 在线状态(在线/离线/忙) + 当前队列 + dispatch_mode ──
+export async function listWorkers() {
+  const r = await fetch(`${getBase()}/workers`)
+  if (!r.ok) throw new Error(`status ${r.status}`)
+  return r.json()
+}
+
 // ── 视频一键换脸：上传一张源脸 → 换到该成片里(产物独立新文件)。返回 job_id，用 streamJobEvents 跟随。
 // ⚠️ 合规红线：仅用于你有权使用的脸(原创/AI 生成/本人授权);换可识别真人=deepfake,平台 ToS 与法律禁止。
 export async function pipelineFaceswap(faceFile, { sceneId = '', kind = 'scene', projectId = '', workspace = null, sessionId = '' } = {}) {

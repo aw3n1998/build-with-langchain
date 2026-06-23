@@ -10,6 +10,7 @@ import { ProductionPanel } from './components/MessageBubble'
 import { Icon } from './components/icons'
 import ProjectSidebar from './components/ProjectSidebar'
 import Account from './components/Account'
+import WorkerPanel from './components/WorkerPanel'
 import { useDialog } from './components/Dialog'
 import useIsMobile from './components/mobile/useIsMobile'
 import MobileShell from './components/mobile/MobileShell'
@@ -75,6 +76,7 @@ export default function App({ onHome }) {
   const [isStreaming, setIsStreaming]      = useState(false)
   const [ragStatus, setRagStatus]         = useState({ rag_connected: false, chunk_count: 0, model: '' })
   const [assistantOpen, setAssistantOpen] = useState(false)   // 浮动小助手开合
+  const [workersOpen, setWorkersOpen] = useState(false)       // GPU 算力仪表盘开合
   const [showSettings,  setShowSettings]  = useState(false)
   const [agent, setAgent]                 = useState('supervisor')
   // HITL：当后端暂停等待确认时记录上下文，用于 resume 请求
@@ -659,6 +661,7 @@ export default function App({ onHome }) {
         <span style={navItem(false)} onClick={() => onHome && onHome()} title="返回官网首页">首页</span>
         <span style={navItem(true)}>创作</span>
         <span style={navItem(false)} onClick={() => setAssistantOpen(true)} title="AI 助手">助手</span>
+        <span style={navItem(false)} onClick={() => setWorkersOpen(true)} title="GPU 算力 / worker 状态">算力</span>
         <div style={{ marginLeft: 'auto' }}><Account /></div>
       </div>
       {/* 主体：左栏剧集 + 主区 */}
@@ -758,6 +761,7 @@ export default function App({ onHome }) {
         />
 
         {/* 右下角可拖动的可爱小助手（纯文字问答 + 久坐/友好主动互动）*/}
+        <WorkerPanel open={workersOpen} onClose={() => setWorkersOpen(false)} />
         <FloatingAssistant
           open={assistantOpen}
           onOpenChange={setAssistantOpen}
