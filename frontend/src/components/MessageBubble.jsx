@@ -1772,6 +1772,25 @@ export function ProductionPanel({ message, workspace, sessionId }) {
                 </span>
               </div>
 
+              {/* AI 每镜决策：拆镜时 AI 给这镜定的 时长/续接/对口型/音效 —— 让「全自动决策」可见可核对（只在 AI 设了才显示）*/}
+              {(() => {
+                const marks = []
+                if (s.seconds > 0) marks.push(['⏱ ' + s.seconds + 's', 'rgba(148,163,184,1)', 'rgba(148,163,184,0.32)', 'AI 给这镜定的时长约 ' + s.seconds + ' 秒（0=回退全局帧数）'])
+                if (s.continue_prev) marks.push(['↳ 续接', 'rgba(165,180,252,1)', 'rgba(129,140,248,0.4)', 'AI 判定这镜续接上一镜尾帧（i2v 连贯，不是重新出）'])
+                if (s.lipsync) marks.push(['💬 对口型', 'rgba(110,231,183,1)', 'rgba(52,211,153,0.4)', 'AI 判定这镜是正脸说话镜，出片后自动对口型（LatentSync）'])
+                if (s.sfx) marks.push(['🔊 音效', 'rgba(252,211,77,1)', 'rgba(251,191,36,0.4)', 'AI 判定这镜需要环境/动作音效（MMAudio 按画面同步生成）'])
+                if (!marks.length) return null
+                return (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: -2, marginBottom: 10 }}>
+                    {marks.map(([t, c, bd, ti]) => (
+                      <span key={t} title={ti} style={{ fontSize: 10.5, lineHeight: 1, padding: '3px 8px', borderRadius: 6,
+                        display: 'inline-flex', alignItems: 'center', gap: 4, fontWeight: 600, color: c,
+                        background: 'rgba(255,255,255,0.04)', border: '1px solid ' + bd }}>{t}</span>
+                    ))}
+                  </div>
+                )
+              })()}
+
               {s.video ? (
                 <div>
                   {/* key 绑 url（含 &v=mtime）：追加后文件变了，强制 <video> 重建、不吃旧缓存 */}
