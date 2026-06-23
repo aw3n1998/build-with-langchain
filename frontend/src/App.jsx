@@ -68,7 +68,7 @@ const brandStyle = { fontSize: 16, fontWeight: 700, letterSpacing: '0.02em',
   background: 'linear-gradient(135deg,#a5b4fc,#818cf8)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }
 const navItem = (active) => ({ fontSize: 13.5, fontWeight: 500, cursor: 'pointer', color: active ? 'var(--text)' : 'var(--text-muted)' })
 
-export default function App() {
+export default function App({ onHome }) {
   const dialog = useDialog()
   const [sessionId, setSessionId]         = useState(loadSessionId)
   const [messages, setMessages]           = useState([])
@@ -655,7 +655,8 @@ export default function App() {
     }}>
       {/* 全局顶栏（OpenArt 风格 studio chrome）：品牌 + 导航 + 账号/积分（Account 在开发态自动隐藏）*/}
       <div style={topBar}>
-        <span style={brandStyle}>蜃景 Mirage</span>
+        <span style={{ ...brandStyle, cursor: 'pointer' }} onClick={() => onHome && onHome()} title="返回首页">蜃景 Mirage</span>
+        <span style={navItem(false)} onClick={() => onHome && onHome()} title="返回官网首页">首页</span>
         <span style={navItem(true)}>创作</span>
         <span style={navItem(false)} onClick={() => setAssistantOpen(true)} title="AI 助手">助手</span>
         <div style={{ marginLeft: 'auto' }}><Account /></div>

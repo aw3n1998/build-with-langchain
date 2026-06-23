@@ -28,7 +28,7 @@ export default function AppGate() {
   }, [])
 
   if (view === 'loading') return <div style={{ minHeight: '100vh', background: '#0a0a12' }} />
-  if (view === 'app') return <App />
+  if (view === 'app') return <App onHome={() => setView('landing')} />
   if (view === 'login') return <Login onSuccess={() => setView('app')} onBack={() => setView('landing')} />
   return (
     <Landing
