@@ -6,20 +6,31 @@ import sys
 
 
 def render_t2v(cfg, task: dict, on_progress) -> str:
-    """payload 自包含 {prompt, params, image_path}——直接喂后端同一个 ComfyUIT2VProvider（零分叉）。
+    """payload 自包含 {prompt, params, image_path, provider}——按 provider 名跑对应的视频模型（零分叉、不写死 Wan）。
     provider 读 settings.COMFYUI_BASE_URL=本机 ComfyUI(worker env 设)；out_remote=本地临时 mp4，返回其路径。"""
     if os.getcwd() not in sys.path:
         sys.path.insert(0, os.getcwd())   # 让 import mirage.* 走仓库根
-    from mirage.app.pipeline.providers.comfyui_t2v import ComfyUIT2VProvider  # noqa: E402
 
     payload = task.get("payload") or {}
+    pname = (payload.get("provider") or "comfyui-t2v")
+    # 用注册表按名取 provider（import 这个包即注册所有内置 provider）；取不到回退 comfyui-t2v；
+    # 注册表彻底没有(异常)再兜底直接 import ComfyUIT2VProvider，保证老任务一定能跑。
+    try:
+        from mirage.app.pipeline.providers import video_provider_registry as R  # noqa: E402
+        prov = R.get(pname) or R.get("comfyui-t2v")
+    except Exception:  # noqa: BLE001
+        prov = None
+    if prov is None:
+        from mirage.app.pipeline.providers.comfyui_t2v import ComfyUIT2VProvider  # noqa: E402
+        prov = ComfyUIT2VProvider()
+
     out = os.path.join(os.environ.get("TMPDIR", "/tmp"), f"{task['id']}.mp4")
-    on_progress("ComfyUI 出片中…")
-    ComfyUIT2VProvider().generate(None, image_path=payload.get("image_path", ""),
-                                  prompt=payload.get("prompt", ""), out_remote=out,
-                                  params=payload.get("params") or {})
+    on_progress(f"{pname} 出片中…")
+    prov.generate(None, image_path=payload.get("image_path", ""),
+                  prompt=payload.get("prompt", ""), out_remote=out,
+                  params=payload.get("params") or {})
     if not (os.path.exists(out) and os.path.getsize(out) > 0):
-        raise RuntimeError("ComfyUI 没产出视频")
+        raise RuntimeError(f"{pname} 没产出视频")
     return out
 
 

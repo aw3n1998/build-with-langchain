@@ -17,6 +17,7 @@ class Config:
     token: str            # WORKER_TOKEN（后端设了才校验）
     worker_id: str        # 默认 hostname-pid
     types: tuple          # 领哪些任务类型
+    models: tuple         # 本 GPU 能跑的视频模型 provider 名(WORKER_MODELS);空=通配(legacy,啥任务都领)
     comfy: str            # 本机 ComfyUI 根
     gpu_name: str         # 仪表盘显示名覆盖（空=nvidia-smi 探测）
     poll_sec: float       # 无 WS 唤醒时的 claim 轮询间隔
@@ -43,6 +44,8 @@ class Config:
             token=os.environ.get("WORKER_TOKEN", ""),
             worker_id=os.environ.get("WORKER_ID") or f"{socket.gethostname()}-{os.getpid()}",
             types=tuple(t.strip() for t in os.environ.get("WORKER_TYPES", "render_t2v").split(",") if t.strip()),
+            # 本 GPU 能跑的视频模型 provider 名(逗号分隔)。默认空=通配:不声明就啥任务都领(向后兼容)。
+            models=tuple(m.strip() for m in os.environ.get("WORKER_MODELS", "").split(",") if m.strip()),
             comfy=os.environ.get("COMFYUI_BASE_URL", "http://127.0.0.1:8188").rstrip("/"),
             gpu_name=os.environ.get("GPU_NAME", ""),
             poll_sec=float(os.environ.get("POLL_SEC", 3)),

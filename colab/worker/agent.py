@@ -29,6 +29,7 @@ class Agent:
         return {"worker_id": self.cfg.worker_id, "gpu": gpu.gpu_name(self.cfg), "hostname": socket.gethostname(),
                 "state": self._state["state"], "current_task": self._state["current_task"],
                 "progress": self._state["progress"], "vram": self._state["vram"], "types": ",".join(self.cfg.types),
+                "models": ",".join(self.cfg.models),   # 本 GPU 能跑的视频模型(后端据此只派能跑的活)
                 "done_count": self._state["done"], "fail_count": self._state["fail"]}
 
     def _push_status(self):
@@ -96,7 +97,7 @@ class Agent:
             print("连不上后端 worker 接口：", e)
             return
         print(f"[worker] {self.cfg.worker_id} 上线 → {self.cfg.api} | GPU={gpu.gpu_name(self.cfg)} | "
-              f"领取 {list(self.cfg.types)} | ComfyUI {self.cfg.comfy} | "
+              f"领取 {list(self.cfg.types)} | 模型 {list(self.cfg.models) or '通配'} | ComfyUI {self.cfg.comfy} | "
               f"WS={'on' if self.ws.available else 'off(HTTP-only)'}")
         self.ws.start()
         threading.Thread(target=self._status_loop, daemon=True).start()

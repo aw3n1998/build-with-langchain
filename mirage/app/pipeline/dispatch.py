@@ -34,10 +34,14 @@ def render_t2v_on_worker(scene_id: str, scene: dict, prompt: str, params: dict,
         store.set_scene_state(scene_id, SceneState.PENDING_VIDEO_GEN, force=True)
     except Exception:  # noqa: BLE001
         pass
+    # provider=本任务要哪个出片模型(默认 comfyui-t2v)。落进 payload 让 worker runner 按名跑，
+    # 同时落进 task.provider 让 claim_one 只把活派给「能跑这个模型」的 worker（模型感知路由）。
+    provider = (settings.T2V_PROVIDER or "comfyui-t2v")
     payload = {"prompt": prompt, "params": params or {}, "image_path": image_path or "",
-               "scene_number": scene.get("scene_number", 0), "kind": "render_t2v"}
+               "scene_number": scene.get("scene_number", 0), "kind": "render_t2v",
+               "provider": provider}
     tid = store.enqueue_task("render_t2v", payload, scene_id=scene_id,
-                             project_id=scene.get("project_id", ""))
+                             project_id=scene.get("project_id", ""), provider=provider)
     try:   # 叫醒已连 worker 立刻 claim（best-effort；漏了有 worker POLL 兜底）
         from mirage.app.api import worker_ws
         worker_ws.hub.nudge(["render_t2v"])

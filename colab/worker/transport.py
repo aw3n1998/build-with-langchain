@@ -36,7 +36,8 @@ class HttpClient:
     def claim(self):
         try:
             r = self._c.post(f"{self.cfg.api}/worker/claim", json={
-                "worker_id": self.cfg.worker_id, "types": list(self.cfg.types), "lease_secs": self.cfg.lease_sec})
+                "worker_id": self.cfg.worker_id, "types": list(self.cfg.types),
+                "lease_secs": self.cfg.lease_sec, "models": list(self.cfg.models)})
             return (r.json() or {}).get("task")
         except Exception:  # noqa: BLE001
             return None

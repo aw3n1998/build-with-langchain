@@ -77,6 +77,7 @@ class WorkerStatusReq(BaseModel):
     progress: str = ""
     vram: str = ""
     types: str = ""
+    models: str = ""             # 本 GPU 能跑的视频模型 provider 名(逗号分隔);''=通配(legacy)
     done_count: int = 0
     fail_count: int = 0
 
@@ -94,7 +95,7 @@ async def worker_status(req: WorkerStatusReq, x_worker_token: str = Header(defau
     await asyncio.to_thread(lambda: _store().upsert_worker(
         req.worker_id, gpu=req.gpu, hostname=req.hostname, state=req.state,
         current_task=req.current_task, progress=req.progress, vram=req.vram,
-        types=req.types, done_count=req.done_count, fail_count=req.fail_count))
+        types=req.types, models=req.models, done_count=req.done_count, fail_count=req.fail_count))
     return {"ok": True}
 
 
@@ -115,18 +116,37 @@ async def list_workers():
     return {"workers": out, "queue": queue, "now": now, "dispatch_mode": settings.DISPATCH_MODE}
 
 
+@router.get("/models")
+async def list_runnable_models():
+    """当前【在线】worker 能跑的视频模型 provider 名并集（供 UI 下拉只展示真能出片的模型）。
+    在线判定与 /workers 一致（last_seen 在 _ONLINE_SECS 内）。models 为空的 worker 是通配，不贡献具体模型名。"""
+    rows = await asyncio.to_thread(lambda: _store().list_workers())
+    now = time.time()
+    names: set[str] = set()
+    for w in rows:
+        if (now - float(w.get("last_seen") or 0)) >= _ONLINE_SECS:
+            continue
+        for m in (w.get("models") or "").split(","):
+            m = m.strip()
+            if m:
+                names.add(m)
+    return {"models": sorted(names), "now": now}
+
+
 # ──────────────── 任务领取 / 心跳 / 结果 / 完成 / 失败 ────────────────
 class ClaimReq(BaseModel):
     worker_id: str
     types: list = []
     lease_secs: int = 0
+    models: list = []            # 本 GPU 能跑的视频模型 provider 名;空=通配(legacy,啥任务都领)
 
 
 @router.post("/worker/claim")
 async def worker_claim(req: ClaimReq, x_worker_token: str = Header(default="")):
     _check_token(x_worker_token)
     lease = int(req.lease_secs or settings.WORKER_LEASE_SECS)
-    task = await asyncio.to_thread(lambda: _store().claim_one(req.worker_id, [str(x) for x in req.types], lease))
+    task = await asyncio.to_thread(lambda: _store().claim_one(
+        req.worker_id, [str(x) for x in req.types], lease, models=[str(x) for x in req.models]))
     return {"task": task}
 
 

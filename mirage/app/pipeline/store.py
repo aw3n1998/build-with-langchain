@@ -161,6 +161,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     attempts      INTEGER NOT NULL DEFAULT 0,
     max_attempts  INTEGER NOT NULL DEFAULT 3,
     error         TEXT NOT NULL DEFAULT '',
+    provider      TEXT NOT NULL DEFAULT '',            -- 出片模型 provider 名(如 comfyui-t2v/sulphur2);''=任意 worker 可领(向后兼容)
     project_id    TEXT NOT NULL DEFAULT '',
     scene_id      TEXT NOT NULL DEFAULT '',
     created_at    REAL NOT NULL DEFAULT 0,
@@ -179,6 +180,7 @@ CREATE TABLE IF NOT EXISTS workers (
     progress     TEXT NOT NULL DEFAULT '',
     vram         TEXT NOT NULL DEFAULT '',
     types        TEXT NOT NULL DEFAULT '',
+    models       TEXT NOT NULL DEFAULT '',          -- 本 GPU 能跑的视频模型 provider 名(逗号分隔);''=通配(legacy,啥都能领)
     done_count   INTEGER NOT NULL DEFAULT 0,
     fail_count   INTEGER NOT NULL DEFAULT 0,
     meta         TEXT NOT NULL DEFAULT '{}',
@@ -270,6 +272,15 @@ class PipelineStore:
             if col not in ccols:
                 conn.execute(f"ALTER TABLE characters ADD COLUMN {col} TEXT NOT NULL DEFAULT ''")
                 logger.info("[PipelineStore] 迁移：characters 补列 %s", col)
+        # 模型感知派发：tasks 带 provider(任务要哪个模型)、workers 带 models(本 GPU 能跑哪些模型)。旧库补列。
+        tcols = {r[1] for r in conn.execute("PRAGMA table_info(tasks)").fetchall()}
+        if "provider" not in tcols:
+            conn.execute("ALTER TABLE tasks ADD COLUMN provider TEXT NOT NULL DEFAULT ''")
+            logger.info("[PipelineStore] 迁移：tasks 补列 provider")
+        wcols = {r[1] for r in conn.execute("PRAGMA table_info(workers)").fetchall()}
+        if "models" not in wcols:
+            conn.execute("ALTER TABLE workers ADD COLUMN models TEXT NOT NULL DEFAULT ''")
+            logger.info("[PipelineStore] 迁移：workers 补列 models")
 
     # ── 项目 ──────────────────────────────────────────────────────
     def create_project(self, title: str, novel_text: str = "") -> dict:
@@ -513,7 +524,8 @@ class PipelineStore:
     # ★这些新方法显式 try/finally 关连接（高频 claim/heartbeat 不能漏连接），与旧方法的 with-conn 习惯并存。
     def enqueue_task(self, task_type: str, payload: dict, *, task_id: str = "",
                      project_id: str = "", scene_id: str = "", priority: int = 0,
-                     max_attempts: int = 3) -> str:
+                     max_attempts: int = 3, provider: str = "") -> str:
+        # provider=要哪个出片模型(如 comfyui-t2v/sulphur2);''=不限模型,任意 worker 可领(向后兼容)。
         tid = task_id or _uid()
         now = time.time()
         conn = self._conn()
@@ -521,33 +533,47 @@ class PipelineStore:
             with self._lock:
                 conn.execute(
                     "INSERT INTO tasks(id,type,state,priority,payload,project_id,scene_id,"
-                    "max_attempts,created_at,updated_at) VALUES(?,?,'pending',?,?,?,?,?,?,?)",
+                    "provider,max_attempts,created_at,updated_at) VALUES(?,?,'pending',?,?,?,?,?,?,?,?)",
                     (tid, task_type, int(priority), json.dumps(payload or {}, ensure_ascii=False),
-                     project_id, scene_id, int(max_attempts), now, now),
+                     project_id, scene_id, provider or "", int(max_attempts), now, now),
                 )
                 conn.commit()
         finally:
             conn.close()
         return tid
 
-    def claim_one(self, worker_id: str, types: list[str], lease_secs: float) -> Optional[dict]:
+    def claim_one(self, worker_id: str, types: list[str], lease_secs: float,
+                  models: list[str] | None = None) -> Optional[dict]:
         """原子领取下一个可领任务（priority desc, created_at）。无 → None。
-        单条 UPDATE...(SELECT LIMIT 1)...RETURNING 天然原子（SQLite 3.35+ RETURNING；本机 3.45），不会双领。"""
+        单条 UPDATE...(SELECT LIMIT 1)...RETURNING 天然原子（SQLite 3.35+ RETURNING；本机 3.45），不会双领。
+
+        模型感知路由：
+          - models 非空(worker 声明了能跑的模型) → 只领 provider='' (不限模型,legacy 任务)
+            或 provider IN (models) (本 GPU 能跑) 的任务；跑不了的模型留给别的 worker。
+          - models 空/None(通配 worker,legacy) → 不按 provider 过滤,啥任务都领。"""
         if not types:
             return None
         now = time.time()
         exp = now + max(60.0, float(lease_secs))
         ph = ",".join("?" for _ in types)
+        # 内层 SELECT 的 WHERE 动态拼：基线 = 可领 + 类型匹配；models 非空再叠加 provider 匹配。
+        inner_where = f"state='pending' AND type IN ({ph})"
+        inner_args: list[Any] = list(types)
+        models = [m for m in (models or []) if m]   # 去空串,空列表=通配
+        if models:
+            mph = ",".join("?" for _ in models)
+            inner_where += f" AND (provider='' OR provider IN ({mph}))"
+            inner_args += models
         conn = self._conn()
         try:
             with self._lock:
                 row = conn.execute(
                     f"UPDATE tasks SET state='leased', worker_id=?, attempts=attempts+1, "
                     f"lease_expires=?, heartbeat=?, updated_at=? "
-                    f"WHERE id=(SELECT id FROM tasks WHERE state='pending' AND type IN ({ph}) "
+                    f"WHERE id=(SELECT id FROM tasks WHERE {inner_where} "
                     f"ORDER BY priority DESC, created_at LIMIT 1) "
-                    f"RETURNING id, type, payload, lease_expires, attempts, max_attempts",
-                    (worker_id, exp, now, now, *types),
+                    f"RETURNING id, type, payload, provider, lease_expires, attempts, max_attempts",
+                    (worker_id, exp, now, now, *inner_args),
                 ).fetchone()
                 conn.commit()
             if not row:
@@ -660,7 +686,9 @@ class PipelineStore:
     # ───────────────── GPU/worker 在线状态注册（仪表盘用；worker 周期 push）─────────────────
     def upsert_worker(self, worker_id: str, *, gpu: str = "", hostname: str = "", state: str = "idle",
                       current_task: str = "", progress: str = "", vram: str = "", types: str = "",
-                      done_count: int = 0, fail_count: int = 0, meta: Optional[dict] = None) -> None:
+                      models: str = "", done_count: int = 0, fail_count: int = 0,
+                      meta: Optional[dict] = None) -> None:
+        # models=本 GPU 能跑的视频模型 provider 名(逗号分隔);''=通配。与 types 同款处理(纯字符串透传)。
         now = time.time()
         conn = self._conn()
         try:
@@ -668,13 +696,13 @@ class PipelineStore:
                 row = conn.execute("SELECT first_seen FROM workers WHERE id=?", (worker_id,)).fetchone()
                 first_seen = row["first_seen"] if row else now
                 conn.execute(
-                    "INSERT INTO workers(id,gpu,hostname,state,current_task,progress,vram,types,"
-                    "done_count,fail_count,meta,first_seen,last_seen) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?) "
+                    "INSERT INTO workers(id,gpu,hostname,state,current_task,progress,vram,types,models,"
+                    "done_count,fail_count,meta,first_seen,last_seen) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
                     "ON CONFLICT(id) DO UPDATE SET gpu=excluded.gpu,hostname=excluded.hostname,state=excluded.state,"
                     "current_task=excluded.current_task,progress=excluded.progress,vram=excluded.vram,"
-                    "types=excluded.types,done_count=excluded.done_count,fail_count=excluded.fail_count,"
+                    "types=excluded.types,models=excluded.models,done_count=excluded.done_count,fail_count=excluded.fail_count,"
                     "meta=excluded.meta,last_seen=excluded.last_seen",
-                    (worker_id, gpu, hostname, state, current_task, progress, vram, types,
+                    (worker_id, gpu, hostname, state, current_task, progress, vram, types, models,
                      int(done_count), int(fail_count), json.dumps(meta or {}, ensure_ascii=False), first_seen, now))
                 conn.commit()
         finally:
