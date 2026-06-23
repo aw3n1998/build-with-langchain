@@ -89,6 +89,7 @@ export default function App() {
   const [agentList, setAgentList]         = useState([])    // 动态 Agent 列表（注册即出现）
   const [panelProjectId, setPanelProjectId] = useState(null)
   const [hasProject, setHasProject]       = useState(false)
+  const [heroNovel, setHeroNovel]         = useState('')   // 首页 Hero 的小说输入（OpenArt 式 prompt-first 入口）
   const [allProjects, setAllProjects]     = useState([])   // 工作目录下全部项目（供面板里切换）
   // 有任务（对话/出图/出片）在跑的会话集合：侧边栏据此显示绿点
   const [runningSessions, setRunningSessions] = useState(() => new Set())
@@ -213,6 +214,19 @@ export default function App() {
       await refreshProjects(); setHasProject(true); setPanelProjectId(r.project_id)
     } catch (e) { dialog.alert('新建失败：' + String(e.message || e)) }
   }, [workspace, refreshProjects, dialog])
+
+  // 首页 Hero「一键开始」：把小说预填进制作面板（usePersistedState 同键 agentlab.panel.sbNovel），
+  // 自动建剧集并打开 → 面板挂载即带着小说，用户点「✨ 一键全自动出片」直接出片。空文本 = 纯新建。
+  const startFromNovel = useCallback(async (novelText) => {
+    const text = (novelText || '').trim()
+    try { if (text) localStorage.setItem('agentlab.panel.sbNovel', JSON.stringify(text)) } catch { /* 隐私模式忽略 */ }
+    const auto = text ? text.replace(/\s+/g, ' ').slice(0, 16) : '新剧集'
+    try {
+      const r = await projectCreate(auto, workspace)
+      await refreshProjects(); setHasProject(true); setPanelProjectId(r.project_id); setHeroNovel('')
+    } catch (e) { dialog.alert('新建失败：' + String(e.message || e)) }
+  }, [workspace, refreshProjects, dialog])
+
   const renameProject = useCallback(async () => {
     if (!panelProjectId) return
     const cur = allProjects.find(p => p.project_id === panelProjectId)
@@ -693,17 +707,33 @@ export default function App() {
               {panelProjectId ? (
                 <ProductionPanel message={{ project_id: panelProjectId }} workspace={workspace} sessionId={sessionId} />
               ) : (
-                <div style={{ maxWidth: 520, margin: '72px auto', textAlign: 'center', color: 'var(--text-sec)' }}>
+                <div style={{ maxWidth: 600, margin: '46px auto', textAlign: 'center', color: 'var(--text-sec)' }}>
                   <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                                 width: 58, height: 58, borderRadius: 16, marginBottom: 18, color: 'rgba(190,192,255,0.9)',
+                                 width: 54, height: 54, borderRadius: 16, marginBottom: 16, color: 'rgba(190,192,255,0.9)',
                                  background: 'rgba(99,102,241,0.10)', border: '1px solid rgba(99,102,241,0.22)' }}>
-                    <Icon.Clapper size={28} stroke={1.5} />
+                    <Icon.Clapper size={26} stroke={1.5} />
                   </span>
-                  <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--text)', marginBottom: 10 }}>开始做一部短剧</div>
-                  <p style={{ fontSize: 13, lineHeight: 1.95, color: 'var(--text-sec)' }}>当前工作目录还没有剧集。点 <b style={{ color: 'var(--text)' }}>新建剧集</b> 建一个，进去用 <b style={{ color: 'var(--text)' }}>AI 拆分镜</b> 把小说一键拆成整套分镜；
-                    或先点 <b style={{ color: 'var(--text)' }}>工作目录</b> 选好素材目录。想问点啥，点 <b style={{ color: 'var(--text)' }}>右下角的小助手</b>。</p>
-                  <button onClick={newProject} style={{ ...studioHdrBtn, padding: '0 18px', height: 36, fontSize: 13, marginTop: 16,
-                    background: 'var(--accent)', borderColor: 'var(--accent)', color: '#fff', fontWeight: 600 }}><Icon.Plus size={16} />新建剧集</button>
+                  <div style={{ fontSize: 23, fontWeight: 800, color: 'var(--text)', marginBottom: 8, letterSpacing: '-0.01em' }}>把小说，一键变短剧</div>
+                  <p style={{ fontSize: 13, lineHeight: 1.8, color: 'var(--text-sec)', margin: '0 0 18px' }}>
+                    粘贴小说 / 剧情，AI 自动拆镜 · 出片续接 · 克隆配音 · 对口型 · 同步音效，合成竖屏成片。</p>
+                  <textarea value={heroNovel} onChange={e => setHeroNovel(e.target.value)} rows={5}
+                    placeholder="把这一集的小说 / 剧情粘进来，AI 帮你拆成整套分镜…"
+                    style={{ width: '100%', resize: 'vertical', minHeight: 112, padding: '13px 15px', boxSizing: 'border-box',
+                             borderRadius: 12, border: '1px solid rgba(255,255,255,0.12)', background: 'rgba(255,255,255,0.03)',
+                             color: 'var(--text)', fontSize: 14, lineHeight: 1.6, fontFamily: 'inherit', outline: 'none' }} />
+                  <div style={{ display: 'flex', gap: 10, justifyContent: 'center', marginTop: 14, flexWrap: 'wrap' }}>
+                    <button onClick={() => startFromNovel(heroNovel)} style={{
+                      height: 44, padding: '0 26px', borderRadius: 11, border: 'none', cursor: 'pointer',
+                      background: 'linear-gradient(135deg,#6366f1,#4338ca)', color: '#fff', fontWeight: 700, fontSize: 14.5,
+                      display: 'inline-flex', alignItems: 'center', gap: 8, fontFamily: 'inherit',
+                      boxShadow: '0 6px 20px rgba(99,102,241,0.32)' }}>
+                      <Icon.Wand size={16} />{heroNovel.trim() ? '新建剧集并拆镜 →' : '新建空白剧集 →'}
+                    </button>
+                    <button onClick={() => setShowFolderPicker(true)} style={{ ...studioHdrBtn, height: 44, padding: '0 18px', fontSize: 13 }}>
+                      <Icon.Folder />工作目录</button>
+                  </div>
+                  <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 14, lineHeight: 1.7 }}>
+                    提交后进工作台，小说已自动带入「AI 拆分镜」——点 <b style={{ color: 'var(--text-sec)' }}>✨ 一键全自动出片</b> 即可一路到底。</div>
                 </div>
               )}
             </div>
