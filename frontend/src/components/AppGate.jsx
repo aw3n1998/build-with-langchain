@@ -1,28 +1,40 @@
 import React, { useState, useEffect } from 'react'
 import App from '../App'
 import Landing from './Landing'
+import Login from './Login'
 import * as api from '../api'
 
 /**
- * 鉴权门 —— 「未登录可看官网，登录了才能创作」。
- * - 后端 AUTH_ENABLED=false：authMe 返回内置 dev 用户 → 直接进创作台 App（开发态不变）。
- * - AUTH_ENABLED=true 且未登录：显示官网 Landing；登录/Google 成功后 onLoggedIn 重新校验 → 进 App。
- * 启动时先处理 Google 回调（URL 里的 oauth_token）。
+ * 顶层路由门 —— 官网(未登录可见) → 登录页 → studio(创作台 App)。
+ * - 有有效令牌 / Google 回调带回令牌 → 直接进 studio。
+ * - 没令牌 → 官网 Landing；点「登录」或「开始创作」→ 登录页（AUTH 开时）/ 直进 studio（AUTH 关，开发态）。
  */
 export default function AppGate() {
-  const [view, setView] = useState('loading')   // loading / app / landing
+  const [view, setView] = useState('loading')   // loading | landing | login | app
+  const [authEnabled, setAuthEnabled] = useState(false)
 
-  const check = async () => {
-    try {
-      const me = await api.authMe()
-      setView(me && me.user ? 'app' : 'landing')
-    } catch {
+  useEffect(() => {
+    (async () => {
+      const fromOAuth = api.applyOAuthRedirect()   // Google 回调把 token 落到 localStorage
+      let prov = { auth_enabled: false }
+      try { prov = await api.authProviders() } catch { /* 后端没起也先给官网 */ }
+      setAuthEnabled(!!prov.auth_enabled)
+      // 有令牌（含刚 OAuth 回来）→ 校验后进 studio
+      if (fromOAuth || (api.getToken && api.getToken())) {
+        try { const me = await api.authMe(); if (me && me.user) { setView('app'); return } } catch { /* 令牌失效 → 落官网 */ }
+      }
       setView('landing')
-    }
-  }
-  useEffect(() => { api.applyOAuthRedirect(); check() }, [])
+    })()
+  }, [])
 
-  if (view === 'loading') return <div style={{ minHeight: '100vh', background: '#0b1020' }} />
-  if (view === 'landing') return <Landing onLoggedIn={check} />
-  return <App />
+  if (view === 'loading') return <div style={{ minHeight: '100vh', background: '#0a0a12' }} />
+  if (view === 'app') return <App />
+  if (view === 'login') return <Login onSuccess={() => setView('app')} onBack={() => setView('landing')} />
+  return (
+    <Landing
+      authEnabled={authEnabled}
+      onLogin={() => setView('login')}
+      onStart={() => setView(authEnabled ? 'login' : 'app')}   /* 开发态(AUTH 关)：直进创作台 */
+    />
+  )
 }
