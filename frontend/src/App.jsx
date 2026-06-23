@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import SettingsPanel  from './components/SettingsPanel'
-import FolderPicker   from './components/FolderPicker'
 import FloatingAssistant from './components/FloatingAssistant'
 import { getStatus, chatSubmit, resumeSubmit, cancelJob, getHistory, getSessionHistory, deleteSession,
          pipelineGenerate, pipelineSelect, pipelineRender, streamJobEvents, listProjects,
@@ -705,7 +704,6 @@ export default function App({ onHome }) {
               </span>
               {panelProjectId && <button onClick={renameProject} style={studioHdrIcon} title="给当前剧集改名"><Icon.Pencil /></button>}
               {panelProjectId && <button onClick={removeProject} style={{ ...studioHdrIcon, color: 'rgba(248,113,113,1)', borderColor: 'rgba(239,68,68,0.3)' }} title="删除当前剧集"><Icon.Trash /></button>}
-              <button onClick={() => setShowFolderPicker(true)} style={studioHdrBtn} title={workspace || '默认工作目录'}><Icon.Folder />工作目录</button>
               <button onClick={openSettings} style={{ ...studioHdrIcon, marginLeft: 'auto' }} title="设置">
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82 2 2 0 1 1-2.83 2.83 1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51 2 2 0 0 1-4 0 1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33 2 2 0 1 1-2.83-2.83 1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1 2 2 0 0 1 0-4 1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82 2 2 0 1 1 2.83-2.83 1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51 2 2 0 0 1 4 0 1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33 2 2 0 1 1 2.83 2.83 1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1 2 2 0 0 1 0 4 1.65 1.65 0 0 0-1.51 1Z"/></svg>
               </button>
@@ -736,8 +734,6 @@ export default function App({ onHome }) {
                       boxShadow: '0 6px 20px rgba(99,102,241,0.32)' }}>
                       <Icon.Wand size={16} />{heroNovel.trim() ? '新建剧集并拆镜 →' : '新建空白剧集 →'}
                     </button>
-                    <button onClick={() => setShowFolderPicker(true)} style={{ ...studioHdrBtn, height: 44, padding: '0 18px', fontSize: 13 }}>
-                      <Icon.Folder />工作目录</button>
                   </div>
                   <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 14, lineHeight: 1.7 }}>
                     提交后进工作台，小说已自动带入「AI 拆分镜」——点 <b style={{ color: 'var(--text-sec)' }}>✨ 一键全自动出片</b> 即可一路到底。</div>
@@ -751,13 +747,6 @@ export default function App({ onHome }) {
           onClose={() => setShowSettings(false)}
           onSaved={handleSettingsSaved}
           videoOnly={ragStatus.video_agent_only !== false}
-        />
-
-        <FolderPicker
-          open={showFolderPicker}
-          initial={workspace}
-          onClose={() => setShowFolderPicker(false)}
-          onPick={saveWorkspace}
         />
 
         {/* 右下角可拖动的可爱小助手（纯文字问答 + 久坐/友好主动互动）*/}

@@ -26,6 +26,23 @@ _known_roots: set[str] = set()
 # 现为空、不启用（单用户无感）。
 _user_workspaces: dict[str, set[str]] = {}
 
+# 当前请求绑定的用户（AUTH 开时由 deps.current_user 绑）。用于「每个用户默认单独一个工作目录」。
+_user_ctx: ContextVar[str | None] = ContextVar("mirage_user", default=None)
+
+
+def bind_user(user_id: str | None):
+    """把本请求的用户绑到上下文（AUTH 开时 deps.current_user 调）。之后 set_workspace 自动用其专属目录。"""
+    _user_ctx.set(str(user_id) if user_id else None)
+
+
+def user_workspace(user_id: str) -> str:
+    """某用户的专属工作目录（多租户：每个用户单独一个、互不可见）。
+    根目录可用 MIRAGE_USER_WORKSPACES 配；默认放默认工作目录的同级 mirage_user_workspaces/<用户id>。"""
+    safe = "".join(c for c in str(user_id) if c.isalnum() or c in "_-") or "anon"
+    base = os.environ.get("MIRAGE_USER_WORKSPACES") or \
+        os.path.join(os.path.dirname(os.path.abspath(default_workspace())), "mirage_user_workspaces")
+    return os.path.abspath(os.path.join(base, safe))
+
 
 def default_workspace() -> str:
     """没显式指定时的默认工作目录。
@@ -54,8 +71,14 @@ def set_workspace(path: str | None, user_id: str | None = None):
     user_id（预留口子）：toC 多租户时传入，做"该用户只能进自己目录"的越权校验。
     现默认 None，不启用——单用户行为完全不变。
     """
-    # TODO(toC): user_id 不为 None 时，校验 abs_path 属于 _user_workspaces.get(user_id, set())，否则拒绝(防越权)；
-    #            首次进入时把目录加进该用户的名单。
+    # 多租户：AUTH 开 + 绑了用户(显式 user_id 或本请求 bind_user 的) → 强制用该用户专属目录，忽略客户端传的 path。
+    uid = user_id or _user_ctx.get()
+    try:
+        from mirage.app.core.config import settings as _s
+        if getattr(_s, "AUTH_ENABLED", False) and uid:
+            path = user_workspace(str(uid))
+    except Exception:  # noqa: BLE001
+        pass
     abs_path = os.path.abspath(path) if path else None
     if abs_path:
         _known_roots.add(os.path.realpath(abs_path))

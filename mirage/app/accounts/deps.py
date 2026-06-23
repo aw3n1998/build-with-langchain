@@ -34,21 +34,31 @@ def _user_from_request(request: Request) -> Optional[dict]:
     return auth_mod.authenticate_token(token) if token else None
 
 
+def _bind_ws(u: dict) -> dict:
+    """把用户绑到 runtime 上下文 → set_workspace 自动用其专属目录（每个用户单独工作目录）。"""
+    try:
+        from mirage.app.pipeline.runtime import bind_user
+        bind_user((u or {}).get("id"))
+    except Exception:  # noqa: BLE001
+        pass
+    return u
+
+
 async def current_user(request: Request) -> dict:
-    """要求已登录（AUTH 开启时）。关闭时返回 dev 用户。"""
+    """要求已登录（AUTH 开启时）。关闭时返回 dev 用户。★顺带把用户绑到 runtime → 每个用户单独工作目录。"""
     if not settings.AUTH_ENABLED:
         return _DEV_USER
     u = _user_from_request(request)
     if not u:
         raise HTTPException(status_code=401, detail="未登录或令牌无效，请先登录")
-    return u
+    return _bind_ws(u)
 
 
 async def optional_user(request: Request) -> dict:
     """尽力取用户（取不到也不报错，用于公开页/可选登录）。"""
     if not settings.AUTH_ENABLED:
         return _DEV_USER
-    return _user_from_request(request) or {}
+    return _bind_ws(_user_from_request(request) or {})
 
 
 def require_admin(user: dict = Depends(current_user)) -> dict:
