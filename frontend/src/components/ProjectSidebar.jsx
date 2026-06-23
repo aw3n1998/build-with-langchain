@@ -20,14 +20,13 @@ export default function ProjectSidebar({ projects = [], currentProjectId, onSele
       borderRight: '1px solid rgba(255,255,255,0.07)', background: '#0d0d0d',
       display: 'flex', flexDirection: 'column',
     }}>
-      {/* 顶部 Logo */}
-      <div style={{ padding: '16px 16px 14px', display: 'flex', alignItems: 'center', gap: 10 }}>
-        <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center',
-                       width: 22, height: 22, borderRadius: 7, color: '#fff', flexShrink: 0,
-                       background: 'linear-gradient(135deg,#6366f1,#4338ca)' }}>
-          <Icon.Clapper size={13} />
-        </span>
-        <span style={{ fontSize: 13.5, fontWeight: 600, color: 'rgba(255,255,255,0.87)' }}>短剧工作台</span>
+      {/* 库标题（品牌已上移到全局顶栏，这里只留「作品库」+ 数量）*/}
+      <div style={{ padding: '15px 16px 11px', display: 'flex', alignItems: 'center', gap: 8,
+                    color: 'rgba(255,255,255,0.42)' }}>
+        <Icon.Folder size={14} />
+        <span style={{ fontSize: 12.5, fontWeight: 600, color: 'rgba(255,255,255,0.6)' }}>作品库</span>
+        <span style={{ marginLeft: 'auto', fontSize: 11, color: 'rgba(255,255,255,0.4)',
+                       background: 'rgba(255,255,255,0.05)', borderRadius: 6, padding: '1px 8px' }}>{projects.length}</span>
       </div>
 
       {/* 新建剧集 */}
@@ -35,13 +34,14 @@ export default function ProjectSidebar({ projects = [], currentProjectId, onSele
         <button onClick={onNew}
           onMouseEnter={() => setNewHover(true)} onMouseLeave={() => setNewHover(false)}
           style={{
-            width: '100%', height: 34, borderRadius: 8,
-            border: `1px dashed ${newHover ? 'rgba(99,102,241,0.6)' : 'rgba(255,255,255,0.2)'}`,
-            background: 'transparent', color: newHover ? '#a5a8ff' : 'rgba(255,255,255,0.52)',
+            width: '100%', height: 36, borderRadius: 9, border: 'none',
+            background: newHover ? 'linear-gradient(135deg,#7173f6,#4f46e5)' : 'linear-gradient(135deg,#6366f1,#4338ca)',
+            color: '#fff', fontWeight: 600,
             fontSize: 12.5, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
             gap: 7, cursor: 'pointer', fontFamily: 'inherit', transition: 'all .14s', outline: 'none',
+            boxShadow: newHover ? '0 4px 14px rgba(99,102,241,0.35)' : '0 2px 8px rgba(99,102,241,0.22)',
           }}>
-          <Icon.Plus size={13} />新建剧集
+          <Icon.Plus size={14} />新建剧集
         </button>
       </div>
 
