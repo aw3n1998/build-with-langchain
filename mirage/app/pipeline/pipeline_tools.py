@@ -792,6 +792,10 @@ def _do_render_t2v(scene_id, scene, motion_prompt, params) -> str:
         merged["wan_t2v_lora_high"] = pstyle["wan_t2v_lora_high"].strip()
     if not merged.get("wan_t2v_lora_low") and (pstyle.get("wan_t2v_lora_low") or "").strip():
         merged["wan_t2v_lora_low"] = pstyle["wan_t2v_lora_low"].strip()
+    # 项目级单 LoRA(LTX/Sulphur 训的 char_lora，模式无关)：sulphur2 provider 读它挂角色身份锁脸；
+    # 放在 worker 入队【之前】，确保跟着 merged 进 worker payload。params 显式带则不覆盖。
+    if not merged.get("char_lora") and (pstyle.get("char_lora") or "").strip():
+        merged["char_lora"] = pstyle["char_lora"].strip()
     # 拉取式（增量3）：DISPATCH_MODE=worker 且非 Stand-In → 入队给 GPU worker 出片（后端不在本机跑 ComfyUI、
     # 不连 GPU）。worker /complete 落盘到同一个 final_local + set_scene_video，这里轮询到 done 返回同样的 VIDFILE。
     from mirage.app.pipeline.dispatch import should_use_worker, render_t2v_on_worker
@@ -861,6 +865,9 @@ def render_continuation(project_id: str, params: dict | None = None) -> str:
         merged["wan_i2v_lora_high"] = _ci_hi
     if _ci_lo and not merged.get("wan_i2v_lora_low"):
         merged["wan_i2v_lora_low"] = _ci_lo
+    # 项目级单 LoRA(LTX/Sulphur char_lora，模式无关)：i2v 续接也挂它锁身份。params 显式带则不覆盖。
+    if not merged.get("char_lora") and (pstyle.get("char_lora") or "").strip():
+        merged["char_lora"] = pstyle["char_lora"].strip()
     # ★周期重锚:每 K 镜把 i2v 首帧拉回「链头镜1 的干净正脸」而非上一镜退化尾帧,打断累积脸漂(0=关=纯链式)
     reanchor_every = int((params or {}).get("reanchor_every") or 3)
     local_dir = video_dir()

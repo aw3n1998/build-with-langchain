@@ -63,6 +63,7 @@ CREATE TABLE IF NOT EXISTS projects (
     wan_t2v_lora_low  TEXT NOT NULL DEFAULT '',
     wan_i2v_lora_high TEXT NOT NULL DEFAULT '',
     wan_i2v_lora_low  TEXT NOT NULL DEFAULT '',
+    char_lora         TEXT NOT NULL DEFAULT '',
     created_at  TEXT NOT NULL
 );
 
@@ -261,7 +262,8 @@ class PipelineStore:
         # 项目级风格（每集一种风格）：旧库给 projects 补列
         pcols = {r[1] for r in conn.execute("PRAGMA table_info(projects)").fetchall()}
         for col in ("style_prompt", "trigger_word", "flux_lora", "negative_prompt", "default_size",
-                    "wan_t2v_lora_high", "wan_t2v_lora_low", "wan_i2v_lora_high", "wan_i2v_lora_low"):
+                    "wan_t2v_lora_high", "wan_t2v_lora_low", "wan_i2v_lora_high", "wan_i2v_lora_low",
+                    "char_lora"):
             if col not in pcols:
                 conn.execute(f"ALTER TABLE projects ADD COLUMN {col} TEXT NOT NULL DEFAULT ''")
                 logger.info("[PipelineStore] 迁移：projects 补列 %s", col)
@@ -319,7 +321,8 @@ class PipelineStore:
         return cur.rowcount > 0
 
     _STYLE_COLS = ("style_prompt", "trigger_word", "flux_lora", "negative_prompt", "default_size",
-                   "wan_t2v_lora_high", "wan_t2v_lora_low", "wan_i2v_lora_high", "wan_i2v_lora_low")
+                   "wan_t2v_lora_high", "wan_t2v_lora_low", "wan_i2v_lora_high", "wan_i2v_lora_low",
+                   "char_lora")
 
     def get_project_style(self, project_id: str) -> dict:
         """项目级风格（每集一种风格）：通用风格词/触发词/LoRA/负向词/默认尺寸。缺失返回空串。"""

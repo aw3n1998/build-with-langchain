@@ -275,6 +275,28 @@ def _link_after_train(store, tid: str, trigger: str, lora_high: str, lora_low: s
             pass
 
 
+def _link_single_after_train(store, tid: str, trigger: str, lora: str) -> None:
+    """单 LoRA(LTX/Sulphur)训练完成回写：① 绑角色 trained_lora_id(反向链)；② 项目若还没设 char_lora
+    则自动把这个单 LoRA 应用为本剧角色 LoRA(出片 sulphur2 provider 挂它锁脸；不覆盖已有手设；热生效)。"""
+    t = store.get_lora_training(tid) or {}
+    cid = t.get("char_id")
+    _ch = store.get_character(cid) if cid else None
+    eff = effective_trigger(_ch.get("trigger_word"), _ch.get("name")) if _ch else (trigger or "")
+    if cid:
+        try:
+            store.update_character(cid, trained_lora_id=tid, trigger_word=eff)
+        except Exception:  # noqa: BLE001
+            pass
+    pid = t.get("project_id")
+    if pid:
+        try:
+            st = store.get_project_style(pid)
+            if not (st.get("char_lora") or "").strip():
+                store.update_project_style(pid, trigger_word=eff, char_lora=lora)
+        except Exception:  # noqa: BLE001
+            pass
+
+
 def register_uploaded_lora(store, pid: str, mode: str, lora_high: str, lora_low: str,
                            *, char_id: str = "", trigger: str = "") -> dict:
     """把【上传的】一套 high/low LoRA 注册到项目，让出片直接用它（覆盖式：上传=用户显式换 LoRA）。
@@ -332,8 +354,39 @@ def _do_train_local(store, tid: str, dataset_dir: str, trigger: str, name: str,
         outs = sorted(glob.glob(os.path.join(training_folder, job_name, "*.safetensors")))
         if not outs:
             outs = sorted(glob.glob(os.path.join(training_folder, "**", "*.safetensors"), recursive=True))
-        # Wan2.2 双专家：分别挑 high / low 两个产物，各拷一份到 loras/（t2v 出片高低噪各挂一个）
         os.makedirs(settings.COMFYUI_LORA_DIR, exist_ok=True)
+        # 单 LoRA(LTX/Sulphur ltxv 等非 wan22 arch)：只一个产物，拷到 loras/ 登记成项目级 char_lora
+        # (出片时 sulphur2 provider 挂它锁脸)；不像 Wan 要 high/low 两文件。
+        _arch = (settings.LORA_TRAIN_ARCH or ("wan22_14b_i2v" if mode == "i2v" else "wan22_14b")).strip()
+        if not _arch.startswith("wan22"):
+            src = next((o for o in outs if not any(c.isdigit() for c in os.path.basename(o))), None) \
+                or (outs[-1] if outs else None)
+            if not src:
+                store.update_lora_training(
+                    tid, status="FAILED",
+                    message=("训练结束但没找到 LoRA 产物（看 _train.log；多半 arch/底模/ai-toolkit 版本不对）。"
+                             f"产物：{[os.path.basename(o) for o in outs][:6]}"))
+                return
+            dst = os.path.join(settings.COMFYUI_LORA_DIR, f"{slug}_{_arch}.safetensors")
+            shutil.copy(src, dst)
+            single = os.path.basename(dst)
+            logger.info("LoRA(单) 已拷到: %s", dst)
+            try:
+                from mirage.app.pipeline import log_bus
+                log_bus.emit(f"[lora] 已存: {dst}")
+            except Exception:  # noqa: BLE001
+                pass
+            store.update_lora_training(
+                tid, status="DONE", output_path=single, trigger_word=trigger,
+                message=(f"训练完成 ✓ {_arch} 单 LoRA 已存到 {settings.COMFYUI_LORA_DIR}/（{single}）"
+                         f"并自动应用为本项目角色 LoRA(char_lora)。出片按文件名挂载。"))
+            try:
+                _link_single_after_train(store, tid, trigger, single)
+            except Exception:  # noqa: BLE001
+                logger.warning("训练完成后回写角色/项目失败 tid=%s", tid)
+            logger.info("LoRA 训练完成(单) tid=%s → %s", tid, single)
+            return
+        # Wan2.2 双专家：分别挑 high / low 两个产物，各拷一份到 loras/（t2v 出片高低噪各挂一个）
         reg: dict[str, str] = {}
         for tag in ("high", "low"):
             tagged = [o for o in outs if tag in os.path.basename(o).lower()]
