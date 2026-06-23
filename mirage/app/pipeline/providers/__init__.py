@@ -32,6 +32,12 @@ if settings.COMFYUI_BASE_URL and settings.COMFYUI_VIDEO_AS:
 if settings.LTX2_ENABLED and (settings.COMFYUI_LTX_BASE_URL or settings.COMFYUI_BASE_URL):
     from mirage.app.pipeline.providers.comfyui_ltx import ComfyUILtxProvider
     video_provider_registry.register(ComfyUILtxProvider())
+# Sulphur 2（LTX-2.3 无审查 fine-tune，NSFW 生产）：与 LTX2 同范式的门控注册——SULPHUR2_ENABLED + 端点才注册，
+# 并列进用户模型下拉、逐镜可手选。与 Wan 并存；.env 设 VIDEO_PROVIDER_DEFAULT=sulphur2 即把默认出片换成它
+# （一个仓 .env 一行切 Wan/Sulphur，无需分叉）。参数卡由它自己的 param_schema() 驱动。
+if settings.SULPHUR2_ENABLED and (settings.SULPHUR2_BASE_URL or settings.COMFYUI_BASE_URL):
+    from mirage.app.pipeline.providers.sulphur2 import Sulphur2Provider
+    video_provider_registry.register(Sulphur2Provider())
 if settings.VIDEO_PROVIDER_DEFAULT and video_provider_registry.has(settings.VIDEO_PROVIDER_DEFAULT):
     video_provider_registry.set_default(settings.VIDEO_PROVIDER_DEFAULT)
 # Wan2.2-S2V 对口型：隐藏 Provider，不进用户下拉，由「对口型」开关路由。配了端点才注册。

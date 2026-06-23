@@ -147,7 +147,8 @@ def build_aitk_config(name: str, dataset_dir: str, trigger: str, base: str,
     """
     dim = int(settings.LORA_TRAIN_NETWORK_DIM)
     res = int(settings.LORA_TRAIN_RESOLUTION)
-    arch = "wan22_14b_i2v" if mode == "i2v" else "wan22_14b"
+    arch = settings.LORA_TRAIN_ARCH or ("wan22_14b_i2v" if mode == "i2v" else "wan22_14b")
+    is_dual = arch.startswith("wan22")   # Wan2.2=MoE 双专家(一次出 high+low)；ltxv 等=单 LoRA(无专家切换/无 model_kwargs)
     # 分辨率桶：含 1024(LORA_TRAIN_HIRES，默认开)学脸高频细节更足；关=只 [res, 1.5res]、快~40% 但脸细节略降。
     buckets = sorted({res, int(res * 1.5)} | ({1024} if settings.LORA_TRAIN_HIRES else set()))
     # 数据集：t2v 喂静图(num_frames=1)；★i2v 必须喂【视频 clip】(每段抽 LORA_TRAIN_I2V_FRAMES 帧、首帧自动当
@@ -182,6 +183,25 @@ def build_aitk_config(name: str, dataset_dir: str, trigger: str, base: str,
             "resolution": buckets,
             "cache_latents_to_disk": True,
         }]
+    train_cfg = {
+        "batch_size": int(settings.LORA_TRAIN_BATCH),
+        "steps": int(steps),
+        "gradient_accumulation_steps": 1,
+        "train_unet": True,
+        "train_text_encoder": False,
+        "gradient_checkpointing": _resolve_grad_ckpt(),   # 默认开(省显存);LORA_TRAIN_GRAD_CKPT=false 关掉提速~25%
+        "optimizer": "adamw8bit",
+        "lr": 1e-4,
+        "dtype": "bf16",
+        "timestep_type": "sigmoid",
+    }
+    model_cfg = {"name_or_path": base, "arch": arch, "quantize": _resolve_quantize(),
+                 "low_vram": _resolve_low_vram()}   # 大卡(>48G)全 GPU 训、不挪 CPU；小卡才省显存
+    if is_dual:
+        # ★仅 Wan2.2 MoE：切高低噪专家(switch_boundary)+ 同时训两个专家 → 一次出 high+low 两个 LoRA(别用 is_flux)。
+        train_cfg["switch_boundary_every"] = 10    # 对齐官方/社区(原 1 每步切专家、更抖更慢);仍约 50/50 覆盖高低噪
+        model_cfg["model_kwargs"] = {"train_high_noise": True, "train_low_noise": True}
+    # ltxv 等单 LoRA arch：不切专家、无 model_kwargs，ai-toolkit 出【一个】LoRA(项目级 char_lora，出片挂它锁身份)。
     return {
         "job": "extension",
         "config": {
@@ -193,26 +213,11 @@ def build_aitk_config(name: str, dataset_dir: str, trigger: str, base: str,
                 "network": {"type": "lora", "linear": dim, "linear_alpha": max(1, dim // 2)},
                 "save": {"dtype": "bf16", "save_every": 1000, "max_step_saves_to_keep": 2},
                 "datasets": datasets,   # t2v=静图桶；i2v=视频桶(+可选静图锚桶)，见上方构造
-                "train": {
-                    "batch_size": int(settings.LORA_TRAIN_BATCH),
-                    "steps": int(steps),
-                    "gradient_accumulation_steps": 1,
-                    "train_unet": True,
-                    "train_text_encoder": False,
-                    "gradient_checkpointing": _resolve_grad_ckpt(),   # 默认开(省显存);LORA_TRAIN_GRAD_CKPT=false 关掉提速~25%
-                    "optimizer": "adamw8bit",
-                    "lr": 1e-4,
-                    "dtype": "bf16",
-                    "timestep_type": "sigmoid",
-                    "switch_boundary_every": 10,    # 对齐官方/社区(原 1 每步切专家、更抖更慢);仍约 50/50 覆盖高低噪
-                },
-                # ★arch=wan22_14b → ai-toolkit 走 MoE 双专家、一次出 high+low 两个 LoRA(别用 is_flux)
-                "model": {"name_or_path": base, "arch": arch, "quantize": _resolve_quantize(),
-                          "low_vram": _resolve_low_vram(),   # 大卡(>48G)全 GPU 训、不挪 CPU；小卡才省显存
-                          "model_kwargs": {"train_high_noise": True, "train_low_noise": True}},
+                "train": train_cfg,
+                "model": model_cfg,
                 # ★不生成训练中预览样图★：ai-toolkit 的 Wan2.2 采样路径调 diffusers encode_prompt 时把负向
                 # prompt 传成 bool → ftfy.fix_text 崩(object of type 'bool' has no len())。角色 LoRA 不需要
-                # 预览样图，直接不配 sample 段 → 跳过采样，训练照常出 high/low LoRA。
+                # 预览样图，直接不配 sample 段 → 跳过采样，训练照常出 LoRA。
             }],
         },
     }

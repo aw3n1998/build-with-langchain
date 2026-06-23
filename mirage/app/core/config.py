@@ -82,6 +82,9 @@ class Settings(BaseSettings):
     # i2v 人物 LoRA 训练底模(diffusers;ai-toolkit arch=wan22_14b_i2v)。前端训练「模式=i2v」时用它,
     # 而非 t2v 的 LORA_TRAIN_BASE。t2v 训的 LoRA 套 i2v 错配(强度只能压 0.5、脸漂),i2v 出片要 i2v 原生 LoRA。
     LORA_TRAIN_I2V_BASE: str = "ai-toolkit/Wan2.2-I2V-A14B-Diffusers-bf16"
+    # 角色 LoRA 训练 arch(ai-toolkit)：空=按出片底模自动选 Wan2.2 双专家(t2v=wan22_14b / i2v=wan22_14b_i2v，
+    # 现状不变、一次出 high+low 两文件)；设 "ltxv"=Sulphur/LTX 单 LoRA(须把 LORA_TRAIN_BASE 指向 LTX/Sulphur diffusers)。
+    LORA_TRAIN_ARCH: str = ""
     # i2v 原生 LoRA 训练数据：必须喂【视频 clip】(num_frames>1)；纯静图(=1)对 i2v arch 条件张量为 None 必崩。
     LORA_TRAIN_I2V_FRAMES: int = 81       # i2v 每段抽帧数(须 4n+1：81 原生 / 41 / 33；显存紧可降)
     LORA_TRAIN_I2V_MIX_IMAGES: bool = True  # 混一个静图锚桶(dataset_dir/_imgs 干净正脸)做身份监督、治脸漂
@@ -216,6 +219,22 @@ class Settings(BaseSettings):
     LTX2_GUIDANCE: float = 3.0
     LTX2_DISTILLED: bool = False          # True=8步蒸馏极速档(类比 Wan Lightning)；False=dev 全量精修
     LTX2_KEEP_AUDIO: bool = False         # 默认丢 LTX 自带音(交角色声音圣经 TTS 统一音色)；True=保留 LTX 原生音轨
+    # ── Sulphur 2（LTX-2.3 无审查 fine-tune，NSFW 生产）：可选的第二个视频后端，与 Wan 并存、门控注册(同 LTX2 范式)──
+    # 装好 Sulphur(ComfyUI v0.16+ 节点 ComfyUI-GGUF/LTXVideo/VHS + GGUF 权重)后 SULPHUR2_ENABLED=true 才进
+    # 用户模型下拉、逐镜可选；.env 设 VIDEO_PROVIDER_DEFAULT=sulphur2 + T2V_PROVIDER=sulphur2 即把默认出片整体换它。
+    # 模型下载见 colab/download_sulphur2.sh。一个仓 .env 一行切 Wan/Sulphur，无需分叉。
+    SULPHUR2_ENABLED: bool = False
+    SULPHUR2_BASE_URL: str = ""            # Sulphur 专属 ComfyUI 端点；空=回落 COMFYUI_BASE_URL
+    COMFYUI_WORKFLOW_SULPHUR_T2V: str = "" # 空=用仓库自带 comfyui_workflows/sulphur_t2v_template.json
+    COMFYUI_WORKFLOW_SULPHUR_I2V: str = ""
+    SULPHUR2_SIZE: str = "704*1280"        # 竖屏~720p；宽高须 32 倍数
+    SULPHUR2_FRAMES: int = 121             # 须 8n+1(121≈5s@24fps)
+    SULPHUR2_FPS: int = 24
+    SULPHUR2_STEPS: int = 30               # dev 档 25-35；distilled 蒸馏档约 8
+    SULPHUR2_GUIDANCE: float = 4.0         # Sulphur/LTX 常用 3.5-5
+    SULPHUR2_DISTILLED: bool = False       # True=8步蒸馏极速档；False=dev 全量精修
+    SULPHUR2_KEEP_AUDIO: bool = False      # 默认丢 LTX 自带音(交 TTS 统一音色)；True=保留原生音轨
+    SULPHUR_LORA_STRENGTH: float = 1.0     # 出片挂角色 LoRA 强度(Sulphur/LTX 单 LoRA)
     # ── ComfyUI 后端（HTTP，可配置；对用户完全隐形）──────────────
     # 在 GPU 或任意机器上跑 ComfyUI，本框架通过它的 HTTP API 提交 workflow。
     # 关键：ComfyUI 不作为「用户可见的模型」出现。它**透明顶替**现有公开模型名的执行后端——

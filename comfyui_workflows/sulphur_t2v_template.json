@@ -1,0 +1,71 @@
+{
+  "1": {
+    "class_type": "UnetLoaderGGUF",
+    "_meta": { "title": "⚠️脚手架·待替换 — Sulphur 2 GGUF UNet 加载(需 ComfyUI-GGUF 节点)。Sulphur 2 = LTX-2.3 无审查 fine-tune。★首次真跑前：从 Sulphur 官方(sulphur-2.com / HF SulphurAI)下其 ComfyUI t2v 工作流，ComfyUI 里跑通后菜单导出 API 格式，整体替换本文件——只保留下方 %占位符% 约定即可，provider 代码不用动。" },
+    "inputs": { "unet_name": "sulphur-2-base-Q8_0.gguf" }
+  },
+  "2": {
+    "class_type": "VAELoader",
+    "_meta": { "title": "LTX VAE(ltx_vae.safetensors，放 models/vae)" },
+    "inputs": { "vae_name": "ltx_vae.safetensors" }
+  },
+  "3": {
+    "class_type": "CLIPLoader",
+    "_meta": { "title": "LTX-2 文本编码器(Gemma3；以 Sulphur 官方工作流为准)" },
+    "inputs": { "clip_name": "gemma_3_12B_it_fp4_mixed.safetensors", "type": "ltxv" }
+  },
+  "4": {
+    "class_type": "CLIPTextEncode",
+    "_meta": { "title": "正向提示(本框架填 %PROMPT%)" },
+    "inputs": { "text": "%PROMPT%", "clip": ["3", 0] }
+  },
+  "5": {
+    "class_type": "CLIPTextEncode",
+    "_meta": { "title": "负向提示(%NEG_PROMPT%)" },
+    "inputs": { "text": "%NEG_PROMPT%", "clip": ["3", 0] }
+  },
+  "6": {
+    "class_type": "EmptyLTXVLatentVideo",
+    "_meta": { "title": "t2v 空 latent(无参考图；尺寸须 32 倍数、帧数须 8n+1)" },
+    "inputs": { "width": "%WIDTH%", "height": "%HEIGHT%", "length": "%FRAMES%", "batch_size": 1 }
+  },
+  "7": {
+    "class_type": "LTXVConditioning",
+    "_meta": { "title": "LTX 条件(设帧率 %FPS%)" },
+    "inputs": { "positive": ["4", 0], "negative": ["5", 0], "frame_rate": "%FPS%" }
+  },
+  "8": {
+    "class_type": "KSampler",
+    "_meta": { "title": "采样(dev≈30步 / distilled≈8步，由 %STEPS% 注入；sgm_uniform/euler、CFG 3.5-5)" },
+    "inputs": {
+      "model": ["1", 0],
+      "positive": ["7", 0],
+      "negative": ["7", 1],
+      "latent_image": ["6", 0],
+      "seed": "%SEED%",
+      "steps": "%STEPS%",
+      "cfg": "%GUIDANCE%",
+      "sampler_name": "euler",
+      "scheduler": "sgm_uniform",
+      "denoise": 1.0
+    }
+  },
+  "9": {
+    "class_type": "VAEDecode",
+    "_meta": { "title": "解码到像素" },
+    "inputs": { "samples": ["8", 0], "vae": ["2", 0] }
+  },
+  "10": {
+    "class_type": "VHS_VideoCombine",
+    "_meta": { "title": "封装成 mp4(★静音出片：配音交角色声音圣经 TTS)" },
+    "inputs": {
+      "images": ["9", 0],
+      "frame_rate": "%FPS%",
+      "loop_count": 0,
+      "filename_prefix": "sulphur2_t2v",
+      "format": "video/h264-mp4",
+      "pingpong": false,
+      "save_output": true
+    }
+  }
+}
