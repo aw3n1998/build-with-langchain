@@ -1489,13 +1489,18 @@ export function ProductionPanel({ message, workspace, sessionId }) {
         <br />人物一致靠训好的 Wan 角色 LoRA（在「角色 &amp; LoRA」里训；i2v 出片会自动挂 wan_i2v_lora_*、回退 t2v）。
       </div>
 
+      {/* 区段标题：出片 · 合成（OpenArt 式带强调竖条的小标题）*/}
+      <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text-secondary)', margin: '4px 0 9px', display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span style={{ width: 3, height: 13, borderRadius: 2, background: '#00bdb0' }} />出片 · 合成
+      </div>
       {/* 批量出片并合成（t2v）：对所有未出片分镜逐镜文生 → 合成整集（模型/分辨率可选）*/}
       <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginBottom: 12 }}>
         <button onClick={() => runJob('finish')} disabled={!!busy || !(c.total > 0)}
           style={!(c.total > 0) ? panelBtn(false, true) : {
-            height: 34, padding: '0 16px', borderRadius: 8, border: 'none',
+            height: 38, padding: '0 18px', borderRadius: 9, border: 'none',
             background: busy === 'finish' ? 'rgba(0,189,176,0.7)' : '#00bdb0',
-            color: '#04201e', fontSize: 13, fontWeight: 700, cursor: 'pointer',
+            color: '#04201e', fontSize: 13.5, fontWeight: 700, cursor: 'pointer',
+            boxShadow: busy === 'finish' ? 'none' : '0 5px 16px rgba(0,189,176,0.26)',
           }}>
           {busy === 'finish' ? '出片合成中…' : `🎬 批量出片并合成（t2v · ${c.total} 镜）`}
         </button>
@@ -1681,6 +1686,13 @@ export function ProductionPanel({ message, workspace, sessionId }) {
         </div>
       )}
 
+      {/* 区段标题：分镜（OpenArt 式带强调竖条的小标题；有分镜才显示）*/}
+      {(proj?.scenes || []).length > 0 && (
+        <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text-secondary)', margin: '6px 0 10px', display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ width: 3, height: 13, borderRadius: 2, background: '#6366f1' }} />分镜
+          <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 400 }}>（{(proj?.scenes || []).length} 镜）</span>
+        </div>
+      )}
       {/* 分镜列表 */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         {(proj?.scenes || []).map(s => {
