@@ -26,7 +26,7 @@ import { fileUrl, getVideoProviders, getImageProviders, getProject, batchGenerat
          suggestContinuation, sceneGenerate, sceneRender, sceneAppend, sceneLipsync, sceneSfx,
          cancelJob, listActiveJobs,
          projectStyle, sceneAdd, sceneDelete, listLoras,
-         oneClick, autoSelect, uploadCharacterFace, uploadCharacterVoice, getLoadedLoras, getProviderHealth } from '../api'
+         oneClick, autoSelect, uploadCharacterFace, uploadCharacterVoice, getLoadedLoras, uploadTrainedLora, getProviderHealth } from '../api'
 
 /**
  * MessageBubble — 消息渲染
@@ -361,6 +361,7 @@ export function ProductionPanel({ message, workspace, sessionId }) {
   const [lockFace, setLockFace] = usePersistedState('lockFace', false)   // 强锁脸(Stand-In):有参考脸的角色镜走「一张脸硬锁」通道(需先跑 Colab §Stand-In)
   const [loadedLoras, setLoadedLoras] = useState(null)   // 项目已配置的角色 LoRA(t2v/i2v,查看用)
   const [loraStatusBusy, setLoraStatusBusy] = useState(false)
+  const [ul, setUl] = useState({ mode: 't2v', high: null, low: null, char: '', trig: '', busy: false })  // 上传已训练 LoRA
   const [health, setHealth] = useState(null)   // 出片后端预检 provider_health:{providers:{name:{enabled,reachable,...}}, char_lora}
   const [dedupBoundary, setDedupBoundary] = usePersistedState('dedupBoundary', false)  // 续接整集:合成时去掉镜间重复边界帧
   // 某后端是否就绪(已注册+可达)的小工具,供 B.2/B.4 按钮禁用与内联提示
@@ -827,6 +828,17 @@ export function ProductionPanel({ message, workspace, sessionId }) {
     try { setLoadedLoras(await getLoadedLoras(pid, workspace)) }
     catch (e) { setProgress('查询已挂 LoRA 失败：' + String(e.message || e)) }
     finally { setLoraStatusBusy(false) }
+  }
+  // 上传已训练好的角色 LoRA（.safetensors）→ 应用到本项目出片，跳过训练
+  const doUploadLora = async () => {
+    if (!ul.high) { setProgress('请先选 LoRA 文件（high，.safetensors）'); return }
+    setUl(s => ({ ...s, busy: true })); setProgress('上传 LoRA 中…（文件较大请耐心）')
+    try {
+      const r = await uploadTrainedLora(pid, ul.mode, ul.high, ul.low, { characterId: ul.char, triggerWord: ul.trig }, workspace)
+      setProgress(`✅ 已应用 LoRA（${r.mode} · ${r.single_file ? '单文件当 high/low' : 'high+low'}）`)
+      setUl(s => ({ ...s, high: null, low: null, busy: false }))
+      await load(); await checkLoadedLoras()
+    } catch (e) { setProgress('上传 LoRA 失败：' + String(e.message || e)); setUl(s => ({ ...s, busy: false })) }
   }
   const loraBootstrap = async (tid) => {
     const { mode, count } = bootOf(tid)
@@ -1384,6 +1396,43 @@ export function ProductionPanel({ message, workspace, sessionId }) {
                 )}
               </div>
             )}
+          </div>
+          {/* 上传已训练好的角色 LoRA（.safetensors）→ 直接应用到本项目出片，跳过训练 */}
+          <div style={{ border: '1px dashed rgba(99,102,241,0.4)', background: 'rgba(99,102,241,0.05)', borderRadius: 6, padding: 10, marginBottom: 8 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-sec)', marginBottom: 6 }}>上传已训练 LoRA（跳过训练，直接出片用）</div>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              <select value={ul.mode} disabled={ul.busy} onChange={e => setUl(s => ({ ...s, mode: e.target.value }))}
+                style={{ ...inputStyle, width: 'auto', height: 28, fontSize: 12 }}>
+                <option value="t2v">t2v（文生视频）</option>
+                <option value="i2v">i2v（续接锁脸）</option>
+              </select>
+              <label style={{ ...miniBtn2, cursor: 'pointer', color: ul.high ? '#34d399' : undefined }}>
+                {ul.high ? `high ✓ ${(ul.high.name || '').slice(0, 14)}` : '选 high 文件*'}
+                <input type="file" accept=".safetensors" style={{ display: 'none' }}
+                  onChange={e => { const f = (e.target.files || [])[0] || null; setUl(s => ({ ...s, high: f })); e.target.value = '' }} />
+              </label>
+              <label style={{ ...miniBtn2, cursor: 'pointer', color: ul.low ? '#34d399' : undefined }}>
+                {ul.low ? `low ✓ ${(ul.low.name || '').slice(0, 14)}` : '选 low 文件（可选）'}
+                <input type="file" accept=".safetensors" style={{ display: 'none' }}
+                  onChange={e => { const f = (e.target.files || [])[0] || null; setUl(s => ({ ...s, low: f })); e.target.value = '' }} />
+              </label>
+              <select value={ul.char} disabled={ul.busy} onChange={e => setUl(s => ({ ...s, char: e.target.value }))}
+                style={{ ...inputStyle, width: 'auto', height: 28, fontSize: 12 }}>
+                <option value="">不绑角色</option>
+                {(proj?.characters || []).map(c => <option key={c.id} value={c.id}>{c.name || '(无名)'}</option>)}
+              </select>
+              <input value={ul.trig} disabled={ul.busy} placeholder="触发词(可空)"
+                onChange={e => setUl(s => ({ ...s, trig: e.target.value }))}
+                style={{ ...inputStyle, width: 110, height: 28, fontSize: 12 }} />
+              <button onClick={doUploadLora} disabled={ul.busy || !ul.high}
+                style={{ ...panelBtn(ul.busy || !ul.high), height: 28, padding: '0 12px', fontSize: 12 }}>
+                {ul.busy ? '上传中…' : '上传并应用'}
+              </button>
+            </div>
+            <div style={{ fontSize: 10.5, color: 'var(--text-dim)', marginTop: 6, lineHeight: 1.6 }}>
+              只传一个文件也行——出片会把它<b>同时当 high/low</b> 用；想最佳画质就把训练产出的 <b>high + low 两个都传</b>。
+              须为 <b>Wan2.2 角色 LoRA</b>（与训练同 arch），上传即覆盖本项目该模式已配置的 LoRA。
+            </div>
           </div>
           {(proj?.lora_trainings || []).map(t => (
             <div key={t.id} style={{ border: '1px solid var(--border)', borderRadius: 6, padding: 8, marginBottom: 6 }}>

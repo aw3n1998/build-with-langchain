@@ -270,6 +270,29 @@ def _link_after_train(store, tid: str, trigger: str, lora_high: str, lora_low: s
             pass
 
 
+def register_uploaded_lora(store, pid: str, mode: str, lora_high: str, lora_low: str,
+                           *, char_id: str = "", trigger: str = "") -> dict:
+    """把【上传的】一套 high/low LoRA 注册到项目，让出片直接用它（覆盖式：上传=用户显式换 LoRA）。
+
+    与训练完成的 _link_after_train 写同一组 project_style 键(wan_{mode}_lora_high/low)+触发词，
+    只是允许覆盖已有手设（训练那条是「不覆盖」、自动应用用）。给了 char_id 则把角色触发词也对齐
+    (effective_trigger，与 caption/出片注入同源)。返回写入的键值，供端点回执。"""
+    mode = "i2v" if mode == "i2v" else "t2v"
+    eff = (trigger or "").strip()
+    if char_id:
+        _ch = store.get_character(char_id)
+        if _ch:
+            eff = effective_trigger(_ch.get("trigger_word"), _ch.get("name"))
+            try:
+                store.update_character(char_id, trigger_word=eff)
+            except Exception:  # noqa: BLE001
+                pass
+    _hi_key = "wan_i2v_lora_high" if mode == "i2v" else "wan_t2v_lora_high"
+    _lo_key = "wan_i2v_lora_low" if mode == "i2v" else "wan_t2v_lora_low"
+    store.update_project_style(pid, trigger_word=eff, **{_hi_key: lora_high, _lo_key: lora_low})
+    return {"mode": mode, _hi_key: lora_high, _lo_key: lora_low, "trigger_word": eff}
+
+
 def _do_train_local(store, tid: str, dataset_dir: str, trigger: str, name: str,
                     base: str, steps: int, mode: str = "t2v") -> None:
     """后台线程：跑 ai-toolkit → 拷贝产物到 loras → 更新 DB 状态。"""

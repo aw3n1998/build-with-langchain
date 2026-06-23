@@ -525,6 +525,18 @@ export async function loraUploadRef(trainingId, file, workspace = null) {
   const r = await fetch(`${getBase()}/pipeline/lora_upload_ref`, { method: 'POST', body: fd })
   if (!r.ok) throw new Error(`status ${r.status}`); return r.json()
 }
+// 上传已训练好的角色 LoRA（.safetensors）直接应用到项目出片，跳过训练。fileHigh 必填、fileLow 可选（只传一个出片会同时当 high/low 用）。
+export async function uploadTrainedLora(projectId, mode, fileHigh, fileLow, opts = {}, workspace = null) {
+  const fd = new FormData()
+  fd.append('project_id', projectId); fd.append('mode', mode || 't2v'); fd.append('file_high', fileHigh)
+  if (fileLow) fd.append('file_low', fileLow)
+  if (opts.characterId) fd.append('character_id', opts.characterId)
+  if (opts.triggerWord) fd.append('trigger_word', opts.triggerWord)
+  if (opts.name) fd.append('name', opts.name)
+  if (workspace) fd.append('workspace', workspace)
+  const r = await fetch(`${getBase()}/pipeline/lora_upload_trained`, { method: 'POST', body: fd })
+  if (!r.ok) throw new Error(`status ${r.status}`); return r.json()
+}
 
 // 更新分镜提示词/旁白（AI 写的提示词可见可改）
 export async function updateScenePrompts(sceneId, fields, workspace = null) {

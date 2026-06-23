@@ -1880,6 +1880,54 @@ async def pipeline_lora_upload_ref(training_id: str = Form(...), workspace: str 
     return {"training_id": training_id, "ref": f"/api/file?path={_quote(path)}"}
 
 
+@router.post("/pipeline/lora_upload_trained")
+async def pipeline_lora_upload_trained(
+    project_id: str = Form(...), mode: str = Form(default="t2v"),
+    character_id: str = Form(default=""), trigger_word: str = Form(default=""),
+    name: str = Form(default=""), workspace: str = Form(default=""),
+    file_high: UploadFile = File(...), file_low: UploadFile | None = File(default=None),
+):
+    """上传【已训练好】的角色 LoRA(.safetensors)直接应用到项目出片，跳过训练。
+
+    file_high 必填、file_low 可选；只传 high 时出片把它同时当 high/low 用(provider 有 low→high 回退，
+    可跑、画质略逊原生双专家)。mode=t2v(文生)/i2v(续接锁脸)。存到 settings.COMFYUI_LORA_DIR(ComfyUI
+    按文件名加载)，注册进项目级 project_style(覆盖式)→出片即用。须为 Wan2.2 角色 LoRA(与训练同 arch)。
+    """
+    import pathlib
+    from uuid import uuid4
+    from mirage.app.pipeline.lora_train import register_uploaded_lora, effective_trigger, _slug
+
+    mode = "i2v" if mode == "i2v" else "t2v"
+    store = _ws_store(workspace or None)
+    if not store.get_project(project_id):
+        raise HTTPException(status_code=404, detail="项目不存在")
+    lora_dir = settings.COMFYUI_LORA_DIR or "loras"
+    os.makedirs(lora_dir, exist_ok=True)
+    slug = _slug(trigger_word or name or "char")
+
+    async def _save(up: UploadFile, tag: str) -> str:
+        suffix = pathlib.Path(up.filename or "").suffix.lower()
+        if suffix != ".safetensors":
+            raise HTTPException(status_code=400, detail=f"LoRA 须为 .safetensors（收到 {suffix or '无后缀'}）")
+        fname = f"{slug}_wan_{mode}_{tag}_{uuid4().hex[:8]}.safetensors"
+        dst = os.path.join(lora_dir, fname)
+        with open(dst, "wb") as f:               # 流式分块写盘：LoRA 可达数百 MB~GB，别整体 read 进内存
+            while True:
+                chunk = await up.read(1024 * 1024)
+                if not chunk:
+                    break
+                f.write(chunk)
+        return fname
+
+    high_name = await _save(file_high, "high")
+    low_name = (await _save(file_low, "low")) if (file_low and file_low.filename) else high_name
+    eff = effective_trigger(trigger_word or None, name or None) if (trigger_word or name) else ""
+    reg = register_uploaded_lora(store, project_id, mode, high_name, low_name,
+                                 char_id=character_id or "", trigger=eff)
+    return {"success": True, "mode": mode, "high": high_name, "low": low_name,
+            "single_file": low_name == high_name, "registered": True, "trigger_word": reg.get("trigger_word", "")}
+
+
 class LoraActionRequest(BaseModel):
     workspace: str | None = None
     project_id: str
