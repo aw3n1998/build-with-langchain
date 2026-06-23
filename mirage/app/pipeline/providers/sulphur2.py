@@ -120,25 +120,32 @@ class Sulphur2Provider(VideoProvider):
             if is_i2v:
                 mapping["%IMAGE%"] = ch.upload_image(client, base, image_path)
             graph = ch.fill_template(template, mapping)
-            # ★角色 LoRA 注入(可选，防御式)：训好的单 LoRA(项目级 char_lora)挂到采样模型上锁身份。
-            #   模板节点 "1"=UnetLoaderGGUF(UNet,[0])，节点 "8"=KSampler(inputs.model=["1",0])。
-            #   有 char_lora 时插一个 LoraLoaderModelOnly(取 ["1",0] 出 LoRA 模型)，再把 KSampler 改吃它；
-            #   无则不动图。包 try/except + 仅在节点 1/8 存在时改，绝不破坏无 LoRA 路径。
-            #   ★LoraLoaderModelOnly 是 ComfyUI 内置节点名；若你的 ComfyUI/LTX 套件节点名不同，按实际改。
-            char_lora = (params.get("char_lora") or "").strip()
+            # ★角色 LoRA 注入(可选，防御式)：训好的单 LoRA(项目级 char_lora)串到采样器前锁身份。
+            #   约定节点 "8"=KSampler。取它【当前】的 model 来源，插一个 LoraLoaderModelOnly 串在中间，
+            #   再把 KSampler 改吃 LoRA 输出；无 char_lora 则不动图。包 try/except，绝不破坏无 LoRA 路径。
+            #   ★LoraLoaderModelOnly 是 ComfyUI 内置节点名；若你的 ComfyUI/LTX 套件节点名/采样器节点号不同，按实际改。
+            # 只取文件名(先把 \ 归一成 /)，防 ../ 路径穿越——char_lora 本应是平铺在 loras/ 根的文件名，
+            # 但它可能来自用户 video_params，必须当不可信处理(否则 ../../x 能让 ComfyUI 读宿主任意文件)。
+            char_lora = (params.get("char_lora") or "").strip().replace("\\", "/").rsplit("/", 1)[-1]
             try:
                 char_lora_str = float(params.get("char_lora_str") or settings.SULPHUR_LORA_STRENGTH)
             except (TypeError, ValueError):
                 char_lora_str = settings.SULPHUR_LORA_STRENGTH
             if char_lora:
                 try:
-                    if "1" in graph and "8" in graph:
-                        graph["20"] = {
+                    # 取 KSampler(节点"8")【当前】的 model 来源，把 LoRA 串在它与 KSampler 之间——
+                    # 不写死「LoRA 取自节点1」，官方工作流换图也稳(只要 8 是采样器)。
+                    ks = graph.get("8") or {}
+                    cur_model = (ks.get("inputs") or {}).get("model")
+                    if cur_model is not None:
+                        # 新节点 id 取【现有数字 id 最大值+1】，绝不撞官方模板已有节点(别写死 "20")。
+                        new_id = str(max((int(k) for k in graph if str(k).isdigit()), default=0) + 1)
+                        graph[new_id] = {
                             "class_type": "LoraLoaderModelOnly",
-                            "inputs": {"model": ["1", 0], "lora_name": char_lora,
+                            "inputs": {"model": cur_model, "lora_name": char_lora,
                                        "strength_model": char_lora_str},
                         }
-                        graph["8"]["inputs"]["model"] = ["20", 0]   # 采样器改吃挂了 LoRA 的模型
+                        graph["8"]["inputs"]["model"] = [new_id, 0]   # 采样器改吃挂了 LoRA 的模型
                         log_bus.emit(f"[{label}] 挂角色 LoRA: {char_lora} (强度 {char_lora_str})")
                 except Exception:  # noqa: BLE001
                     logger.warning("[sulphur2] 角色 LoRA 注入失败，回退无 LoRA 出片: %s", char_lora)

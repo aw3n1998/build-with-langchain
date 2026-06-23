@@ -21,6 +21,7 @@ import glob
 import json
 import os
 import re
+import re
 import shutil
 import subprocess
 import sys
@@ -147,7 +148,7 @@ def build_aitk_config(name: str, dataset_dir: str, trigger: str, base: str,
     """
     dim = int(settings.LORA_TRAIN_NETWORK_DIM)
     res = int(settings.LORA_TRAIN_RESOLUTION)
-    arch = settings.LORA_TRAIN_ARCH or ("wan22_14b_i2v" if mode == "i2v" else "wan22_14b")
+    arch = (settings.LORA_TRAIN_ARCH or ("wan22_14b_i2v" if mode == "i2v" else "wan22_14b")).strip()
     is_dual = arch.startswith("wan22")   # Wan2.2=MoE 双专家(一次出 high+low)；ltxv 等=单 LoRA(无专家切换/无 model_kwargs)
     # 分辨率桶：含 1024(LORA_TRAIN_HIRES，默认开)学脸高频细节更足；关=只 [res, 1.5res]、快~40% 但脸细节略降。
     buckets = sorted({res, int(res * 1.5)} | ({1024} if settings.LORA_TRAIN_HIRES else set()))
@@ -359,7 +360,9 @@ def _do_train_local(store, tid: str, dataset_dir: str, trigger: str, name: str,
         # (出片时 sulphur2 provider 挂它锁脸)；不像 Wan 要 high/low 两文件。
         _arch = (settings.LORA_TRAIN_ARCH or ("wan22_14b_i2v" if mode == "i2v" else "wan22_14b")).strip()
         if not _arch.startswith("wan22"):
-            src = next((o for o in outs if not any(c.isdigit() for c in os.path.basename(o))), None) \
+            # 「最终」产物=文件名【无步数后缀】(如 ..._000500.safetensors 是中途检查点);否则取排序最后。
+            # 用步数后缀正则、不用「basename 含任意数字」——触发词/slug 含数字(zq<hex>)时后者会全误判。
+            src = next((o for o in outs if not re.search(r"_\d{4,}\.safetensors$", os.path.basename(o), re.I)), None) \
                 or (outs[-1] if outs else None)
             if not src:
                 store.update_lora_training(
@@ -391,7 +394,7 @@ def _do_train_local(store, tid: str, dataset_dir: str, trigger: str, name: str,
         for tag in ("high", "low"):
             tagged = [o for o in outs if tag in os.path.basename(o).lower()]
             # 优先「最终」产物(文件名无步数,如 char_lora_high_noise.safetensors);否则取步数最大的检查点
-            src = next((o for o in tagged if not any(c.isdigit() for c in os.path.basename(o))), None) \
+            src = next((o for o in tagged if not re.search(r"_\d{4,}\.safetensors$", os.path.basename(o), re.I)), None) \
                 or (tagged[-1] if tagged else None)
             if src:
                 dst = os.path.join(settings.COMFYUI_LORA_DIR, f"{slug}_wan_{mode}_{tag}.safetensors")

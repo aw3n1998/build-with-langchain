@@ -24,6 +24,22 @@ def should_use_worker(kind: str) -> bool:
     return kind in kinds
 
 
+_ONLINE_SECS = 45   # 与 worker_routes 一致：last_seen 在此秒内算在线
+
+def _any_worker_can_run(store, provider: str) -> bool:
+    """有没有在线 worker 能领这个 provider 的任务(通配 worker 或显式声明了它)。provider 空=通配任务总能领。"""
+    if not provider:
+        return True
+    now = time.time()
+    for w in store.list_workers():
+        if (now - float(w.get("last_seen") or 0)) >= _ONLINE_SECS:
+            continue   # 离线跳过
+        models = [m.strip() for m in (w.get("models") or "").split(",") if m.strip()]
+        if not models or provider in models:   # 通配(没声明) or 声明了这个 provider
+            return True
+    return False
+
+
 def render_t2v_on_worker(scene_id: str, scene: dict, prompt: str, params: dict,
                          image_path: str, final_local: str) -> str:
     """把一镜 t2v 入队给 worker，同步轮询等出完。返回与 local 一致的 VIDFILE 标记（worker 已落盘 final_local）。"""
@@ -42,6 +58,12 @@ def render_t2v_on_worker(scene_id: str, scene: dict, prompt: str, params: dict,
                "provider": provider}
     tid = store.enqueue_task("render_t2v", payload, scene_id=scene_id,
                              project_id=scene.get("project_id", ""), provider=provider)
+    try:   # 路由性预警：没在线 worker 能跑这个 provider → 任务会一直排队，提前喊一声别让用户干等
+        if not _any_worker_can_run(store, provider):
+            log_bus.emit(f"⚠️ 当前没有在线 GPU worker 能跑「{provider}」——任务 {tid} 会一直排队。"
+                         f"请在对应 GPU 的 worker 设 WORKER_MODELS 含「{provider}」(或留空=通配)，见算力面板。")
+    except Exception:  # noqa: BLE001
+        pass
     try:   # 叫醒已连 worker 立刻 claim（best-effort；漏了有 worker POLL 兜底）
         from mirage.app.api import worker_ws
         worker_ws.hub.nudge(["render_t2v"])
