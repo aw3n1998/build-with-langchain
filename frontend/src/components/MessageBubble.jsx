@@ -1921,18 +1921,26 @@ export function ProductionPanel({ message, workspace, sessionId }) {
 
       {tab === 'export' && (
         <div style={subBox}>
-          <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 8 }}>
-            导出 —— 全部分镜出完片后，「批量出片并合成（t2v）」在「分镜制作」里点；成片在这里下载。
+          <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text-secondary)', margin: '0 0 8px', display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ width: 3, height: 13, borderRadius: 2, background: '#5eead4' }} />导出 · 成片
+          </div>
+          <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 10 }}>
+            全部分镜出完片后，在「分镜制作」点「批量出片并合成（t2v）」生成整集；成片在这里下载。
           </div>
           {proj?.episode ? (
             <div>
-              <video src={fileUrl(proj.episode.url)} controls style={{ width: '100%', borderRadius: 8, marginBottom: 8 }} />
+              <video src={fileUrl(proj.episode.url)} controls style={{ width: '100%', borderRadius: 10, marginBottom: 10 }} />
               <a href={fileUrl(proj.episode.url)} download style={{ ...panelBtn(false), textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 6 }}><Icon.Download size={14} />下载整集 mp4</a>
             </div>
           ) : (
-            <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>还没有整集成片。去「分镜制作」点「批量出片并合成（t2v）」。</div>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', padding: '22px 0', textAlign: 'center' }}>还没有整集成片。去「分镜制作」点「批量出片并合成（t2v）」。</div>
           )}
-          <div style={{ fontSize: 10.5, color: '#ffb454', marginTop: 8 }}>平台导出预设（抖音 1080×1920 等）待补。</div>
+          {/* TODO(排版优先·功能后做)：平台导出预设 —— 给用户看的「未做」记号 */}
+          <div style={{ marginTop: 12, padding: '9px 11px', borderRadius: 8, border: '1px dashed rgba(245,158,11,0.4)',
+                        background: 'rgba(245,158,11,0.06)', fontSize: 11, color: '#ffb454', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 10, fontWeight: 700, padding: '1px 7px', borderRadius: 5, background: 'rgba(245,158,11,0.2)', color: '#fbbf24' }}>待开发</span>
+            平台导出预设（抖音 / 快手 / ReelShort · 1080×1920 等）—— 功能后做
+          </div>
         </div>
       )}
 
