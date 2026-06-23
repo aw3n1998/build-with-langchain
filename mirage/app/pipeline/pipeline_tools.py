@@ -792,6 +792,11 @@ def _do_render_t2v(scene_id, scene, motion_prompt, params) -> str:
         merged["wan_t2v_lora_high"] = pstyle["wan_t2v_lora_high"].strip()
     if not merged.get("wan_t2v_lora_low") and (pstyle.get("wan_t2v_lora_low") or "").strip():
         merged["wan_t2v_lora_low"] = pstyle["wan_t2v_lora_low"].strip()
+    # 拉取式（增量3）：DISPATCH_MODE=worker 且非 Stand-In → 入队给 GPU worker 出片（后端不在本机跑 ComfyUI、
+    # 不连 GPU）。worker /complete 落盘到同一个 final_local + set_scene_video，这里轮询到 done 返回同样的 VIDFILE。
+    from mirage.app.pipeline.dispatch import should_use_worker, render_t2v_on_worker
+    if should_use_worker("render_t2v") and not want_standin:
+        return render_t2v_on_worker(scene_id, scene, prompt, merged, "", final_local)
     try:
         store.set_scene_state(scene_id, SceneState.PENDING_VIDEO_GEN, force=True)
         _gpu_retry(lambda: t2v.generate(None, image_path=(ref_face if want_standin else ""), prompt=prompt,
