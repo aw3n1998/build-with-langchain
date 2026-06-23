@@ -383,7 +383,7 @@ export function ProductionPanel({ message, workspace, sessionId }) {
   const [addBusy, setAddBusy] = useState(false)
   // 小说→自动拆分镜
   const [showSB, setShowSB] = useState(false)
-  const [novel, setNovel] = usePersistedState('sbNovel', '')
+  const [novel, setNovel] = usePersistedState('sbNovel.' + pid, '')   // ★ per-project：每集独立剧本（曾用全局键'sbNovel'导致各集剧本串成同一份）
   const [sbN, setSbN] = usePersistedState('sbN', 8)
   const [sbReplace, setSbReplace] = useState(false)
   const [sbBusy, setSbBusy] = useState(false)

@@ -219,11 +219,13 @@ export default function App() {
   // 自动建剧集并打开 → 面板挂载即带着小说，用户点「✨ 一键全自动出片」直接出片。空文本 = 纯新建。
   const startFromNovel = useCallback(async (novelText) => {
     const text = (novelText || '').trim()
-    try { if (text) localStorage.setItem('agentlab.panel.sbNovel', JSON.stringify(text)) } catch { /* 隐私模式忽略 */ }
     const auto = text ? text.replace(/\s+/g, ' ').slice(0, 16) : '新剧集'
     try {
       const r = await projectCreate(auto, workspace)
+      // 把小说预填进【这个新剧集】的拆分镜输入（per-project 同键 sbNovel.<pid>，面板 key=pid 挂载即读到）
+      try { if (text) localStorage.setItem('agentlab.panel.sbNovel.' + r.project_id, JSON.stringify(text)) } catch { /* 隐私模式忽略 */ }
       await refreshProjects(); setHasProject(true); setPanelProjectId(r.project_id); setHeroNovel('')
+      // TODO(排版优先·功能后做)：可选「提交即自动跑一键全自动」——现为预填+用户手点，保留确认步避免误触 GPU 任务
     } catch (e) { dialog.alert('新建失败：' + String(e.message || e)) }
   }, [workspace, refreshProjects, dialog])
 
@@ -705,7 +707,7 @@ export default function App() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 22px' }}>
               {panelProjectId ? (
-                <ProductionPanel message={{ project_id: panelProjectId }} workspace={workspace} sessionId={sessionId} />
+                <ProductionPanel key={panelProjectId} message={{ project_id: panelProjectId }} workspace={workspace} sessionId={sessionId} />
               ) : (
                 <div style={{ maxWidth: 600, margin: '46px auto', textAlign: 'center', color: 'var(--text-sec)' }}>
                   <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
