@@ -224,8 +224,9 @@ export default function App() {
       const r = await projectCreate(auto, workspace)
       // 把小说预填进【这个新剧集】的拆分镜输入（per-project 同键 sbNovel.<pid>，面板 key=pid 挂载即读到）
       try { if (text) localStorage.setItem('agentlab.panel.sbNovel.' + r.project_id, JSON.stringify(text)) } catch { /* 隐私模式忽略 */ }
+      // 自动跑信号旗（仅带小说时）：面板挂载后读到即自动触发「一键全自动出片」，读后即清；空文本=只建剧集不出片。
+      try { if (text) localStorage.setItem('agentlab.panel.autorun.' + r.project_id, '1') } catch { /* 隐私模式忽略 */ }
       await refreshProjects(); setHasProject(true); setPanelProjectId(r.project_id); setHeroNovel('')
-      // TODO(排版优先·功能后做)：可选「提交即自动跑一键全自动」——现为预填+用户手点，保留确认步避免误触 GPU 任务
     } catch (e) { dialog.alert('新建失败：' + String(e.message || e)) }
   }, [workspace, refreshProjects, dialog])
 

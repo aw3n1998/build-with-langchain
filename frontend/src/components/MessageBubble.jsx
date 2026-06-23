@@ -406,6 +406,7 @@ export function ProductionPanel({ message, workspace, sessionId }) {
   const batchJob = useRef(null)                    // 当前批量任务 job_id（供停止）
   const sceneJob = useRef({})                      // {sceneId: job_id}（供单镜停止）
   const startAt = useRef({})                       // {key: 起始时间戳}，用于"已运行 Xs"
+  const autoFired = useRef(false)                  // 首页 Hero 自动跑：保证一个面板实例只自动触发一次
   const [, setTick] = useState(0)                  // 每秒触发重渲染，刷新计时
 
   // 有任务在跑时每秒走表，让"出片中"显示已运行时长（证明在干活、没冻住）
@@ -682,11 +683,12 @@ export function ProductionPanel({ message, workspace, sessionId }) {
     finally { setAfBusy(false) }
   }
   // 一键全自动出片：按目标秒数自算镜数 → 拆镜/角色/风格 → 出图 → 自动/手动选图 → 出片 → 合成
-  const doOneClick = async () => {
+  // opts.skipConfirm：仅供首页 Hero 新建空剧集后自动触发（新建剧集无内容本就不弹确认，显式旁路再彻底防竞态）。手动按钮永不传，确认行为一字不改。
+  const doOneClick = async (opts = {}) => {
     if (busy) return
     if (!novel.trim()) { setProgress('先在上方粘一段小说/剧情文本'); return }
     const hasContent = (proj?.characters?.length || 0) > 0 || (proj?.scenes?.length || 0) > 0 || !!(proj?.style?.style_prompt)
-    if (hasContent) {
+    if (hasContent && !opts.skipConfirm) {
       if (!await dialog.confirm('一键全自动会重拆分镜并覆盖现有 角色 / 风格 / 分镜，继续？', {
         message: '按目标时长自动拆镜 → 逐镜文生视频(t2v) → 合成整集（LoRA 任务保留）。',
         danger: true, confirmText: '开始',
@@ -694,7 +696,7 @@ export function ProductionPanel({ message, workspace, sessionId }) {
     }
     cancelled.current = false
     startAt.current.batch = Date.now()
-    setLogs([]); setShowLogs(true); setBusy('oneclick'); setProgress('提交一键全自动任务…')
+    setLogs([]); setShowLogs(true); setBusy('oneclick'); setProgress(opts.skipConfirm ? '首页小说 · 自动提交一键全自动出片…' : '提交一键全自动任务…')
     try {
       const jobId = await oneClick({
         project_id: pid, workspace, session_id: sessionId,
@@ -885,6 +887,21 @@ export function ProductionPanel({ message, workspace, sessionId }) {
   )
   const subBox = { background: '#161616', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 12, padding: '16px 18px', marginBottom: 12 }
   useEffect(() => { cancelled.current = false; load(); loadLoras(); return () => { cancelled.current = true } }, [pid])  // eslint-disable-line loadLoras 全局拿 comfyui 标志,门控换脸/造图入口
+
+  // 首页 Hero 自动跑：面板挂载后若有 startFromNovel 写的自动跑信号旗，消费一次即自动触发「一键全自动出片」。
+  // 旗读后立即清除 + autoFired 守卫 → StrictMode 双调 / 切剧集都只触发一次；普通打开历史剧集无旗、永不触发；novel 由 usePersistedState 懒初始化、挂载即就绪。
+  useEffect(() => {
+    if (autoFired.current) return
+    let flag = null
+    try { flag = localStorage.getItem('agentlab.panel.autorun.' + pid) } catch { /* 隐私模式 */ }
+    if (flag !== '1') return
+    autoFired.current = true
+    try { localStorage.removeItem('agentlab.panel.autorun.' + pid) } catch { /* 忽略 */ }
+    // 直接调用：useEffect 已在 commit 之后跑，不存在 setState-in-render。
+    // ★不要用 setTimeout+cleanup：StrictMode 双调时 cleanup 会在两次之间 clearTimeout 清掉它，
+    //   再被 autoFired 守卫挡掉重排 → 永不触发（实测踩过）。直接调 + 守卫先置位即可只触发一次。
+    doOneClick({ skipConfirm: true })
+  }, [pid])  // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (tab === 'script' && !style) loadStyle()
     if (tab === 'script' || tab === 'cast') loadLoras()   // cast tab 也要 loras.comfyui 决定「造图自训」入口显不显示
@@ -1198,7 +1215,7 @@ export function ProductionPanel({ message, workspace, sessionId }) {
           <div style={{ marginTop: 14, border: '1px solid rgba(0,189,176,0.32)', background: 'rgba(0,189,176,0.06)',
                         borderRadius: 12, padding: 14 }}>
             <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-              <button onClick={doOneClick} disabled={!!busy || afBusy || sbBusy}
+              <button onClick={() => doOneClick()} disabled={!!busy || afBusy || sbBusy}
                 style={{ height: 42, padding: '0 22px', borderRadius: 10, border: 'none',
                          background: (busy || afBusy || sbBusy) ? 'rgba(255,255,255,0.06)' : '#00bdb0',
                          color: (busy || afBusy || sbBusy) ? 'var(--text-muted)' : '#04201e', fontSize: 14.5, fontWeight: 700,
