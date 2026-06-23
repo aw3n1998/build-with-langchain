@@ -1256,8 +1256,11 @@ export function ProductionPanel({ message, workspace, sessionId }) {
 
       {tab === 'cast' && (<>
         <div style={subBox}>
+          <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text-secondary)', margin: '0 0 8px', display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ width: 3, height: 13, borderRadius: 2, background: '#a855f7' }} />角色 · 声音圣经
+          </div>
           <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 8 }}>
-            角色/声音圣经 —— 每个角色固定外貌+音色。拆分镜/出片自动用其外貌（跨镜同一个人），配音用其音色。
+            每个角色固定外貌 + 音色。拆分镜 / 出片自动用其外貌（跨镜同一个人），配音用其音色。
           </div>
           {(proj?.characters || []).map(c => (
             <div key={c.id} style={{ border: '1px solid var(--border)', borderRadius: 6, padding: 8, marginBottom: 6 }}>
@@ -1301,8 +1304,11 @@ export function ProductionPanel({ message, workspace, sessionId }) {
         </div>
 
         <div style={subBox}>
+          <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text-secondary)', margin: '0 0 8px', display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ width: 3, height: 13, borderRadius: 2, background: '#f59e0b' }} />LoRA 训练
+          </div>
           <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 8 }}>
-            人物 LoRA 训练 —— 一次训出 high+low 两个 Wan LoRA、出片锁定这个角色（t2v 没首帧，人物一致全靠它）。
+            一次训出 high+low 两个 Wan LoRA、出片锁定这个角色（t2v 没首帧，人物一致全靠它）。
             训练目标可选 <b>t2v</b>(文生视频锁脸) 或 <b>i2v</b>(图生视频/尾帧续接锁脸，底模不同)——一镜到底续接用 i2v。
             手动传 20-30 张同脸图开训。<b style={{ color: '#ffb454' }}>务必含 8-10 张脸部特写（脸占大半画面、戴眼镜要拍清）</b>——
             只传全身照的话脸太小、训出来只像体型不像脸（头号坑）。混搭：脸特写 8-10 张 + 半身 5-6 + 全身 4-5。
