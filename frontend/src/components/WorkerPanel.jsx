@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { listWorkers, connectWorkersWS } from '../api'
+import { listWorkers, connectWorkersWS, cancelTask } from '../api'
 
 /**
  * GPU 算力仪表盘（弹层）—— 每个 worker 周期把自己的 GPU/状态/当前任务/进度/显存/能跑的模型 push 到后端，
@@ -74,6 +74,12 @@ export default function WorkerPanel({ open, onClose }) {
   const ws = data.workers || []
   const queue = data.queue || []
   const { cluster, busy, online, pending, running, unroutable } = compute(ws, queue)
+  const onCancel = async (id) => {
+    try {
+      await cancelTask(id)
+      setData(d => ({ ...d, queue: (d.queue || []).filter(t => t.id !== id) }))   // 乐观移除，下次轮询/WS 确认
+    } catch (e) { setErr('取消失败：' + (e.message || e)) }
+  }
   return (
     <div onClick={onClose} style={S.scrim}>
       <div onClick={e => e.stopPropagation()} style={S.panel}>
@@ -139,6 +145,7 @@ export default function WorkerPanel({ open, onClose }) {
                 <span style={{ width: 64, color: '#eab308' }}>● 执行中</span>
                 <span style={{ width: 96 }}>{t.provider || t.type}</span>
                 <span style={S.qid}>{t.scene_id || t.project_id || t.id}</span>
+                <button onClick={() => onCancel(t.id)} title="中止这个执行中的任务" style={S.cancelBtn}>✕</button>
               </div>
             ))}
             {pending.slice(0, 12).map(t => (
@@ -146,6 +153,7 @@ export default function WorkerPanel({ open, onClose }) {
                 <span style={{ width: 64, color: t.routable ? '#94a3b8' : '#fca5a5', fontWeight: t.routable ? 400 : 700 }}>{t.routable ? '第 ' + t.position + ' 位' : '⚠ 无人跑'}</span>
                 <span style={{ width: 96, color: t.routable ? '#cbd5e1' : '#fca5a5' }}>{t.provider || t.type}</span>
                 <span style={S.qid}>{t.scene_id || t.project_id || t.id}</span>
+                <button onClick={() => onCancel(t.id)} title="取消这个排队任务" style={S.cancelBtn}>✕</button>
               </div>
             ))}
             {pending.length > 12 && <div style={{ fontSize: 11, color: '#64748b', marginTop: 4 }}>…还有 {pending.length - 12} 个排队</div>}
@@ -175,5 +183,6 @@ const S = {
   modelTag: { fontSize: 10.5, padding: '2px 7px', borderRadius: 6, background: 'rgba(99,102,241,0.14)', border: '1px solid rgba(99,102,241,0.3)', color: '#a5b4fc' },
   queue: { marginTop: 16, paddingTop: 12, borderTop: '1px solid rgba(148,163,184,0.12)' },
   qrow: { display: 'flex', gap: 10, fontSize: 11.5, padding: '3px 0', fontFamily: 'ui-monospace,monospace', alignItems: 'center' },
-  qid: { color: '#64748b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  qid: { flex: 1, minWidth: 0, color: '#64748b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  cancelBtn: { flexShrink: 0, width: 18, height: 18, lineHeight: '15px', textAlign: 'center', borderRadius: 5, border: '1px solid rgba(239,68,68,0.3)', background: 'transparent', color: '#fca5a5', cursor: 'pointer', fontSize: 11, padding: 0 },
 }

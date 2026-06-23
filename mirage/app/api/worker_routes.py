@@ -133,6 +133,27 @@ async def list_runnable_models():
     return {"models": sorted(names), "now": now}
 
 
+@router.post("/tasks/{task_id}/cancel")
+async def cancel_task(task_id: str):
+    """取消排队/执行中的任务（算力面板的取消按钮；与 /workers 同为面板操作，无需 worker token）。
+    pending→直接作废、不再被领；leased→标 cancelled（worker 心跳/complete 因 state≠leased 被拒、自我中止）。
+    顺带把关联 scene 拉回 FAILED（不卡在 PENDING_VIDEO_GEN，可重出）。幂等：已终态任务原样返回。"""
+    def _do():
+        st = _store()
+        t = st.cancel_task(task_id)
+        if t is None:
+            raise HTTPException(status_code=404, detail="任务不存在")
+        sid = t.get("scene_id") or ""
+        if sid and t.get("type") in ("render_t2v", "render_i2v", "continuation_one"):
+            try:
+                from mirage.app.pipeline.store import SceneState
+                st.set_scene_state(sid, SceneState.FAILED, force=True)
+            except Exception:  # noqa: BLE001
+                pass
+        return {"ok": True, "task_id": task_id, "state": t.get("state")}
+    return await asyncio.to_thread(_do)
+
+
 # ──────────────── 任务领取 / 心跳 / 结果 / 完成 / 失败 ────────────────
 class ClaimReq(BaseModel):
     worker_id: str

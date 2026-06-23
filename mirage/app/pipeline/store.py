@@ -645,6 +645,27 @@ class PipelineStore:
         finally:
             conn.close()
 
+    def cancel_task(self, task_id: str) -> Optional[dict]:
+        """取消任务：pending→标 cancelled(claim_one 只领 pending，不会再被领)；leased→标 cancelled
+        (worker 下次心跳因 WHERE state='leased' 不匹配返 False 自我中止，其 complete 同理被拒)。
+        done/failed/cancelled→幂等原样返回。返回任务行(含新 state/scene_id/type)或 None(不存在)。"""
+        now = time.time()
+        conn = self._conn()
+        try:
+            with self._lock:
+                row = conn.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone()
+                if not row:
+                    return None
+                d = dict(row)
+                if d["state"] in ("pending", "leased"):
+                    conn.execute("UPDATE tasks SET state='cancelled', worker_id='', updated_at=? WHERE id=?",
+                                 (now, task_id))
+                    conn.commit()
+                    d["state"] = "cancelled"
+                return d
+        finally:
+            conn.close()
+
     def reclaim_expired(self, now: Optional[float] = None) -> list[dict]:
         """回收租约过期的 leased 任务（worker 挂了/断网）：attempts<max → 回 pending 重派；否则 failed。
         返回被回收任务（含最终 state），供调用方给 failed 的镜标 FAILED。"""

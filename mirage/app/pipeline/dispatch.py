@@ -84,6 +84,9 @@ def render_t2v_on_worker(scene_id: str, scene: dict, prompt: str, params: dict,
                     f"VIDFILE::{scene_id}::{final_local}")
         if st == "failed":
             return f"文生视频(worker)出片失败：{task.get('error') or '未知'}（可重出或看算力面板）"
+        if st == "cancelled":   # 用户在算力面板点了取消 → 别再死等，立刻收尾
+            log_bus.emit(f"[worker] 任务已取消 {scene_id}")
+            return f"文生视频(worker)已取消（任务 {tid}）。"
         if st != last:
             log_bus.emit(f"[worker] 出片中…（{st}）")
             last = st
