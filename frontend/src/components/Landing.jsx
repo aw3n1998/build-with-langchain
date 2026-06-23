@@ -100,7 +100,7 @@ export default function Landing({ onStart, onLogin, authEnabled }) {
 }
 
 const S = {
-  page: { position: 'relative', minHeight: '100vh', background: '#0a0a12', color: '#e2e8f0', fontFamily: 'system-ui,-apple-system,"Segoe UI",sans-serif', overflowX: 'hidden' },
+  page: { position: 'relative', height: '100vh', overflowY: 'auto', overflowX: 'hidden', background: '#0a0a12', color: '#e2e8f0', fontFamily: 'system-ui,-apple-system,"Segoe UI",sans-serif' },
   glow: { position: 'absolute', top: -260, left: '50%', transform: 'translateX(-50%)', width: 1000, height: 560, background: 'radial-gradient(circle, rgba(124,58,237,0.28), transparent 62%)', filter: 'blur(20px)', pointerEvents: 'none' },
   nav: { position: 'sticky', top: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 32px', maxWidth: 1200, margin: '0 auto', backdropFilter: 'blur(8px)' },
   brand: { fontSize: 20, fontWeight: 800, letterSpacing: 0.5 },

@@ -64,7 +64,7 @@ export default function Login({ onSuccess, onBack }) {
 }
 
 const S = {
-  page: { position: 'relative', minHeight: '100vh', background: '#0a0a12', color: '#e2e8f0', fontFamily: 'system-ui,-apple-system,"Segoe UI",sans-serif', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  page: { position: 'relative', height: '100vh', overflowY: 'auto', overflowX: 'hidden', background: '#0a0a12', color: '#e2e8f0', fontFamily: 'system-ui,-apple-system,"Segoe UI",sans-serif', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' },
   glow: { position: 'absolute', top: '-20%', left: '50%', transform: 'translateX(-50%)', width: 900, height: 600, background: 'radial-gradient(circle, rgba(124,58,237,0.25), transparent 60%)', filter: 'blur(20px)', pointerEvents: 'none' },
   back: { position: 'absolute', top: 24, left: 24, height: 34, padding: '0 14px', borderRadius: 9, border: '1px solid rgba(148,163,184,0.2)', background: 'transparent', color: '#94a3b8', fontSize: 13, cursor: 'pointer' },
   card: { position: 'relative', width: 380, padding: '36px 34px', borderRadius: 18, background: 'rgba(20,20,32,0.85)', border: '1px solid rgba(148,163,184,0.18)', boxShadow: '0 24px 60px rgba(0,0,0,0.5)', backdropFilter: 'blur(12px)' },
