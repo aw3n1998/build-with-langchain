@@ -122,6 +122,27 @@ export function connectJobsWS(onMsg) {
   return () => { closed = true; try { ws?.close() } catch {} }
 }
 
+// GPU/worker 算力实时推送（WS）：连上即收 workers_snapshot，之后实时 worker_update。仿 connectJobsWS。
+export function connectWorkersWS(onMsg) {
+  let ws = null
+  let closed = false
+  const url = (() => {
+    const base = getBase()
+    if (base.startsWith('http')) return base.replace(/^http/, 'ws') + '/ws/workers'
+    const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    return `${proto}//${window.location.host}${base}/ws/workers`
+  })()
+  const connect = () => {
+    if (closed) return
+    try { ws = new WebSocket(url) } catch { setTimeout(connect, 3000); return }
+    ws.onmessage = e => { try { onMsg(JSON.parse(e.data)) } catch {} }
+    ws.onclose = () => { if (!closed) setTimeout(connect, 3000) }
+    ws.onerror = () => { try { ws.close() } catch {} }
+  }
+  connect()
+  return () => { closed = true; try { ws?.close() } catch {} }
+}
+
 // 停止生成：chat 回合可真取消；GPU 任务会返回 cancelled=false（不可中断）
 export async function cancelJob(jobId) {
   const r = await fetch(`${getBase()}/pipeline/jobs/${jobId}/cancel`, { method: 'POST' })

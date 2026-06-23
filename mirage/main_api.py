@@ -116,9 +116,11 @@ except Exception as _e:  # noqa: BLE001 - 公开 API 出问题不应拖垮内部
 try:
     from mirage.app.api.worker_routes import router as worker_router
     app.include_router(worker_router, prefix="/api")
+    from mirage.app.api.worker_ws import router as worker_ws_router
+    app.include_router(worker_ws_router, prefix="/api")   # /api/worker/ws(worker 推) + /api/ws/workers(前端订阅)
 except Exception as _e:  # noqa: BLE001 - worker 模块出问题不应拖垮主面板
     import logging
-    logging.getLogger("mirage").warning("worker 接口(/api/worker,/api/workers) 未加载: %s", _e)
+    logging.getLogger("mirage").warning("worker 接口(/api/worker,/api/workers,/api/ws/workers) 未加载: %s", _e)
 
 
 @app.on_event("startup")

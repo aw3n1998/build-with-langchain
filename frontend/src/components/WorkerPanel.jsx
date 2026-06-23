@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { listWorkers } from '../api'
+import { listWorkers, connectWorkersWS } from '../api'
 
 /**
  * GPU 算力仪表盘（弹层）—— worker 周期把自己的 GPU/状态/当前任务/显存 push 到后端，这里每 4s 轮询展示。
@@ -20,8 +20,25 @@ export default function WorkerPanel({ open, onClose }) {
       try { const d = await listWorkers(); if (alive) { setData(d); setErr('') } }
       catch (e) { if (alive) setErr(String(e.message || e)) }
     }
-    tick(); timer.current = setInterval(tick, 4000)
-    return () => { alive = false; clearInterval(timer.current) }
+    tick()   // 首屏 + 兜底
+    // WS 实时：连上即收 snapshot，之后 worker_update 按 id 合并（状态/进度 ~1s 内到，不再死等 4s）。
+    const closeWs = connectWorkersWS(msg => {
+      if (!alive) return
+      if (msg.type === 'workers_snapshot') {
+        setData({ workers: msg.workers || [], queue: msg.queue || [], dispatch_mode: msg.dispatch_mode || '' }); setErr('')
+      } else if (msg.type === 'worker_update' && msg.worker) {
+        setData(d => {
+          const ws = (d.workers || []).slice()
+          const i = ws.findIndex(w => w.id === msg.worker.id)
+          if (i >= 0) ws[i] = { ...ws[i], ...msg.worker }; else ws.push(msg.worker)
+          return { ...d, workers: ws }
+        })
+      } else if (msg.type === 'queue_update') {
+        setData(d => ({ ...d, queue: msg.queue || [] }))
+      }
+    })
+    timer.current = setInterval(tick, 10000)   // 慢轮询兜底：WS 断了仍刷新、并重算离线态
+    return () => { alive = false; clearInterval(timer.current); closeWs() }
   }, [open])
   if (!open) return null
   const ws = data.workers || []
